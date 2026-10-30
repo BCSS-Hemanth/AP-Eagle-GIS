@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { applyCurrentMandalSpellings } from './adminHierarchy';
 
 export interface MandalProperties {
   mandal_name: string;
@@ -38,8 +39,8 @@ export function useApMandals(enabled: boolean) {
     let cancelled = false;
     if (!mandalPromise) {
       mandalPromise = loadJson<GeoJSON.FeatureCollection>('/geo/ap-mandals.geojson').then((data) => {
-        cachedMandals = data;
-        return data;
+        cachedMandals = applyCurrentMandalSpellings(data);
+        return cachedMandals;
       });
     }
     mandalPromise.then((data) => {
@@ -83,7 +84,10 @@ export function useVillagePolygons(
       const parts = await Promise.all(
         needed.map(async (d) => {
           if (!villageCache.has(d.file)) {
-            villageCache.set(d.file, await loadJson<GeoJSON.FeatureCollection>(d.file));
+            villageCache.set(
+              d.file,
+              applyCurrentMandalSpellings(await loadJson<GeoJSON.FeatureCollection>(d.file))
+            );
           }
           return villageCache.get(d.file)!;
         })

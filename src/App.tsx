@@ -31,6 +31,15 @@ import { LoginScreen } from './components/LoginScreen';
 import { allowedWorkspaces, defaultWorkspace } from './auth/rbac';
 import { policeStationsToRows, usePoliceStations } from './gis/usePoliceStations';
 import { buildSearchTargets, resolveFlyTarget } from './gis/searchTargets';
+import {
+  applyLayerConfig,
+  countEnabledLayers,
+  defaultDashboardLayerConfig,
+  layerConfigFromGisLayers,
+  loadDashboardLayerConfig,
+  persistDashboardLayerConfig,
+  type DashboardLayerConfig,
+} from './gis/dashboardLayers';
 
 function AppShell() {
   const { user, canOpen, can, logout } = useAuth();
@@ -44,7 +53,22 @@ function AppShell() {
   );
 
   // Global Spatial State
-  const [layers, setLayers] = useState<GisLayer[]>(INITIAL_GIS_LAYERS);
+  const [layers, setLayers] = useState<GisLayer[]>(() => {
+    const saved = loadDashboardLayerConfig();
+    const next = saved ? applyLayerConfig(INITIAL_GIS_LAYERS, saved) : INITIAL_GIS_LAYERS;
+    return next.map((layer) => (layer.id === 'lyr-pss' ? { ...layer, enabled: false } : layer));
+  });
+  const [dashboardLayerConfig, setDashboardLayerConfig] = useState<DashboardLayerConfig>(() => {
+    const loaded = loadDashboardLayerConfig() ?? defaultDashboardLayerConfig(INITIAL_GIS_LAYERS);
+    return {
+      ...loaded,
+      'lyr-pss': { enabled: false, opacity: loaded['lyr-pss']?.opacity ?? 100 },
+    };
+  });
+  const dashboardLayers = useMemo(
+    () => applyLayerConfig(INITIAL_GIS_LAYERS, dashboardLayerConfig),
+    [dashboardLayerConfig]
+  );
   const [basemap, setBasemap] = useState<BasemapId>('maplibre');
   const [crs, setCrs] = useState<CrsId>('EPSG:4326');
   const [centerCoords, setCenterCoords] = useState<{ lat: number; lon: number }>({
@@ -140,6 +164,19 @@ function AppShell() {
   const handleChangeLayerOpacity = (layerId: string, opacity: number) => {
     setLayers((prev) =>
       prev.map((l) => (l.id === layerId ? { ...l, opacity } : l))
+    );
+  };
+
+  const handleSaveDashboardLayers = () => {
+    const config = layerConfigFromGisLayers(layers);
+    setDashboardLayerConfig(config);
+    const persisted = persistDashboardLayerConfig(config);
+    const enabled = countEnabledLayers(layers);
+    appendAudit('SAVE_DASHBOARD_LAYERS', `catalog → dashboard (${enabled} on)`);
+    triggerToast(
+      persisted
+        ? `Saved ${enabled} catalog layers to the Dashboard map`
+        : `Applied ${enabled} catalog layers to the Dashboard map (this browser blocked persistence)`
     );
   };
 
@@ -314,6 +351,7 @@ function AppShell() {
           <CoreOpsWorkspaces
             workspace={activeWorkspace}
             jobs={jobs}
+            dashboardLayers={dashboardLayers}
             onAddJob={handleAddJob}
             onSelectFeatureAndFly={handleSelectFeatureAndFly}
             onFlyToLocation={handleFlyToLocation}
@@ -329,8 +367,10 @@ function AppShell() {
           <DataLayerWorkspaces
             workspace={activeWorkspace}
             layers={layers}
+            dashboardLayerConfig={dashboardLayerConfig}
             onToggleLayer={handleToggleLayer}
             onChangeLayerOpacity={handleChangeLayerOpacity}
+            onSaveDashboardLayers={handleSaveDashboardLayers}
             digitizedFeatures={digitizedFeatures}
             onAddDigitizedFeature={handleAddDigitizedFeature}
             onDeleteDigitizedFeature={handleDeleteDigitizedFeature}

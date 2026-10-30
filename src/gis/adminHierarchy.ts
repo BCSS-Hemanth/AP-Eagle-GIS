@@ -1,5 +1,7 @@
 /** Spatial helpers for district → mandal → village drill-down on real GeoJSON. */
 
+import { CURRENT_MANDAL_SPELLING } from './mandalSpellings';
+
 export type LonLat = [number, number];
 
 export function adminNameKey(value: string | undefined | null): string {
@@ -13,10 +15,39 @@ export function adminNameKey(value: string | undefined | null): string {
     .trim();
 }
 
+const MANDAL_SPELLING_BY_KEY: Record<string, string> = Object.fromEntries(
+  Object.entries(CURRENT_MANDAL_SPELLING).map(([from, to]) => [adminNameKey(from), to])
+);
+
+export function currentMandalSpelling(name: string | undefined | null): string {
+  const raw = String(name ?? '');
+  if (!raw) return raw;
+  return MANDAL_SPELLING_BY_KEY[adminNameKey(raw)] ?? raw;
+}
+
+function comparableAdminKey(value: string | undefined | null): string {
+  const key = adminNameKey(value);
+  const mapped = MANDAL_SPELLING_BY_KEY[key];
+  return mapped ? adminNameKey(mapped) : key;
+}
+
 export function adminNamesEqual(a?: string | null, b?: string | null): boolean {
-  const left = adminNameKey(a);
-  const right = adminNameKey(b);
+  const left = comparableAdminKey(a);
+  const right = comparableAdminKey(b);
   return Boolean(left && right && left === right);
+}
+
+export function applyCurrentMandalSpellings(collection: GeoJSON.FeatureCollection): GeoJSON.FeatureCollection {
+  return {
+    ...collection,
+    features: collection.features.map((feature) => {
+      const props = feature.properties as Record<string, unknown> | null;
+      if (!props || typeof props.mandal_name !== 'string') return feature;
+      const next = currentMandalSpelling(props.mandal_name);
+      if (next === props.mandal_name) return feature;
+      return { ...feature, properties: { ...props, mandal_name: next } };
+    }),
+  };
 }
 
 function outerRings(geometry: GeoJSON.Geometry | null | undefined): LonLat[][] {
@@ -109,12 +140,13 @@ export function filterFeaturesInParent(
   const pb = featureBbox(parent);
   if (!pb) return [];
   const [west, south, east, north] = pb;
-  return children.filter((child) => {
-    const c = featureCentroid(child);
-    if (!c) return false;
+  return children.flatMap((child) => {
+    const clipped = clipFeatureToParent(child, parent);
+    const c = featureCentroid(clipped);
+    if (!c) return [];
     const [lon, lat] = c;
-    if (lon < west || lon > east || lat < south || lat > north) return false;
-    return pointInFeature(c, parent);
+    if (lon < west || lon > east || lat < south || lat > north) return [];
+    return pointInFeature(c, parent) ? [clipped] : [];
   });
 }
 
@@ -130,6 +162,113 @@ export function filterByAdminName(
 
 export function asFeatureCollection(features: GeoJSON.Feature[]): GeoJSON.FeatureCollection {
   return { type: 'FeatureCollection', features };
+}
+
+function polygonSpanArea(coords: GeoJSON.Position[][]): number {
+  const ring = coords[0];
+  if (!ring || ring.length < 3) return 0;
+  let west = Infinity;
+  let south = Infinity;
+  let east = -Infinity;
+  let north = -Infinity;
+  for (const pos of ring) {
+    const lon = Number(pos[0]);
+    const lat = Number(pos[1]);
+    if (lon < west) west = lon;
+    if (lon > east) east = lon;
+    if (lat < south) south = lat;
+    if (lat > north) north = lat;
+  }
+  if (!Number.isFinite(west)) return 0;
+  return Math.max(0, east - west) * Math.max(0, north - south);
+}
+
+function asPolygonFeature(feature: GeoJSON.Feature, coordinates: GeoJSON.Position[][]): GeoJSON.Feature {
+  return {
+    type: 'Feature',
+    properties: feature.properties,
+    geometry: { type: 'Polygon', coordinates },
+  };
+}
+
+function bboxOverlaps(
+  a: [number, number, number, number],
+  b: [number, number, number, number]
+): boolean {
+  return !(a[2] < b[0] || a[0] > b[2] || a[3] < b[1] || a[1] > b[3]);
+}
+
+/**
+ * Same mandal names exist in more than one district in the NWIC vintage, so the
+ * dissolved file can be a MultiPolygon of distant parts. Isolation must use the
+ * part the user actually clicked — not the combined envelope.
+ */
+export function focusPolygonAtPoint(feature: GeoJSON.Feature, point: LonLat): GeoJSON.Feature {
+  const geom = feature.geometry;
+  if (!geom || geom.type === 'Polygon') return feature;
+  if (geom.type !== 'MultiPolygon') return feature;
+  for (const coords of geom.coordinates) {
+    const part = asPolygonFeature(feature, coords);
+    if (pointInFeature(point, part)) return part;
+  }
+  let best: GeoJSON.Position[][] | null = null;
+  let bestDist = Infinity;
+  for (const coords of geom.coordinates) {
+    const part = asPolygonFeature(feature, coords);
+    const centroid = featureCentroid(part);
+    if (!centroid) continue;
+    const dist =
+      (centroid[0] - point[0]) * (centroid[0] - point[0]) +
+      (centroid[1] - point[1]) * (centroid[1] - point[1]);
+    if (dist < bestDist) {
+      bestDist = dist;
+      best = coords;
+    }
+  }
+  if (!best) {
+    let bestArea = -1;
+    for (const coords of geom.coordinates) {
+      const area = polygonSpanArea(coords);
+      if (area > bestArea) {
+        bestArea = area;
+        best = coords;
+      }
+    }
+  }
+  return best ? asPolygonFeature(feature, best) : feature;
+}
+
+/** Drop MultiPolygon parts that do not overlap the parent admin unit. */
+export function clipFeatureToParent(child: GeoJSON.Feature, parent: GeoJSON.Feature): GeoJSON.Feature {
+  const geom = child.geometry;
+  if (!geom || geom.type !== 'MultiPolygon') return child;
+  const parentBox = featureBbox(parent);
+  const kept = geom.coordinates.filter((coords) => {
+    const part = asPolygonFeature(child, coords);
+    const centroid = featureCentroid(part);
+    if (centroid && pointInFeature(centroid, parent)) return true;
+    const partBox = featureBbox(part);
+    return Boolean(parentBox && partBox && bboxOverlaps(partBox, parentBox));
+  });
+  if (kept.length === 1) return asPolygonFeature(child, kept[0]);
+  if (kept.length > 1) {
+    return {
+      type: 'Feature',
+      properties: child.properties,
+      geometry: { type: 'MultiPolygon', coordinates: kept },
+    };
+  }
+  return child;
+}
+
+/** Clip to parent (when known), then keep only the part at `point`. */
+export function isolateChildFeature(
+  feature: GeoJSON.Feature,
+  point: LonLat,
+  parent?: GeoJSON.Feature | null
+): GeoJSON.Feature {
+  const clipped = parent ? clipFeatureToParent(feature, parent) : feature;
+  return focusPolygonAtPoint(clipped, point);
 }
 
 /** Clockwise world ring in Leaflet [lat, lon] order, used as the invert-mask outer. */
@@ -197,6 +336,32 @@ export function invertMaskGeoJSON(feature: GeoJSON.Feature): GeoJSON.Feature | n
     geometry: {
       type: 'Polygon',
       coordinates: [WORLD_GEOJSON_RING, ...holes],
+    },
+  };
+}
+
+/** MapLibre cannot fill a ±180 world ring. Pad a local envelope and punch the feature hole. */
+export function invertMaskLocalGeoJSON(
+  feature: GeoJSON.Feature,
+  padDeg = 8
+): GeoJSON.Feature | null {
+  const world = invertMaskGeoJSON(feature);
+  if (!world || world.geometry.type !== 'Polygon') return null;
+  const box = featureBbox(feature);
+  if (!box) return world;
+  const outer: LonLat[] = [
+    [box[0] - padDeg, box[1] - padDeg],
+    [box[2] + padDeg, box[1] - padDeg],
+    [box[2] + padDeg, box[3] + padDeg],
+    [box[0] - padDeg, box[3] + padDeg],
+    [box[0] - padDeg, box[1] - padDeg],
+  ];
+  return {
+    type: 'Feature',
+    properties: { kind: 'invert-mask' },
+    geometry: {
+      type: 'Polygon',
+      coordinates: [outer, ...world.geometry.coordinates.slice(1)],
     },
   };
 }

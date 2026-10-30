@@ -9,7 +9,7 @@ import {
   Radar,
   Sliders,
 } from 'lucide-react';
-import { GisJob, WorkspaceId } from '../../types/gis';
+import { GisJob, GisLayer, WorkspaceId } from '../../types/gis';
 import { downloadTextFile } from '../../utils/geoMath';
 import { NdpsHeatMapDashboard } from './NdpsHeatMapDashboard';
 import { ApLeafletMap } from '../gis/ApLeafletMap';
@@ -23,6 +23,7 @@ interface CoreOpsProps {
     | 'spatial-analysis-and-geoprocessing'
     | 'map-designer-and-layout-composer';
   jobs: GisJob[];
+  dashboardLayers: GisLayer[];
   onAddJob: (job: GisJob) => void;
   onSelectFeatureAndFly: (featureId: string) => void;
   onFlyToLocation?: (lat: number, lon: number, label: string) => void;
@@ -33,6 +34,7 @@ interface CoreOpsProps {
 export const CoreOpsWorkspaces: React.FC<CoreOpsProps> = ({
   workspace,
   jobs,
+  dashboardLayers,
   onAddJob,
   onSelectFeatureAndFly,
   onFlyToLocation,
@@ -62,6 +64,7 @@ export const CoreOpsWorkspaces: React.FC<CoreOpsProps> = ({
   if (workspace === 'gis-dashboard') {
     return (
       <NdpsHeatMapDashboard
+        layers={dashboardLayers}
         onSelectFeatureAndFly={onSelectFeatureAndFly}
         onFlyToLocation={onFlyToLocation}
         onSwitchWorkspace={onSwitchWorkspace}

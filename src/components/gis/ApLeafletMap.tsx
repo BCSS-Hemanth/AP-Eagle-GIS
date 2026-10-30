@@ -38,6 +38,7 @@ import {
   featureBbox,
   filterByAdminName,
   filterFeaturesInParent,
+  isolateChildFeature,
   invertMaskLatLngs,
   pointInFeature,
 } from '../../gis/adminHierarchy';
@@ -53,6 +54,23 @@ import {
   OPENRAILWAY_TILES,
 } from '../../data/apGeo';
 import type { ApDistrictProperties } from '../../gis/useApBoundaries';
+import {
+  MAP_CAMERA_MAX_ZOOM,
+  MAP_CAMERA_MIN_ZOOM,
+  MAP_ZOOM,
+  clampMapZoom,
+  findContainingFeature,
+  formatIdentifyHtml,
+  identifyAdminAtPoint,
+  leafletOverzoom,
+  mapDetailCaption,
+  shouldDrawMandals,
+  shouldDrawVillages,
+  shouldOverlayOsmRaster,
+  shouldOverlayPlaces,
+  shouldOverlayRoads,
+  shouldOverlaySatellite,
+} from '../../gis/mapDetail';
 
 export type { AdminDrill, AdminDrillLevel } from '../../gis/adminHierarchy';
 
@@ -82,6 +100,7 @@ export interface ApLeafletMapHandle {
   fitFeature: (feature: GeoJSON.Feature) => void;
   zoomIn: () => void;
   zoomOut: () => void;
+  getView: () => { lat: number; lon: number; zoom: number } | null;
 }
 
 interface MarkerSpec {
@@ -159,6 +178,8 @@ interface ApLeafletMapProps {
   interactive?: boolean;
   layoutRevision?: string | number;
   fitToState?: boolean;
+  viewTarget?: { lat: number; lon: number; zoom: number; token: number };
+  viewActive?: boolean;
 }
 
 function markerIcon(kind: MarkerSpec['kind'], selected: boolean): DivIcon {
@@ -206,16 +227,29 @@ function bindIsolateClick(layer: L.Layer, onClick: (e: L.LeafletMouseEvent) => v
 
 function constrainToFeature(map: L.Map, feature: GeoJSON.Feature | null) {
   map.options.maxBoundsViscosity = feature ? 1 : 0;
+  map.setMaxZoom(MAP_CAMERA_MAX_ZOOM);
   if (!feature) {
-    map.setMinZoom(3);
+    map.setMinZoom(MAP_CAMERA_MIN_ZOOM);
     map.setMaxBounds(WORLD_BOUNDS);
     return null;
   }
   const bounds = featureBounds(feature);
   if (!bounds) return null;
-  map.setMaxBounds(bounds.pad(0.16));
+  map.setMaxBounds(bounds.pad(0.22));
   const fitted = map.getBoundsZoom(bounds, false);
-  if (Number.isFinite(fitted)) map.setMinZoom(Math.max(3, fitted - 1));
+  const cap =
+    feature.properties && 'village_name' in (feature.properties as object)
+      ? 15
+      : feature.properties && 'mandal_name' in (feature.properties as object)
+        ? 13
+        : 10;
+  if (Number.isFinite(fitted) && fitted > 0) {
+    map.setMinZoom(
+      Math.min(MAP_CAMERA_MAX_ZOOM - 1, cap, Math.max(MAP_CAMERA_MIN_ZOOM, Math.floor(fitted) - 1))
+    );
+  } else {
+    map.setMinZoom(MAP_CAMERA_MIN_ZOOM);
+  }
   return bounds;
 }
 
@@ -227,9 +261,11 @@ const MapController = forwardRef<
     fitToState?: boolean;
     clipFeature?: GeoJSON.Feature | null;
     clipKey?: string;
+    viewTarget?: { lat: number; lon: number; zoom: number; token: number };
+    viewActive?: boolean;
   }
 >(
-  ({ onViewChange, layoutRevision, fitToState, clipFeature = null, clipKey = '' }, ref) => {
+  ({ onViewChange, layoutRevision, fitToState, clipFeature = null, clipKey = '', viewTarget, viewActive = true }, ref) => {
     const map = useMap();
     const layoutToken = useContext(MapLayoutContext);
     const revision = `${layoutToken}:${layoutRevision ?? ''}`;
@@ -237,7 +273,7 @@ const MapController = forwardRef<
     useImperativeHandle(ref, () => ({
       flyTo: (lat, lon, zoom = 12) => {
         map.invalidateSize({ animate: false });
-        map.flyTo([lat, lon], zoom, { duration: 0.8 });
+        map.flyTo([lat, lon], clampMapZoom(zoom), { duration: 0.8 });
       },
       fitState: () => {
         map.invalidateSize({ animate: false });
@@ -255,10 +291,14 @@ const MapController = forwardRef<
             : feature.properties && 'mandal_name' in (feature.properties as object)
               ? 14
               : 11;
-        map.fitBounds(bounds, { padding: [24, 24], maxZoom, animate: true });
+        map.fitBounds(bounds, { padding: [28, 28], maxZoom: Math.min(maxZoom, MAP_CAMERA_MAX_ZOOM), animate: true });
       },
       zoomIn: () => map.zoomIn(),
       zoomOut: () => map.zoomOut(),
+      getView: () => {
+        const c = map.getCenter();
+        return { lat: c.lat, lon: c.lng, zoom: map.getZoom() };
+      },
     }));
     useEffect(() => {
       let frame = 0;
@@ -305,6 +345,7 @@ const MapController = forwardRef<
       };
     }, [map, revision, fitToState]);
     useEffect(() => {
+      if (!viewActive) return;
       if (!clipFeature) {
         constrainToFeature(map, null);
         if (hadClip.current) {
@@ -324,14 +365,24 @@ const MapController = forwardRef<
           : clipFeature.properties && 'mandal_name' in (clipFeature.properties as object)
             ? 14
             : 11;
-      map.fitBounds(bounds, { padding: [24, 24], maxZoom, animate: true });
-    }, [map, clipKey, clipFeature]);
+      map.fitBounds(bounds, { padding: [28, 28], maxZoom: Math.min(maxZoom, MAP_CAMERA_MAX_ZOOM), animate: true });
+    }, [map, clipKey, clipFeature, viewActive]);
+    const lastViewToken = React.useRef<number | null>(null);
+    useEffect(() => {
+      if (!viewTarget || clipFeature) return;
+      if (lastViewToken.current === viewTarget.token) return;
+      lastViewToken.current = viewTarget.token;
+      map.invalidateSize({ animate: false });
+      map.flyTo([viewTarget.lat, viewTarget.lon], clampMapZoom(viewTarget.zoom), { duration: 0 });
+    }, [map, viewTarget, clipFeature]);
     useMapEvents({
       moveend: () => {
+        if (!viewActive) return;
         const c = map.getCenter();
         onViewChange?.(c.lat, c.lng, map.getZoom());
       },
       zoomend: () => {
+        if (!viewActive) return;
         const c = map.getCenter();
         onViewChange?.(c.lat, c.lng, map.getZoom());
       },
@@ -344,9 +395,12 @@ MapController.displayName = 'MapController';
 const ClickSink: React.FC<{
   mode: MapClickMode;
   interactive: boolean;
+  drillLevel: string;
+  districts: GeoJSON.FeatureCollection | null;
+  onDistrictClick?: ApLeafletMapProps['onDistrictClick'];
   onMapClick?: (lat: number, lon: number) => void;
   onCursorMove?: ApLeafletMapProps['onCursorMove'];
-}> = ({ mode, interactive, onMapClick, onCursorMove }) => {
+}> = ({ mode, interactive, drillLevel, districts, onDistrictClick, onMapClick, onCursorMove }) => {
   const map = useMap();
   useEffect(() => {
     if (!interactive) {
@@ -375,6 +429,19 @@ const ClickSink: React.FC<{
   useMapEvents({
     click: (e) => {
       if (mode === 'boxzoom' || mode === 'pan') return;
+      if (mode === 'inspect' && drillLevel === 'state' && onDistrictClick && districts) {
+        const hit = findContainingFeature([e.latlng.lng, e.latlng.lat], districts.features);
+        const name = String((hit?.properties as ApDistrictProperties | undefined)?.district_name ?? '');
+        if (hit && name) {
+          onDistrictClick(
+            name,
+            e.latlng.lat,
+            e.latlng.lng,
+            isolateChildFeature(hit, [e.latlng.lng, e.latlng.lat])
+          );
+          return;
+        }
+      }
       onMapClick?.(e.latlng.lat, e.latlng.lng);
     },
     mousemove: (e) => {
@@ -492,23 +559,28 @@ const AdminPolygonLayers: React.FC<{
   const mandalCollection = useMemo(() => {
     if (!mandals) return null;
     const level = adminDrill?.level ?? 'state';
+    if (level === 'state') return showMandals ? mandals : null;
     if (level === 'village' && adminDrill?.mandalFeature) {
+      return asFeatureCollection([adminDrill.mandalFeature]);
+    }
+    if (level === 'mandal' && adminDrill?.mandalFeature) {
       return asFeatureCollection([adminDrill.mandalFeature]);
     }
     if (level === 'mandal' && adminDrill?.mandalName) {
       const named = filterByAdminName(mandals.features, 'mandal_name', adminDrill.mandalName);
-      return asFeatureCollection(named.length ? named : adminDrill.mandalFeature ? [adminDrill.mandalFeature] : []);
+      return asFeatureCollection(named);
     }
     if ((level === 'district' || level === 'mandal') && adminDrill?.districtFeature) {
       const inside = filterFeaturesInParent(mandals.features, adminDrill.districtFeature);
       return asFeatureCollection(inside);
     }
     return mandals;
-  }, [mandals, adminDrill]);
+  }, [mandals, adminDrill, showMandals]);
 
   const villageCollection = useMemo(() => {
     if (!villages) return null;
     const level = adminDrill?.level ?? 'state';
+    if (level === 'state') return showVillages ? villages : null;
     if (level === 'village' && adminDrill?.villageFeature) {
       return asFeatureCollection([adminDrill.villageFeature]);
     }
@@ -524,7 +596,7 @@ const AdminPolygonLayers: React.FC<{
       return asFeatureCollection(filterByAdminName(villages.features, 'mandal_name', adminDrill.mandalName));
     }
     return villages;
-  }, [villages, adminDrill]);
+  }, [villages, adminDrill, showVillages]);
 
   return (
     <>
@@ -535,7 +607,7 @@ const AdminPolygonLayers: React.FC<{
           hidden
         />
       )}
-      {showVillages && villageCollection && (adminDrill || zoom >= 9) && (
+      {showVillages && villageCollection && (
         <div
           data-testid="village-layer-ready"
           data-count={villageCollection.features.length}
@@ -550,47 +622,39 @@ const AdminPolygonLayers: React.FC<{
           data={mandalCollection}
           style={{
             color: '#475569',
-            weight: zoom >= 9 ? 1.1 : 0.6,
+            weight: zoom >= 9 ? 0.85 : 0.55,
             fillColor: '#94a3b8',
             fillOpacity: adminDrill && adminDrill.level !== 'state' ? 0 : 0.12 * mandalOpacity,
             opacity: mandalOpacity,
           }}
           onEachFeature={(feature, layer) => {
             const props = feature.properties as MandalProperties;
-            layer.bindTooltip(
-              `${props.mandal_name}${props.district_name ? ` • ${props.district_name}` : ''}`,
-              { sticky: true }
-            );
             bindIsolateClick(layer, (e) => {
               onMandalClick?.(
                 props.mandal_name,
                 e.latlng.lat,
                 e.latlng.lng,
                 props.district_name,
-                feature
+                isolateChildFeature(feature, [e.latlng.lng, e.latlng.lat], adminDrill?.districtFeature)
               );
             });
           }}
         />
       )}
-      {showVillages && villageCollection && (adminDrill || zoom >= 9) && (
+      {showVillages && villageCollection && (
         <GeoJSON
           key={`villages-${villageOpacity}-${villageCollection.features.length}-${adminDrill?.villageName ?? adminDrill?.mandalName ?? 'all'}`}
           pane="admin-vectors"
           data={villageCollection}
           style={{
             color: '#334155',
-            weight: 0.6,
+            weight: 0.5,
             fillColor: '#cbd5e1',
             fillOpacity: adminDrill && adminDrill.level !== 'state' ? 0 : 0.18 * villageOpacity,
             opacity: villageOpacity,
           }}
           onEachFeature={(feature, layer) => {
             const props = feature.properties as VillageProperties;
-            layer.bindTooltip(
-              `${props.village_name}${props.mandal_name ? ` • ${props.mandal_name}` : ''}`,
-              { sticky: true }
-            );
             bindIsolateClick(layer, (e) => {
               onVillageClick?.(
                 props.village_name,
@@ -598,7 +662,11 @@ const AdminPolygonLayers: React.FC<{
                 e.latlng.lng,
                 props.mandal_name,
                 props.district_name,
-                feature
+                isolateChildFeature(
+                  feature,
+                  [e.latlng.lng, e.latlng.lat],
+                  adminDrill?.mandalFeature ?? adminDrill?.districtFeature
+                )
               );
             });
           }}
@@ -673,8 +741,172 @@ const ZoomAwarePlaces: React.FC<{ enabled: boolean; minZoom?: number; pane?: str
       attribution={ESRI_PLACES_TILES.attribution}
       opacity={0.95}
       pane={pane}
+      {...leafletOverzoom(ESRI_PLACES_TILES.maxZoom)}
     />
   );
+};
+
+const ZoomAwareDetailStack: React.FC<{
+  useMapLibre: boolean;
+  rasterId: RasterBasemapId;
+  drillActive: boolean;
+  drillLevel: string;
+  showImageryOverlay: boolean;
+  showHighways: boolean;
+  showPlaces: boolean;
+}> = ({
+  useMapLibre,
+  rasterId,
+  drillActive,
+  drillLevel,
+  showImageryOverlay,
+  showHighways,
+  showPlaces,
+}) => {
+  const map = useMap();
+  const [zoom, setZoom] = useState(map.getZoom());
+  useMapEvents({ zoomend: () => setZoom(map.getZoom()) });
+  const osmBoost = shouldOverlayOsmRaster(zoom, useMapLibre, drillActive);
+  const imagery = shouldOverlaySatellite(zoom, rasterId, drillLevel, showImageryOverlay);
+  const roads = shouldOverlayRoads(zoom, showHighways, useMapLibre, drillActive);
+  const caption = mapDetailCaption(zoom, rasterId, useMapLibre, imagery);
+  const overlayPane = useMapLibre || drillActive || imagery ? 'overlayPane' : undefined;
+  const captionEl = React.useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    const ctrl = new L.Control({ position: 'bottomright' });
+    ctrl.onAdd = () => {
+      const el = L.DomUtil.create('div', 'ap-map-detail-caption');
+      el.textContent = caption;
+      captionEl.current = el;
+      return el;
+    };
+    ctrl.addTo(map);
+    return () => {
+      captionEl.current = null;
+      ctrl.remove();
+    };
+    // Caption text is updated in the effect below; this mounts the control once.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [map]);
+  useEffect(() => {
+    if (captionEl.current) captionEl.current.textContent = caption;
+  }, [caption]);
+
+  return (
+    <>
+      {osmBoost && (
+        <TileLayer
+          attribution={BASEMAP_TILES.vector.attribution}
+          url={BASEMAP_TILES.vector.url}
+          pane="overlayPane"
+          opacity={imagery ? 0.35 : 1}
+          {...leafletOverzoom(BASEMAP_TILES.vector.maxZoom)}
+        />
+      )}
+      {imagery && rasterId !== 'satellite' && rasterId !== 'hybrid' && (
+        <TileLayer
+          url={BASEMAP_TILES.satellite.url}
+          attribution={BASEMAP_TILES.satellite.attribution}
+          opacity={0.88}
+          pane="overlayPane"
+          {...leafletOverzoom(BASEMAP_TILES.satellite.maxZoom)}
+        />
+      )}
+      {roads && (
+        <TileLayer
+          url={ESRI_TRANSPORT_TILES.url}
+          attribution={ESRI_TRANSPORT_TILES.attribution}
+          opacity={0.9}
+          pane={overlayPane ?? 'overlayPane'}
+          {...leafletOverzoom(ESRI_TRANSPORT_TILES.maxZoom)}
+        />
+      )}
+      <ZoomAwarePlaces
+        enabled={shouldOverlayPlaces(zoom, showPlaces, drillActive)}
+        minZoom={6}
+        pane="overlayPane"
+      />
+    </>
+  );
+};
+
+const AdminHoverIdentify: React.FC<{
+  adminDrill?: AdminDrill | null;
+  enabled?: boolean;
+}> = ({ adminDrill, enabled = true }) => {
+  const map = useMap();
+  const { districts } = useApBoundaries();
+  const mandals = useApMandals(enabled);
+  const [zoom, setZoom] = useState(map.getZoom());
+  const [bbox, setBbox] = useState<[number, number, number, number] | null>(null);
+  const tooltipRef = React.useRef<L.Tooltip | null>(null);
+  const lastAt = React.useRef(0);
+  const parentBbox =
+    (adminDrill?.mandalFeature && featureBbox(adminDrill.mandalFeature)) ||
+    (adminDrill?.districtFeature && featureBbox(adminDrill.districtFeature)) ||
+    bbox;
+  const villages = useVillagePolygons(
+    enabled && zoom >= MAP_ZOOM.villagePolygons,
+    parentBbox,
+    zoom,
+    adminDrill && adminDrill.level !== 'state' ? 0 : MAP_ZOOM.villagePolygons
+  );
+
+  const refreshView = () => {
+    const b = map.getBounds();
+    setBbox([b.getWest(), b.getSouth(), b.getEast(), b.getNorth()]);
+    setZoom(map.getZoom());
+  };
+  useMapEvents({
+    moveend: refreshView,
+    zoomend: refreshView,
+    mouseout: () => {
+      tooltipRef.current?.remove();
+    },
+    mousemove: (e) => {
+      if (!enabled) return;
+      const now = Date.now();
+      if (now - lastAt.current < 90) return;
+      lastAt.current = now;
+      const z = map.getZoom();
+      const hit = identifyAdminAtPoint(
+        [e.latlng.lng, e.latlng.lat],
+        z,
+        districts?.features ?? [],
+        mandals?.features ?? [],
+        villages?.features ?? []
+      );
+      const html = formatIdentifyHtml(hit);
+      if (!html) {
+        tooltipRef.current?.remove();
+        return;
+      }
+      if (!tooltipRef.current) {
+        tooltipRef.current = L.tooltip({
+          sticky: true,
+          opacity: 0.96,
+          className: 'ap-admin-identify-tip',
+          direction: 'top',
+          offset: [0, -8],
+        });
+      }
+      tooltipRef.current.setLatLng(e.latlng).setContent(html);
+      if (!map.hasLayer(tooltipRef.current as unknown as L.Layer)) {
+        tooltipRef.current.addTo(map);
+      }
+    },
+  });
+  useEffect(() => {
+    refreshView();
+    return () => {
+      tooltipRef.current?.remove();
+      tooltipRef.current = null;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [map]);
+
+  return <div data-testid="admin-hover-identify" data-zoom={zoom} hidden />;
 };
 
 const AdminClipPanes: React.FC = () => {
@@ -705,7 +937,7 @@ const AdminClipMask: React.FC<{ feature: GeoJSON.Feature | null }> = ({ feature 
         fillOpacity: 1,
         fillRule: 'evenodd',
         color: '#0f2942',
-        weight: 2.2,
+        weight: 1.5,
         opacity: 1,
         interactive: false,
         stroke: true,
@@ -792,6 +1024,8 @@ export const ApLeafletMap = forwardRef<ApLeafletMapHandle, ApLeafletMapProps>(fu
     layoutRevision = 0,
     fitToState = false,
     adminDrill = null,
+    viewTarget,
+    viewActive = true,
   },
   ref
 ) {
@@ -799,12 +1033,8 @@ export const ApLeafletMap = forwardRef<ApLeafletMapHandle, ApLeafletMapProps>(fu
   const { highways, rivers, agency } = useApNetwork();
   const drillLevel = adminDrill?.level ?? 'state';
   const drillActive = drillLevel !== 'state';
-  const showMandalsEffective = drillActive
-    ? drillLevel === 'district' || drillLevel === 'mandal'
-    : showMandals;
-  const showVillagesEffective = drillActive
-    ? drillLevel === 'mandal' || drillLevel === 'village'
-    : showVillages;
+  const showMandalsEffective = shouldDrawMandals(drillLevel) || showMandals;
+  const showVillagesEffective = shouldDrawVillages(drillLevel) || showVillages;
   const showDistrictsEffective = drillActive ? drillLevel === 'district' : showDistricts;
   const districtData =
     districts && drillActive && adminDrill?.districtFeature
@@ -823,6 +1053,7 @@ export const ApLeafletMap = forwardRef<ApLeafletMapHandle, ApLeafletMapProps>(fu
     fitFeature: (feature) => controllerRef.current?.fitFeature(feature),
     zoomIn: () => controllerRef.current?.zoomIn(),
     zoomOut: () => controllerRef.current?.zoomOut(),
+    getView: () => controllerRef.current?.getView() ?? null,
   }));
 
   const districtStyle = (feature?: GeoJSON.Feature) => {
@@ -830,9 +1061,9 @@ export const ApLeafletMap = forwardRef<ApLeafletMapHandle, ApLeafletMapProps>(fu
     const isAgency = highlightAgency && AGENCY_DISTRICT_NAMES.includes(name);
     return {
       color: isAgency ? '#5b21b6' : '#0f2942',
-      weight: isAgency ? 1.6 : 0.9,
+      weight: isAgency ? 1.3 : drillActive ? 0.8 : 1.4,
       fillColor: isAgency ? '#7c3aed' : '#0f2942',
-      fillOpacity: isAgency ? 0.22 * districtOpacity : 0.02 * districtOpacity,
+      fillOpacity: isAgency ? 0.22 * districtOpacity : drillActive ? 0 : 0.05 * districtOpacity,
       opacity: districtOpacity,
     };
   };
@@ -846,8 +1077,11 @@ export const ApLeafletMap = forwardRef<ApLeafletMapHandle, ApLeafletMapProps>(fu
       <MapContainer
         center={initialCenter}
         zoom={initialZoom}
-        minZoom={3}
-        maxZoom={19}
+        minZoom={MAP_CAMERA_MIN_ZOOM}
+        maxZoom={MAP_CAMERA_MAX_ZOOM}
+        zoomSnap={0}
+        zoomDelta={0.5}
+        wheelPxPerZoomLevel={80}
         zoomControl={false}
         attributionControl
         worldCopyJump
@@ -863,52 +1097,36 @@ export const ApLeafletMap = forwardRef<ApLeafletMapHandle, ApLeafletMapProps>(fu
       >
         <AdminClipPanes />
         {useMapLibre ? (
-          <>
-            {drillActive && (
-              <TileLayer
-                attribution={BASEMAP_TILES.vector.attribution}
-                url={BASEMAP_TILES.vector.url}
-                maxZoom={BASEMAP_TILES.vector.maxZoom}
-                pane="overlayPane"
-              />
-            )}
-            <MapLibreBasemap
-              viewSync={`${adminDrill?.level ?? 'state'}:${adminDrill?.districtName ?? ''}:${adminDrill?.mandalName ?? ''}:${adminDrill?.villageName ?? ''}`}
-            />
-          </>
+          <MapLibreBasemap
+            viewSync={`${adminDrill?.level ?? 'state'}:${adminDrill?.districtName ?? ''}:${adminDrill?.mandalName ?? ''}:${adminDrill?.villageName ?? ''}`}
+          />
         ) : (
-          <TileLayer attribution={tiles.attribution} url={tiles.url} maxZoom={tiles.maxZoom} />
+          <TileLayer
+            attribution={tiles.attribution}
+            url={tiles.url}
+            {...leafletOverzoom(tiles.maxZoom)}
+          />
         )}
         {tiles.labelsUrl && !useMapLibre && (
-          <TileLayer url={tiles.labelsUrl} pane="overlayPane" />
+          <TileLayer url={tiles.labelsUrl} pane="overlayPane" {...leafletOverzoom(tiles.maxZoom)} />
         )}
-        {showImageryOverlay && (
-          <TileLayer
-            url={BASEMAP_TILES.satellite.url}
-            attribution={BASEMAP_TILES.satellite.attribution}
-            opacity={0.72}
-            pane={drillActive ? 'overlayPane' : undefined}
-          />
-        )}
-        <ZoomAwarePlaces
-          enabled={useMapLibre || showPlaces || showMandals || showVillages || drillActive}
-          minZoom={6}
-          pane="overlayPane"
+        <ZoomAwareDetailStack
+          useMapLibre={useMapLibre}
+          rasterId={rasterId}
+          drillActive={drillActive}
+          drillLevel={drillLevel}
+          showImageryOverlay={showImageryOverlay}
+          showHighways={showHighways}
+          showPlaces={showPlaces}
         />
-        {(showHighways || useMapLibre || drillActive) && (
-          <TileLayer
-            url={ESRI_TRANSPORT_TILES.url}
-            attribution={ESRI_TRANSPORT_TILES.attribution}
-            opacity={0.85}
-            pane="overlayPane"
-          />
-        )}
+        <AdminHoverIdentify adminDrill={adminDrill} />
         {showTrails && (
           <TileLayer
             url={HIKING_TRAIL_TILES.url}
             attribution={HIKING_TRAIL_TILES.attribution}
             opacity={0.85}
             pane={drillActive ? 'overlayPane' : undefined}
+            {...leafletOverzoom(HIKING_TRAIL_TILES.maxZoom)}
           />
         )}
         {showRailways && (
@@ -917,6 +1135,7 @@ export const ApLeafletMap = forwardRef<ApLeafletMapHandle, ApLeafletMapProps>(fu
             url={OPENRAILWAY_TILES.url}
             opacity={0.85}
             pane={drillActive ? 'overlayPane' : undefined}
+            {...leafletOverzoom(OPENRAILWAY_TILES.maxZoom)}
           />
         )}
         {showGraticule && <Graticule />}
@@ -933,7 +1152,8 @@ export const ApLeafletMap = forwardRef<ApLeafletMapHandle, ApLeafletMapProps>(fu
         {ready && state && showStateBorder && (
           <GeoJSON
             data={state}
-            style={{ color: '#001428', weight: 2.2, fill: false, opacity: stateOpacity }}
+            interactive={false}
+            style={{ color: '#001428', weight: 1.5, fill: false, opacity: stateOpacity }}
           />
         )}
         <AdminClipMask
@@ -948,16 +1168,20 @@ export const ApLeafletMap = forwardRef<ApLeafletMapHandle, ApLeafletMapProps>(fu
             style={(feature) => {
               const base = districtStyle(feature);
               if (drillLevel === 'district') {
-                return { ...base, fillOpacity: 0, weight: 2.4 };
+                return { ...base, fillOpacity: 0, weight: 1.6 };
               }
               return base;
             }}
             interactive={!drillActive}
             onEachFeature={(feature, layer) => {
               const name = (feature.properties as ApDistrictProperties).district_name;
-              layer.bindTooltip(name, { sticky: true });
               bindIsolateClick(layer, (e) => {
-                onDistrictClick?.(name, e.latlng.lat, e.latlng.lng, feature);
+                onDistrictClick?.(
+                  name,
+                  e.latlng.lat,
+                  e.latlng.lng,
+                  isolateChildFeature(feature, [e.latlng.lng, e.latlng.lat])
+                );
               });
             }}
           />
@@ -1110,11 +1334,16 @@ export const ApLeafletMap = forwardRef<ApLeafletMapHandle, ApLeafletMapProps>(fu
           layoutRevision={layoutRevision}
           fitToState={fitToState}
           clipFeature={clipFeature}
-          clipKey={`${adminDrill?.level ?? 'state'}:${adminDrill?.districtName ?? ''}:${adminDrill?.mandalName ?? ''}:${adminDrill?.villageName ?? ''}`}
+          clipKey={`${viewActive ? 'on' : 'off'}:${adminDrill?.level ?? 'state'}:${adminDrill?.districtName ?? ''}:${adminDrill?.mandalName ?? ''}:${adminDrill?.villageName ?? ''}`}
+          viewTarget={viewTarget}
+          viewActive={viewActive}
         />
         <ClickSink
           mode={clickMode}
           interactive={interactive}
+          drillLevel={drillLevel}
+          districts={districts}
+          onDistrictClick={onDistrictClick}
           onMapClick={onMapClick}
           onCursorMove={onCursorMove}
         />

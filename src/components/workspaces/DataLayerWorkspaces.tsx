@@ -8,12 +8,20 @@ import {
   Layers,
   MapPin,
   Plus,
+  Save,
   Trash2,
   Upload,
 } from 'lucide-react';
 import { DigitizedFeature, GisLayer, WorkspaceId } from '../../types/gis';
 import { ApLeafletMap } from '../gis/ApLeafletMap';
 import { useAuth } from '../../auth/AuthContext';
+import {
+  configsEqual,
+  countEnabledLayers,
+  layerConfigFromGisLayers,
+  leafletFlagsFromLayers,
+  type DashboardLayerConfig,
+} from '../../gis/dashboardLayers';
 
 function parseImportedGeoJson(text: string): {
   type: 'Point' | 'LineString' | 'Polygon';
@@ -68,8 +76,10 @@ interface DataLayerProps {
     | 'feature-editor-and-digitizer'
     | 'raster-management-and-toposheets';
   layers: GisLayer[];
+  dashboardLayerConfig?: DashboardLayerConfig;
   onToggleLayer: (id: string) => void;
   onChangeLayerOpacity: (id: string, opacity: number) => void;
+  onSaveDashboardLayers?: () => void;
   digitizedFeatures: DigitizedFeature[];
   onAddDigitizedFeature: (f: DigitizedFeature) => void;
   onDeleteDigitizedFeature: (id: string) => void;
@@ -81,8 +91,10 @@ interface DataLayerProps {
 export const DataLayerWorkspaces: React.FC<DataLayerProps> = ({
   workspace,
   layers,
+  dashboardLayerConfig,
   onToggleLayer,
   onChangeLayerOpacity,
+  onSaveDashboardLayers,
   digitizedFeatures,
   onAddDigitizedFeature,
   onDeleteDigitizedFeature,
@@ -117,6 +129,11 @@ export const DataLayerWorkspaces: React.FC<DataLayerProps> = ({
         l.name.toLowerCase().includes(catalogSearch.toLowerCase()) ||
         l.sourceTable.toLowerCase().includes(catalogSearch.toLowerCase())
     );
+    const catalogFlags = leafletFlagsFromLayers(layers);
+    const unsaved = dashboardLayerConfig
+      ? !configsEqual(layerConfigFromGisLayers(layers), dashboardLayerConfig)
+      : true;
+    const enabledCount = countEnabledLayers(layers);
 
     return (
       <div className="p-4 lg:p-6 space-y-4 max-w-[1440px] mx-auto">
@@ -128,6 +145,10 @@ export const DataLayerWorkspaces: React.FC<DataLayerProps> = ({
             <h1 className="text-xl font-bold text-primary tracking-tight">
               Administrative &amp; Operational Layer Catalog
             </h1>
+            <p className="text-[11px] text-on-surface-variant mt-1">
+              Toggle layers here, then Save to apply them on the GIS Dashboard map.
+              {unsaved ? ' Unsaved changes are not on the Dashboard yet.' : ' Dashboard map matches this catalog.'}
+            </p>
           </div>
           <div className="flex items-center gap-2">
             <input
@@ -139,8 +160,26 @@ export const DataLayerWorkspaces: React.FC<DataLayerProps> = ({
             />
             <button
               type="button"
+              data-testid="catalog-save-dashboard"
+              onClick={() => onSaveDashboardLayers?.()}
+              className="h-8 px-3 rounded bg-secondary text-on-secondary text-xs font-bold cursor-pointer inline-flex items-center gap-1.5 shadow-sm"
+              title="Apply these catalog layers to the GIS Dashboard map"
+            >
+              <Save className="w-3.5 h-3.5" />
+              Save to Dashboard
+              {unsaved ? '' : ` (${enabledCount} on)`}
+            </button>
+            <button
+              type="button"
+              onClick={() => onSwitchWorkspace('gis-dashboard')}
+              className="h-8 px-3 rounded border border-outline-variant/60 bg-surface-container-lowest text-xs font-semibold cursor-pointer"
+            >
+              Open Dashboard
+            </button>
+            <button
+              type="button"
               onClick={() => onSwitchWorkspace('interactive-map-viewer')}
-              className="px-3 py-1.5 rounded bg-primary text-on-primary text-xs font-semibold cursor-pointer"
+              className="h-8 px-3 rounded bg-primary text-on-primary text-xs font-semibold cursor-pointer"
             >
               View Active Map
             </button>
@@ -200,21 +239,25 @@ export const DataLayerWorkspaces: React.FC<DataLayerProps> = ({
         <div className="gis-map-host h-80 rounded border border-outline-variant/40">
           <ApLeafletMap
             basemap="vector"
-            showStateBorder={layers.find((l) => l.id === 'lyr-state-border')?.enabled ?? true}
-            showDistricts={layers.find((l) => l.id === 'lyr-districts')?.enabled ?? true}
-            districtOpacity={(layers.find((l) => l.id === 'lyr-districts')?.opacity ?? 100) / 100}
-            showHighways={layers.find((l) => l.id === 'lyr-highways')?.enabled ?? false}
-            showAgencyRoutes={layers.find((l) => l.id === 'lyr-drug-routes')?.enabled ?? false}
-            showRivers={layers.find((l) => l.id === 'lyr-rivers')?.enabled ?? false}
-            showRailways={layers.find((l) => l.id === 'lyr-railways')?.enabled ?? false}
-            showTrails={layers.find((l) => l.id === 'lyr-forest-trails')?.enabled ?? false}
-            showPlaces={layers.find((l) => l.id === 'lyr-mandals')?.enabled ?? false}
-            showMandals={layers.find((l) => l.id === 'lyr-mandals')?.enabled ?? false}
-            showVillages={layers.find((l) => l.id === 'lyr-villages')?.enabled ?? false}
-            showPoliceStations={layers.find((l) => l.id === 'lyr-pss')?.enabled ?? false}
-            policeStationOpacity={(layers.find((l) => l.id === 'lyr-pss')?.opacity ?? 100) / 100}
-            highlightAgency={layers.find((l) => l.id === 'lyr-asr-agency')?.enabled ?? false}
-            showGraticule={layers.find((l) => l.id === 'lyr-soi-grid')?.enabled ?? false}
+            showStateBorder={catalogFlags.showStateBorder}
+            showDistricts={catalogFlags.showDistricts}
+            districtOpacity={catalogFlags.districtOpacity}
+            stateOpacity={catalogFlags.stateOpacity}
+            showHighways={catalogFlags.showHighways}
+            showAgencyRoutes={catalogFlags.showAgencyRoutes}
+            showRivers={catalogFlags.showRivers}
+            showRailways={catalogFlags.showRailways}
+            showTrails={catalogFlags.showTrails}
+            showPlaces={catalogFlags.showPlaces}
+            showMandals={catalogFlags.showMandals}
+            showVillages={catalogFlags.showVillages}
+            mandalOpacity={catalogFlags.mandalOpacity}
+            villageOpacity={catalogFlags.villageOpacity}
+            showPoliceStations={catalogFlags.showPoliceStations}
+            policeStationOpacity={catalogFlags.policeStationOpacity}
+            highlightAgency={catalogFlags.highlightAgency}
+            showGraticule={catalogFlags.showGraticule}
+            showImageryOverlay={catalogFlags.showImageryOverlay}
           />
         </div>
       </div>
@@ -497,6 +540,7 @@ export const DataLayerWorkspaces: React.FC<DataLayerProps> = ({
                 basemap="hybrid"
                 showStateBorder
                 showDistricts
+                showHighways
                 showPoliceStations
                 digitizedFeatures={digitizedFeatures}
                 draftPoints={draftPoints}
@@ -504,7 +548,7 @@ export const DataLayerWorkspaces: React.FC<DataLayerProps> = ({
                 clickMode="draw"
                 onMapClick={handleCanvasClick}
                 initialCenter={[18.2, 82.7]}
-                initialZoom={9}
+                initialZoom={11}
               />
             </div>
           </div>
@@ -630,7 +674,7 @@ export const DataLayerWorkspaces: React.FC<DataLayerProps> = ({
       <div className="flex flex-wrap items-center justify-between gap-3 border-b border-outline-variant/35 pb-3">
         <div>
           <span className="text-[10.5px] font-bold uppercase tracking-wider text-secondary block">
-            Survey of India OSM &amp; ISRO Cartosat-3 Archive
+            OpenStreetMap, OpenTopoMap, and Esri World Imagery
           </span>
           <h1 className="text-xl font-bold text-primary tracking-tight">
             Raster Imagery &amp; 1:50K Toposheet Index
@@ -641,12 +685,12 @@ export const DataLayerWorkspaces: React.FC<DataLayerProps> = ({
           onClick={() => {
             onToggleLayer('lyr-cartosat');
             onSwitchWorkspace('interactive-map-viewer');
-            onTriggerToast('Mounted ISRO Cartosat-3 (0.5m) swath onto map canvas');
+            onTriggerToast('Esri World Imagery overlay (Maxar/Earthstar). No Cartosat-3 file is in this project.');
           }}
           className="px-3 py-1.5 rounded bg-primary text-on-primary text-xs font-semibold flex items-center gap-1.5 cursor-pointer"
         >
           <Eye className="w-3.5 h-3.5" />
-          <span>Toggle Cartosat-3 Swath on Map</span>
+          <span>Toggle Esri World Imagery on Map</span>
         </button>
       </div>
 

@@ -1,10 +1,12 @@
 import React, { useRef, useState } from 'react';
-import { WorkspaceId } from '../../types/gis';
+import { GisLayer, WorkspaceId } from '../../types/gis';
 import { ApLeafletMap, ApLeafletMapHandle } from '../gis/ApLeafletMap';
 import { AdminDrillBar } from '../gis/AdminDrillBar';
-import { type AdminDrill, STATE_ADMIN_DRILL } from '../../gis/adminHierarchy';
+import { type AdminDrill, STATE_ADMIN_DRILL, isolateChildFeature } from '../../gis/adminHierarchy';
+import { leafletFlagsFromLayers } from '../../gis/dashboardLayers';
 
 interface NdpsHeatMapDashboardProps {
+  layers: GisLayer[];
   onSelectFeatureAndFly: (featureId: string) => void;
   onFlyToLocation?: (lat: number, lon: number, label: string) => void;
   onSwitchWorkspace: (ws: WorkspaceId) => void;
@@ -21,11 +23,12 @@ const EmptyPanel: React.FC<{ title: string; children: string }> = ({ title, chil
 );
 
 export const NdpsHeatMapDashboard: React.FC<NdpsHeatMapDashboardProps> = ({
-  onFlyToLocation,
+  layers,
   onTriggerToast,
 }) => {
   const mapRef = useRef<ApLeafletMapHandle>(null);
   const [adminDrill, setAdminDrill] = useState<AdminDrill>(STATE_ADMIN_DRILL);
+  const mapFlags = leafletFlagsFromLayers(layers);
 
   return (
     <div className="h-full min-h-0 bg-[#c5d4e2] flex flex-col overflow-hidden">
@@ -49,7 +52,13 @@ export const NdpsHeatMapDashboard: React.FC<NdpsHeatMapDashboardProps> = ({
         </div>
 
         <div className="flex flex-col gap-2 min-h-0 min-w-0 h-full">
-          <section className="gis-map-host relative flex-1 min-h-[480px] bg-[#8eb9d6] rounded-sm border border-[#6f97b3]">
+          <section
+            className="gis-map-host relative flex-1 min-h-[480px] bg-[#8eb9d6] rounded-sm border border-[#6f97b3]"
+            data-testid="dashboard-map"
+            data-highways={mapFlags.showHighways ? 'on' : 'off'}
+            data-ps="off"
+            data-mandals={mapFlags.showMandals ? 'on' : 'off'}
+          >
             <div className="absolute top-1.5 left-0 right-0 z-10 text-center pointer-events-none">
               <h2
                 className="text-[#0b3d7a] text-[14px] xl:text-[16px] font-extrabold tracking-[0.08em] uppercase"
@@ -71,20 +80,33 @@ export const NdpsHeatMapDashboard: React.FC<NdpsHeatMapDashboardProps> = ({
               ref={mapRef}
               basemap="vector"
               fitToState
-              showStateBorder
-              showDistricts
-              showHighways={false}
-              showRivers={false}
-              showPlaces
+              showStateBorder={mapFlags.showStateBorder}
+              showDistricts={mapFlags.showDistricts}
+              districtOpacity={mapFlags.districtOpacity}
+              stateOpacity={mapFlags.stateOpacity}
+              showMandals={mapFlags.showMandals}
+              showVillages={mapFlags.showVillages}
+              mandalOpacity={mapFlags.mandalOpacity}
+              villageOpacity={mapFlags.villageOpacity}
+              showPoliceStations={false}
+              policeStationOpacity={mapFlags.policeStationOpacity}
+              showHighways={mapFlags.showHighways}
+              showAgencyRoutes={mapFlags.showAgencyRoutes}
+              showRivers={mapFlags.showRivers}
+              showRailways={mapFlags.showRailways}
+              showTrails={mapFlags.showTrails}
+              showPlaces={mapFlags.showPlaces}
+              highlightAgency={mapFlags.highlightAgency}
+              showGraticule={mapFlags.showGraticule}
+              showImageryOverlay={mapFlags.showImageryOverlay}
               adminDrill={adminDrill}
-              onDistrictClick={(name, lat, lon, feature) => {
+              onDistrictClick={(name, _lat, _lon, feature) => {
                 setAdminDrill({
                   level: 'district',
                   districtName: name,
                   districtFeature: feature,
                 });
-                onFlyToLocation?.(lat, lon, name);
-                onTriggerToast(`District: ${name}. Mandals are NWIC vintage, parented spatially.`);
+                onTriggerToast(`Isolated ${name}. Click a mandal inside, or go back to all districts.`);
               }}
               onMandalClick={(name, lat, lon, district, feature) => {
                 setAdminDrill((prev) => ({
@@ -92,7 +114,7 @@ export const NdpsHeatMapDashboard: React.FC<NdpsHeatMapDashboardProps> = ({
                   districtName: prev.districtName ?? district,
                   districtFeature: prev.districtFeature,
                   mandalName: name,
-                  mandalFeature: feature,
+                  mandalFeature: isolateChildFeature(feature, [lon, lat], prev.districtFeature),
                 }));
                 onTriggerToast(`Mandal: ${name}`);
               }}
@@ -104,7 +126,11 @@ export const NdpsHeatMapDashboard: React.FC<NdpsHeatMapDashboardProps> = ({
                   mandalName: prev.mandalName ?? mandal,
                   mandalFeature: prev.mandalFeature,
                   villageName: name,
-                  villageFeature: feature,
+                  villageFeature: isolateChildFeature(
+                    feature,
+                    [lon, lat],
+                    prev.mandalFeature ?? prev.districtFeature
+                  ),
                 }));
                 onTriggerToast(`Village: ${name}`);
               }}

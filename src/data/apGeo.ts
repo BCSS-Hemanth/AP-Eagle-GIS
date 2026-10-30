@@ -36,12 +36,12 @@ export const BASEMAP_TILES: Record<
   satellite: {
     url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
     attribution: 'Tiles &copy; Esri, Maxar, Earthstar Geographics',
-    maxZoom: 19,
+    maxZoom: 23,
   },
   hybrid: {
     url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
     attribution: 'Tiles &copy; Esri | Labels &copy; CARTO',
-    maxZoom: 19,
+    maxZoom: 23,
     labelsUrl:
       'https://{s}.basemaps.cartocdn.com/rastertiles/voyager_only_labels/{z}/{x}/{y}{r}.png',
   },

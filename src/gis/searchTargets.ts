@@ -52,6 +52,50 @@ export function placeToInspectable(args: {
   };
 }
 
+export function osmFeatureToInspectable(args: {
+  name: string;
+  kind: 'OSM Building' | 'Highway' | 'River';
+  lat: number;
+  lon: number;
+  detail: string;
+  heightM?: number;
+}): InspectableFeature {
+  return {
+    id: `${args.kind}:${args.lat.toFixed(5)},${args.lon.toFixed(5)}`,
+    code: args.kind.toUpperCase(),
+    name: args.name,
+    shortLabel: args.name.toUpperCase(),
+    category: args.kind,
+    statusBadge: `${args.kind.toUpperCase()} / MAP FEATURE`,
+    liveIndicator: args.kind.toUpperCase(),
+    severity: 'intel',
+    geometryLabel: args.detail || `${args.lat.toFixed(4)}° N, ${args.lon.toFixed(4)}° E`,
+    lat: args.lat,
+    lon: args.lon,
+    elevationM: args.heightM ?? 0,
+    soiGrid: '—',
+    svgX: 0,
+    svgY: 0,
+    district: '—',
+    jurisdictionPs: '—',
+    roadClassification: args.detail,
+    manningDetail: args.kind === 'OSM Building' ? 'OSM footprint with recorded height' : 'Loaded GIS geometry',
+    sensorId: '—',
+    seizuresSummary: 'No operational record on this map feature',
+    lastInspection: '—',
+    inspectingOfficer: '—',
+    nearestPsName: '—',
+    nearestPsDistanceKm: 0,
+    nearestPsSvgX: 0,
+    nearestPsSvgY: 0,
+    camLabel: args.name,
+    camSublabel: args.detail,
+    camTag: args.kind.toUpperCase(),
+    sceneTheme: args.kind === 'Highway' ? 'highway-plaza' : 'valley-polygon',
+    cases: [],
+  };
+}
+
 export function featureToStationRow(feature: InspectableFeature): PoliceStationRow {
   return {
     id: feature.id,

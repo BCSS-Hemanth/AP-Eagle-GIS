@@ -22,8 +22,34 @@ def strip_props(props: dict) -> dict:
     return {str(k).replace("\n", " ").strip(): v for k, v in (props or {}).items()}
 
 
+CURRENT_MANDAL_SPELLING = {
+    "Anakapalle": "Anakapalli",
+    "Anantapur": "Anantapuramu",
+    "Markapur": "Markapuram",
+    "Tadpatri": "Tadipatri",
+    "Agiripalle": "Agiripalli",
+    "Challapalle": "Challapalli",
+    "Kollur": "Kolluru",
+    "Ipur": "Ipuru",
+    "Vissannapet": "Vissannapeta",
+    "Kandukur": "Kandukuru",
+    "Palacole": "Palakollu",
+    "Naidupet": "Naidupeta",
+    "Sirvel": "Sirivella",
+    "Velgode": "Velgodu",
+    "Zarugumalli": "Zarugumilli",
+    "Cherukupalle H/O Arumbaka": "Cherukupalle",
+    "Chilakaluripet H/O.Purushotha Patnam": "Chilakaluripet",
+    "Savalyapuram H/O Kanamarlapudi": "Savalyapuram",
+}
+
+
 def clean(v) -> str:
     return str(v or "").replace("\n", " ").strip()
+
+
+def current_mandal_spelling(name: str) -> str:
+    return CURRENT_MANDAL_SPELLING.get(name, name)
 
 
 def slug(s: str) -> str:
@@ -88,7 +114,9 @@ def main() -> None:
             continue
 
         village = clean(props.get("village")) or "Unnamed village"
-        mandal = clean(props.get("subdistrict")) or clean(props.get("block")) or "Unknown mandal"
+        mandal = current_mandal_spelling(
+            clean(props.get("subdistrict")) or clean(props.get("block")) or "Unknown mandal"
+        )
         district = clean(props.get("district")) or "Unknown district"
         gj = round_geom(mapping(g), 4)
         item = {

@@ -72,7 +72,7 @@ export const AdminDrillBar: React.FC<AdminDrillBarProps> = ({ drill, onChange })
       </div>
       <p className="px-1 pt-0.5 text-[9px] leading-snug text-on-surface-variant">
         {drill.level === 'state'
-          ? 'Click a district to isolate it. Surrounding areas are hidden.'
+          ? 'District borders only. Click a district to isolate it — mandals then appear inside.'
           : drill.level === 'district'
             ? 'Only this district is on the map. Click a mandal, or go back to all districts.'
             : drill.level === 'mandal'

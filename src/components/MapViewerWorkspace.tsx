@@ -58,8 +58,16 @@ import { ApLeafletMap, ApLeafletMapHandle, MapClickMode } from './gis/ApLeafletM
 import { ApMapLibre3DMap } from './gis/ApMapLibre3DMap';
 import { MAP_VIEW_3D_LAYER_LIMITS, MAP_VIEW_3D_NOTE, webglIsAvailable } from '../gis/mapLibre3d';
 import { AdminDrillBar } from './gis/AdminDrillBar';
-import { type AdminDrill, STATE_ADMIN_DRILL, adminNamesEqual, featureCentroid } from '../gis/adminHierarchy';
+import {
+  type AdminDrill,
+  STATE_ADMIN_DRILL,
+  adminNamesEqual,
+  featureCentroid,
+  isolateChildFeature,
+  pointInFeature,
+} from '../gis/adminHierarchy';
 import { useApBoundaries } from '../gis/useApBoundaries';
+import { useApMandals } from '../gis/useApAdmin';
 import { fetchSrtmElevation, nominatimSearch, osrmDrivingRoute } from '../gis/osmServices';
 import {
   findLinkedStation,
@@ -69,8 +77,10 @@ import {
   stationToInspectable,
   usePoliceStations,
 } from '../gis/usePoliceStations';
-import { featureToStationRow, placeToInspectable } from '../gis/searchTargets';
+import { featureToStationRow, osmFeatureToInspectable, placeToInspectable } from '../gis/searchTargets';
 import { useAuth } from '../auth/AuthContext';
+import { AP_CENTER } from '../data/apGeo';
+import { clampMapZoom } from '../gis/mapDetail';
 
 interface MapViewerWorkspaceProps {
   layers: GisLayer[];
@@ -125,6 +135,7 @@ export const MapViewerWorkspace: React.FC<MapViewerWorkspaceProps> = ({
 }) => {
   const { can } = useAuth();
   const { districts } = useApBoundaries();
+  const mandals = useApMandals(true);
   const kmzStations = usePoliceStations(true);
   const stationRows = useMemo(() => policeStationsToRows(kmzStations), [kmzStations]);
   const pssRows = stationRows.length > 0 ? stationRows : psRows;
@@ -147,10 +158,10 @@ export const MapViewerWorkspace: React.FC<MapViewerWorkspaceProps> = ({
 
   const [mapZoom, setMapZoom] = useState<number>(7);
   const [cursorLatLon, setCursorLatLon] = useState<{ lat: number; lon: number }>({
-    lat: 18.3273,
-    lon: 82.8775,
+    lat: AP_CENTER[0],
+    lon: AP_CENTER[1],
   });
-  const [cursorElev, setCursorElev] = useState<number>(894);
+  const [cursorElev, setCursorElev] = useState<number | null>(null);
 
   const [nearestRouteVisible, setNearestRouteVisible] = useState<boolean>(false);
   const [drivingRoute, setDrivingRoute] = useState<Array<{ lat: number; lon: number }>>([]);
@@ -174,7 +185,93 @@ export const MapViewerWorkspace: React.FC<MapViewerWorkspaceProps> = ({
   const pageSize = 5;
 
   const viewportRef = useRef<HTMLDivElement>(null);
-  const mapRef = useRef<ApLeafletMapHandle>(null);
+  const leafletRef = useRef<ApLeafletMapHandle>(null);
+  const map3dRef = useRef<ApLeafletMapHandle>(null);
+  const [threeDMounted, setThreeDMounted] = useState(false);
+  const [sharedView, setSharedView] = useState<{
+    lat: number;
+    lon: number;
+    zoom: number;
+    token: number;
+  } | null>(null);
+  const activeMap = () => (mapViewMode === '3d' ? map3dRef.current : leafletRef.current);
+  const districtByName = (name?: string | null) =>
+    districts?.features.find((feature) =>
+      adminNamesEqual(
+        String((feature.properties as { district_name?: string } | null)?.district_name ?? ''),
+        name
+      )
+    );
+  const captureSharedView = (v: { lat: number; lon: number; zoom: number } | null | undefined) => {
+    if (!v) return;
+    setSharedView({
+      lat: v.lat,
+      lon: v.lon,
+      zoom: clampMapZoom(v.zoom),
+      token: Date.now(),
+    });
+  };
+  const drillToMandal = (
+    name: string,
+    lat: number,
+    lon: number,
+    district: string | undefined,
+    feature: GeoJSON.Feature
+  ) => {
+    setAdminDrill((prev) => {
+      const isolated = isolateChildFeature(feature, [lon, lat], prev.districtFeature);
+      const centroid = featureCentroid(isolated);
+      const districtFeature =
+        prev.districtFeature ??
+        (centroid ? districts?.features.find((f) => pointInFeature(centroid, f)) : undefined) ??
+        districtByName(prev.districtName ?? district);
+      return {
+        level: 'mandal',
+        districtName:
+          prev.districtName ??
+          String(
+            (districtFeature?.properties as { district_name?: string } | null)?.district_name ??
+              district ??
+              ''
+          ),
+        districtFeature,
+        mandalName: name,
+        mandalFeature: isolated,
+      };
+    });
+  };
+  const drillToVillage = (
+    name: string,
+    lat: number,
+    lon: number,
+    mandal: string | undefined,
+    district: string | undefined,
+    feature: GeoJSON.Feature
+  ) => {
+    setAdminDrill((prev) => {
+      const isolated = isolateChildFeature(feature, [lon, lat], prev.mandalFeature ?? prev.districtFeature);
+      const centroid = featureCentroid(isolated);
+      const districtFeature =
+        prev.districtFeature ??
+        (centroid ? districts?.features.find((f) => pointInFeature(centroid, f)) : undefined) ??
+        districtByName(prev.districtName ?? district);
+      return {
+        level: 'village',
+        districtName:
+          prev.districtName ??
+          String(
+            (districtFeature?.properties as { district_name?: string } | null)?.district_name ??
+              district ??
+              ''
+          ),
+        districtFeature,
+        mandalName: prev.mandalName ?? mandal,
+        mandalFeature: prev.mandalFeature,
+        villageName: name,
+        villageFeature: isolated,
+      };
+    });
+  };
 
   const selectedStation = useMemo(
     () => pssRows.find((row) => row.id === selectedPsId) ?? null,
@@ -200,7 +297,7 @@ export const MapViewerWorkspace: React.FC<MapViewerWorkspaceProps> = ({
   const activeLayerCount = useMemo(() => layers.filter((l) => l.enabled).length, [layers]);
 
   const flyToLatLon = (lat: number, lon: number, zoom = 12) => {
-    mapRef.current?.flyTo(lat, lon, zoom);
+    activeMap()?.flyTo(lat, lon, zoom);
     onUpdateCenterCoords(lat, lon);
   };
 
@@ -258,7 +355,6 @@ export const MapViewerWorkspace: React.FC<MapViewerWorkspaceProps> = ({
         districtName: name,
         districtFeature: matchedDistrict,
       });
-      mapRef.current?.fitFeature(matchedDistrict);
       if (centroid) {
         handleInspectAdmin(
           placeToInspectable({
@@ -271,7 +367,59 @@ export const MapViewerWorkspace: React.FC<MapViewerWorkspaceProps> = ({
           })
         );
       }
+      activeMap()?.fitFeature(matchedDistrict);
       onTriggerToast(`Isolated ${name} district`);
+      return;
+    }
+
+    const matchedMandal = mandals?.features.find((feature) => {
+      const name = String((feature.properties as { mandal_name?: string } | null)?.mandal_name ?? '');
+      return adminNamesEqual(name, q) || name.toLowerCase() === qLower;
+    });
+    if (matchedMandal && !coordMatch) {
+      const props = (matchedMandal.properties ?? {}) as {
+        mandal_name?: string;
+        district_name?: string;
+      };
+      const name = String(props.mandal_name ?? q);
+      const view = activeMap()?.getView();
+      const point: [number, number] = view
+        ? [view.lon, view.lat]
+        : [AP_CENTER[1], AP_CENTER[0]];
+      const isolated = isolateChildFeature(matchedMandal, point, adminDrill.districtFeature);
+      const centroid = featureCentroid(isolated);
+      const districtFeature =
+        adminDrill.districtFeature ??
+        (centroid ? districts?.features.find((f) => pointInFeature(centroid, f)) : undefined) ??
+        districtByName(adminDrill.districtName ?? props.district_name);
+      setAdminDrill({
+        level: 'mandal',
+        districtName:
+          adminDrill.districtName ??
+          String(
+            (districtFeature?.properties as { district_name?: string } | null)?.district_name ??
+              props.district_name ??
+              ''
+          ),
+        districtFeature,
+        mandalName: name,
+        mandalFeature: isolated,
+      });
+      if (centroid) {
+        handleInspectAdmin(
+          placeToInspectable({
+            id: `mandal:${name}`,
+            kind: 'Mandal',
+            name,
+            lat: centroid[1],
+            lon: centroid[0],
+            district: adminDrill.districtName ?? String(props.district_name ?? ''),
+            parent: adminDrill.districtName ?? String(props.district_name ?? ''),
+          })
+        );
+      }
+      activeMap()?.fitFeature(isolated);
+      onTriggerToast(`Isolated ${name} mandal`);
       return;
     }
 
@@ -311,7 +459,7 @@ export const MapViewerWorkspace: React.FC<MapViewerWorkspaceProps> = ({
 
   const resetFullExtent = () => {
     setAdminDrill(STATE_ADMIN_DRILL);
-    mapRef.current?.fitState();
+    activeMap()?.fitState();
     onUpdateCenterCoords(15.9129, 79.74);
     onTriggerToast('Reset map canvas to Andhra Pradesh State Full Extent (EPSG:4326)');
   };
@@ -696,6 +844,7 @@ export const MapViewerWorkspace: React.FC<MapViewerWorkspaceProps> = ({
               type="button"
               data-testid="map-view-2d"
               onClick={() => {
+                captureSharedView(map3dRef.current?.getView());
                 setMapViewMode('2d');
                 onTriggerToast('2D layer restored. Leaflet GIS map is unchanged.');
               }}
@@ -719,6 +868,8 @@ export const MapViewerWorkspace: React.FC<MapViewerWorkspaceProps> = ({
                 if (activeTool === 'boxzoom') {
                   setActiveTool('pan');
                 }
+                captureSharedView(leafletRef.current?.getView());
+                setThreeDMounted(true);
                 setMapViewMode('3d');
                 onTriggerToast(`${MAP_VIEW_3D_NOTE} ${MAP_VIEW_3D_LAYER_LIMITS}`);
               }}
@@ -1057,10 +1208,13 @@ export const MapViewerWorkspace: React.FC<MapViewerWorkspaceProps> = ({
         <div className="flex-1 min-w-0 min-h-0 relative overflow-hidden flex flex-col bg-[#E6EFF8]">
           {/* MAP CANVAS — real OSM / Esri tiles + AP district GeoJSON */}
           <div ref={viewportRef} className="gis-map-host flex-1 min-h-0 min-w-0 select-none">
-            {mapViewMode === '3d' ? (
+            {threeDMounted ? (
+            <div className={`ap-map-pane ${mapViewMode === '3d' ? 'is-active' : 'is-hidden'}`}>
             <ApMapLibre3DMap
-              ref={mapRef}
-              layoutRevision={`${leftOpen}-${rightOpen}-${bottomMode}`}
+              ref={map3dRef}
+              layoutRevision={`${leftOpen}-${rightOpen}-${bottomMode}-${mapViewMode}`}
+              viewTarget={sharedView ?? undefined}
+              viewActive={mapViewMode === '3d'}
               showStateBorder={isLayerOn('lyr-state-border')}
               showDistricts={isLayerOn('lyr-districts')}
               districtOpacity={getLayerOpacity('lyr-districts')}
@@ -1072,7 +1226,7 @@ export const MapViewerWorkspace: React.FC<MapViewerWorkspaceProps> = ({
               showTrails={isLayerOn('lyr-forest-trails')}
               showMandals={isLayerOn('lyr-mandals')}
               showVillages={isLayerOn('lyr-villages')}
-              showPoliceStations={isLayerOn('lyr-pss')}
+              showPoliceStations={false}
               mandalOpacity={getLayerOpacity('lyr-mandals')}
               villageOpacity={getLayerOpacity('lyr-villages')}
               policeStationOpacity={getLayerOpacity('lyr-pss')}
@@ -1114,13 +1268,7 @@ export const MapViewerWorkspace: React.FC<MapViewerWorkspaceProps> = ({
               }}
               onMandalClick={(name, lat, lon, district, feature) => {
                 if (canDrillAdmin) {
-                  setAdminDrill((prev) => ({
-                    level: 'mandal',
-                    districtName: prev.districtName ?? district,
-                    districtFeature: prev.districtFeature,
-                    mandalName: name,
-                    mandalFeature: feature,
-                  }));
+                  drillToMandal(name, lat, lon, district, feature);
                 }
                 handleInspectAdmin(
                   placeToInspectable({
@@ -1136,15 +1284,7 @@ export const MapViewerWorkspace: React.FC<MapViewerWorkspaceProps> = ({
               }}
               onVillageClick={(name, lat, lon, mandal, district, feature) => {
                 if (canDrillAdmin) {
-                  setAdminDrill((prev) => ({
-                    level: 'village',
-                    districtName: prev.districtName ?? district,
-                    districtFeature: prev.districtFeature,
-                    mandalName: prev.mandalName ?? mandal,
-                    mandalFeature: prev.mandalFeature,
-                    villageName: name,
-                    villageFeature: feature,
-                  }));
+                  drillToVillage(name, lat, lon, mandal, district, feature);
                 }
                 handleInspectAdmin(
                   placeToInspectable({
@@ -1178,21 +1318,31 @@ export const MapViewerWorkspace: React.FC<MapViewerWorkspaceProps> = ({
                 );
               }}
               onViewChange={(lat, lon, zoom) => {
-                setMapZoom(zoom);
+                setMapZoom(clampMapZoom(zoom));
                 onUpdateCenterCoords(lat, lon);
               }}
-              onCursorMove={(lat, lon) => {
+              onCursorMove={(lat, lon, _zoom, elevM) => {
                 setCursorLatLon({ lat, lon });
+                if (typeof elevM === 'number' && Number.isFinite(elevM)) {
+                  setCursorElev(Math.round(elevM));
+                  return;
+                }
                 if (elevTimer.current) window.clearTimeout(elevTimer.current);
                 elevTimer.current = window.setTimeout(() => {
                   void sampleElevation(lat, lon).then(setCursorElev);
                 }, 700);
               }}
+              onInspectHit={(hit) => handleInspectAdmin(osmFeatureToInspectable(hit))}
             />
-            ) : (
+            </div>
+            ) : null}
+            <div className={`ap-map-pane ${mapViewMode === '2d' ? 'is-active' : 'is-hidden'}`}>
             <ApLeafletMap
-              ref={mapRef}
-              layoutRevision={`${leftOpen}-${rightOpen}-${bottomMode}`}
+              ref={leafletRef}
+              layoutRevision={`${leftOpen}-${rightOpen}-${bottomMode}-${mapViewMode}`}
+              viewTarget={sharedView ?? undefined}
+              viewActive={mapViewMode === '2d'}
+              fitToState
               basemap={basemap}
               showStateBorder={isLayerOn('lyr-state-border')}
               showDistricts={isLayerOn('lyr-districts')}
@@ -1207,7 +1357,7 @@ export const MapViewerWorkspace: React.FC<MapViewerWorkspaceProps> = ({
               showPlaces={isLayerOn('lyr-mandals') || isLayerOn('lyr-villages')}
               showMandals={isLayerOn('lyr-mandals')}
               showVillages={isLayerOn('lyr-villages')}
-              showPoliceStations={isLayerOn('lyr-pss')}
+              showPoliceStations={false}
               mandalOpacity={getLayerOpacity('lyr-mandals')}
               villageOpacity={getLayerOpacity('lyr-villages')}
               policeStationOpacity={getLayerOpacity('lyr-pss')}
@@ -1251,13 +1401,7 @@ export const MapViewerWorkspace: React.FC<MapViewerWorkspaceProps> = ({
               }}
               onMandalClick={(name, lat, lon, district, feature) => {
                 if (canDrillAdmin) {
-                  setAdminDrill((prev) => ({
-                    level: 'mandal',
-                    districtName: prev.districtName ?? district,
-                    districtFeature: prev.districtFeature,
-                    mandalName: name,
-                    mandalFeature: feature,
-                  }));
+                  drillToMandal(name, lat, lon, district, feature);
                 }
                 handleInspectAdmin(
                   placeToInspectable({
@@ -1273,15 +1417,7 @@ export const MapViewerWorkspace: React.FC<MapViewerWorkspaceProps> = ({
               }}
               onVillageClick={(name, lat, lon, mandal, district, feature) => {
                 if (canDrillAdmin) {
-                  setAdminDrill((prev) => ({
-                    level: 'village',
-                    districtName: prev.districtName ?? district,
-                    districtFeature: prev.districtFeature,
-                    mandalName: prev.mandalName ?? mandal,
-                    mandalFeature: prev.mandalFeature,
-                    villageName: name,
-                    villageFeature: feature,
-                  }));
+                  drillToVillage(name, lat, lon, mandal, district, feature);
                 }
                 handleInspectAdmin(
                   placeToInspectable({
@@ -1315,7 +1451,7 @@ export const MapViewerWorkspace: React.FC<MapViewerWorkspaceProps> = ({
                 );
               }}
               onViewChange={(lat, lon, zoom) => {
-                setMapZoom(zoom);
+                setMapZoom(clampMapZoom(zoom));
                 onUpdateCenterCoords(lat, lon);
               }}
               onCursorMove={(lat, lon) => {
@@ -1326,7 +1462,7 @@ export const MapViewerWorkspace: React.FC<MapViewerWorkspaceProps> = ({
                 }, 700);
               }}
             />
-            )}
+            </div>
 
             <div className="absolute top-3 left-14 right-14 z-20 flex justify-center pointer-events-none">
               <AdminDrillBar
@@ -1385,7 +1521,7 @@ export const MapViewerWorkspace: React.FC<MapViewerWorkspaceProps> = ({
               <button
                 type="button"
                 data-testid="map-zoom-in"
-                onClick={() => mapRef.current?.zoomIn()}
+                onClick={() => activeMap()?.zoomIn()}
                 title="Zoom In (+)"
                 className="w-8 h-8 flex items-center justify-center text-on-surface hover:bg-surface-container transition-colors border-b border-outline-variant/25 cursor-pointer"
               >
@@ -1393,7 +1529,7 @@ export const MapViewerWorkspace: React.FC<MapViewerWorkspaceProps> = ({
               </button>
               <button
                 type="button"
-                onClick={() => mapRef.current?.zoomOut()}
+                onClick={() => activeMap()?.zoomOut()}
                 title="Zoom Out (-)"
                 className="w-8 h-8 flex items-center justify-center text-on-surface hover:bg-surface-container transition-colors border-b border-outline-variant/25 cursor-pointer"
               >
@@ -1491,7 +1627,9 @@ export const MapViewerWorkspace: React.FC<MapViewerWorkspaceProps> = ({
               <span className="text-outline-variant">|</span>
               <div>
                 <span>Elev: </span>
-                <span className="text-on-surface font-semibold">{cursorElev} m MSL</span>
+                <span className="text-on-surface font-semibold">
+                  {cursorElev == null ? '—' : `${cursorElev} m MSL`}
+                </span>
               </div>
               <span className="text-outline-variant">|</span>
               <div>

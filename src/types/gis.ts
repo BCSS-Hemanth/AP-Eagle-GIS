@@ -87,7 +87,10 @@ export interface InspectableFeature {
     | 'Seizure Polygon'
     | 'District'
     | 'Mandal'
-    | 'Village';
+    | 'Village'
+    | 'OSM Building'
+    | 'Highway'
+    | 'River';
   statusBadge: string;
   liveIndicator: string;
   severity: 'operational' | 'critical' | 'warning' | 'intel';
