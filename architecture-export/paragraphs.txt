@@ -1,0 +1,19 @@
+﻿1. Project overview and system architecture
+Platform vision, user roles, application modules, React and
+TypeScript frontend, Node.js API, Python GIS processing and
+PostgreSQL/PostGIS storage.
+2. GIS interface and dashboards
+Conceptual map workspace, layer management,
+feature inspection, operational dashboards and
+data-quality visualizations.
+3. Advanced GIS and field operations
+Spatial analysis, hotspot detection,
+network routing, field reporting, GPS,
+imagery and conditional
+CCTV/ANPR integrations.
+4. Security and implementation planning
+Access control, audit trails,
+data dependencies,
+acceptance testing and
+decisions required before implementation.
+Note: The slides contain editable diagrams and illustrative interface mockups. Sample dashboard labels and map features are conceptual placeholders, not live operational data. The implementation scope and dependencies remain subject to stakeholder approval.

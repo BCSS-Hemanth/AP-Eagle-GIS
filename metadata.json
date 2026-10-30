@@ -1,0 +1,6 @@
+{
+  "name": "EAGLE Force AP | GIS Monitoring & Spatial Intelligence",
+  "description": "Enterprise geospatial intelligence, tactical cartographic monitoring, and spatial analysis platform for Andhra Pradesh law enforcement operations.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
