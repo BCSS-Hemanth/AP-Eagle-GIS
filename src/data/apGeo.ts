@@ -67,6 +67,16 @@ export const ESRI_PLACES_TILES = {
   maxZoom: 19,
 };
 
+/**
+ * Esri World Hillshade — the usual QGIS XYZ relief overlay (multiply blend).
+ * Public ArcGIS Online tiles; attribution required; no API key.
+ */
+export const ESRI_HILLSHADE_TILES = {
+  url: 'https://server.arcgisonline.com/ArcGIS/rest/services/Elevation/World_Hillshade/MapServer/tile/{z}/{y}/{x}',
+  attribution: 'Hillshade &copy; Esri',
+  maxZoom: 16,
+};
+
 /** OSM hiking / forest tracks (Waymarked Trails). */
 export const HIKING_TRAIL_TILES = {
   url: 'https://tile.waymarkedtrails.org/hiking/{z}/{x}/{y}.png',

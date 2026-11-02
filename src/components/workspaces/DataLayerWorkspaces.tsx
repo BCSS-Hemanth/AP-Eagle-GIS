@@ -1,18 +1,16 @@
 import React, { useState } from 'react';
 import {
-  CheckCircle2,
   Edit3,
   Eye,
-  FileUp,
   Grid,
-  Layers,
   MapPin,
   Plus,
   Save,
   Trash2,
-  Upload,
 } from 'lucide-react';
 import { DigitizedFeature, GisLayer, WorkspaceId } from '../../types/gis';
+import type { IngestedLayer } from '../../gis/ingest';
+import { IngestPanel } from '../gis/IngestPanel';
 import { ApLeafletMap } from '../gis/ApLeafletMap';
 import { useAuth } from '../../auth/AuthContext';
 import {
@@ -22,52 +20,6 @@ import {
   leafletFlagsFromLayers,
   type DashboardLayerConfig,
 } from '../../gis/dashboardLayers';
-
-function parseImportedGeoJson(text: string): {
-  type: 'Point' | 'LineString' | 'Polygon';
-  points: Array<{ lat: number; lon: number }>;
-  name?: string;
-} | null {
-  try {
-    const data = JSON.parse(text) as GeoJSON.GeoJsonObject;
-    const feature =
-      data.type === 'FeatureCollection'
-        ? (data as GeoJSON.FeatureCollection).features[0]
-        : data.type === 'Feature'
-          ? (data as GeoJSON.Feature)
-          : null;
-    const geometry = feature?.geometry ?? (data.type !== 'Feature' && data.type !== 'FeatureCollection' ? (data as GeoJSON.Geometry) : null);
-    if (!geometry) return null;
-    const name =
-      feature && feature.properties && typeof feature.properties === 'object'
-        ? String((feature.properties as { name?: string }).name ?? '')
-        : '';
-    if (geometry.type === 'Point') {
-      const [lon, lat] = geometry.coordinates;
-      return { type: 'Point', points: [{ lat, lon }], name: name || undefined };
-    }
-    if (geometry.type === 'LineString') {
-      return {
-        type: 'LineString',
-        points: geometry.coordinates.map(([lon, lat]) => ({ lat, lon })),
-        name: name || undefined,
-      };
-    }
-    if (geometry.type === 'Polygon') {
-      const ring = geometry.coordinates[0] ?? [];
-      const pts = ring.map(([lon, lat]) => ({ lat, lon }));
-      if (pts.length > 1) {
-        const first = pts[0];
-        const last = pts[pts.length - 1];
-        if (first.lat === last.lat && first.lon === last.lon) pts.pop();
-      }
-      return { type: 'Polygon', points: pts, name: name || undefined };
-    }
-    return null;
-  } catch {
-    return null;
-  }
-}
 
 interface DataLayerProps {
   workspace:
@@ -81,7 +33,9 @@ interface DataLayerProps {
   onChangeLayerOpacity: (id: string, opacity: number) => void;
   onSaveDashboardLayers?: () => void;
   digitizedFeatures: DigitizedFeature[];
+  ingestedLayers?: IngestedLayer[];
   onAddDigitizedFeature: (f: DigitizedFeature) => void;
+  onPublishIngested?: (layers: IngestedLayer[]) => void;
   onDeleteDigitizedFeature: (id: string) => void;
   onSwitchWorkspace: (ws: WorkspaceId) => void;
   onTriggerToast: (msg: string) => void;
@@ -96,7 +50,9 @@ export const DataLayerWorkspaces: React.FC<DataLayerProps> = ({
   onChangeLayerOpacity,
   onSaveDashboardLayers,
   digitizedFeatures,
+  ingestedLayers = [],
   onAddDigitizedFeature,
+  onPublishIngested,
   onDeleteDigitizedFeature,
   onSwitchWorkspace,
   onTriggerToast,
@@ -105,14 +61,6 @@ export const DataLayerWorkspaces: React.FC<DataLayerProps> = ({
   const { can } = useAuth();
   // Catalog filter
   const [catalogSearch, setCatalogSearch] = useState('');
-
-  // Import Wizard state
-  const [wizardStep, setWizardStep] = useState<1 | 2 | 3>(1);
-  const [importFormat, setImportFormat] = useState<'GeoJSON' | 'Shapefile' | 'GeoPackage' | 'GeoTIFF'>('GeoJSON');
-  const [importLayerTitle, setImportLayerTitle] = useState('Untitled layer');
-  const [sampleJsonText, setSampleJsonText] = useState(
-    JSON.stringify({ type: 'FeatureCollection', features: [] }, null, 2)
-  );
 
   // Digitizer state
   const [drawGeometryType, setDrawGeometryType] = useState<'Point' | 'LineString' | 'Polygon'>('Point');
@@ -246,6 +194,8 @@ export const DataLayerWorkspaces: React.FC<DataLayerProps> = ({
             showHighways={catalogFlags.showHighways}
             showAgencyRoutes={catalogFlags.showAgencyRoutes}
             showRivers={catalogFlags.showRivers}
+            showWaterbodies={catalogFlags.showWaterbodies}
+            showHillshade={catalogFlags.showHillshade}
             showRailways={catalogFlags.showRailways}
             showTrails={catalogFlags.showTrails}
             showPlaces={catalogFlags.showPlaces}
@@ -265,186 +215,33 @@ export const DataLayerWorkspaces: React.FC<DataLayerProps> = ({
   }
 
   if (workspace === 'vector-and-raster-data-import') {
-    const handlePublishImportedLayer = () => {
-      if (!can('import')) {
-        onTriggerToast('Import denied for your RBAC clearance');
-        return;
-      }
-      const parsed = parseImportedGeoJson(sampleJsonText);
-      if (!parsed || parsed.points.length === 0) {
-        onTriggerToast('Could not parse GeoJSON coordinates from the payload');
-        return;
-      }
-      if (importFormat !== 'GeoJSON') {
-        onTriggerToast(`${importFormat} binary drivers are not loaded; publishing parsed GeoJSON vertices instead`);
-      }
-      onAddDigitizedFeature({
-        id: `IMP-${Date.now()}`,
-        name: parsed.name || importLayerTitle,
-        type: parsed.type,
-        category:
-          parsed.type === 'Point'
-            ? 'Tactical Check Post'
-            : parsed.type === 'LineString'
-              ? 'Patrol Corridor'
-              : 'Containment Cordon',
-        points: parsed.points,
-        createdAt: '2026-10-28 04:42 IST',
-        officer: 'GIS Lead Analyst',
-        notes: `Imported via ${importFormat} Ingestion Wizard`,
-      });
-      const origin = parsed.points[0];
-      onFlyToLocation?.(origin.lat, origin.lon, parsed.name || importLayerTitle);
-      onTriggerToast(`Ingested "${parsed.name || importLayerTitle}" and mounted onto Interactive Map Viewer`);
-      onSwitchWorkspace('interactive-map-viewer');
-    };
-
     return (
       <div className="p-4 lg:p-6 space-y-5 max-w-5xl mx-auto">
         <div className="border-b border-outline-variant/35 pb-3">
           <span className="text-[10.5px] font-bold uppercase tracking-wider text-secondary block">
-            Spatial ETL &amp; Schema Validation Pipeline
+            QGIS OGR / GDAL / WMS / WFS providers in the browser
           </span>
           <h1 className="text-xl font-bold text-primary tracking-tight">
-            Vector &amp; Raster Data Import Wizard
+            Vector &amp; Raster Data Import
           </h1>
+          <p className="text-[11px] text-on-surface-variant mt-1">
+            Ingested layers overlay the map. Existing AP districts, mandals, villages, KMZ stations, and OSM
+            networks are not replaced. PostGIS and FileGDB stay unavailable without a GIS server.
+          </p>
         </div>
-
-        {/* Step Indicator */}
-        <div className="grid grid-cols-3 gap-3 text-xs">
-          {[
-            { step: 1, label: '01. Select Spatial Format & Source' },
-            { step: 2, label: '02. CRS Reprojection & OGC Pre-Check' },
-            { step: 3, label: '03. Commit to PostGIS & Map Canvas' },
-          ].map((s) => (
-            <button
-              key={s.step}
-              type="button"
-              onClick={() => setWizardStep(s.step as 1 | 2 | 3)}
-              className={`p-2.5 rounded border text-left font-semibold cursor-pointer ${
-                wizardStep === s.step
-                  ? 'bg-primary text-on-primary border-primary'
-                  : 'bg-surface-container-lowest text-on-surface-variant border-outline-variant/40'
-              }`}
-            >
-              {s.label}
-            </button>
-          ))}
-        </div>
-
-        <div className="bg-surface-container-lowest rounded border border-outline-variant/40 p-5 space-y-4 text-xs">
-          {wizardStep === 1 && (
-            <div className="space-y-4">
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
-                {(['GeoJSON', 'Shapefile', 'GeoPackage', 'GeoTIFF'] as const).map((fmt) => (
-                  <button
-                    key={fmt}
-                    type="button"
-                    onClick={() => setImportFormat(fmt)}
-                    className={`p-3 rounded border text-left space-y-1 cursor-pointer ${
-                      importFormat === fmt
-                        ? 'border-secondary bg-secondary-container/20 text-primary font-bold'
-                        : 'border-outline-variant/40 hover:bg-surface-container-low'
-                    }`}
-                  >
-                    <FileUp className="w-4 h-4 text-secondary" />
-                    <div>{fmt}</div>
-                  </button>
-                ))}
-              </div>
-
-              <div>
-                <label className="block font-semibold text-primary mb-1">Target Layer Title</label>
-                <input
-                  type="text"
-                  value={importLayerTitle}
-                  onChange={(e) => setImportLayerTitle(e.target.value)}
-                  className="w-full h-8 px-2.5 rounded border border-outline-variant/50 bg-surface-container-low"
-                />
-              </div>
-
-              <div>
-                <label className="block font-semibold text-primary mb-1">
-                  GeoJSON Payload / Tactical Waypoint Feed
-                </label>
-                <textarea
-                  rows={6}
-                  value={sampleJsonText}
-                  onChange={(e) => setSampleJsonText(e.target.value)}
-                  className="w-full p-2.5 rounded border border-outline-variant/50 bg-surface-container-low font-mono text-[11px]"
-                />
-              </div>
-
-              <div className="flex justify-end">
-                <button
-                  type="button"
-                  onClick={() => setWizardStep(2)}
-                  className="px-4 py-2 rounded bg-primary text-on-primary font-semibold cursor-pointer"
-                >
-                  Validate CRS &amp; Geometry →
-                </button>
-              </div>
-            </div>
-          )}
-
-          {wizardStep === 2 && (
-            <div className="space-y-4">
-              <div className="p-3 rounded bg-secondary-container/25 border border-secondary/35 flex items-center gap-2.5 text-primary">
-                <CheckCircle2 className="w-4 h-4 text-secondary shrink-0" />
-                <div>
-                  <div className="font-bold">OGC ST_IsValid Pre-Check Passed</div>
-                  <div className="text-[11px] text-on-surface-variant">
-                    Detected Source CRS: EPSG:4326 (WGS 84) • Bounding Box verified inside Andhra Pradesh State Extent.
-                  </div>
-                </div>
-              </div>
-              <div className="flex justify-between">
-                <button
-                  type="button"
-                  onClick={() => setWizardStep(1)}
-                  className="px-3 py-1.5 rounded bg-surface-container font-semibold cursor-pointer"
-                >
-                  ← Back
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setWizardStep(3)}
-                  className="px-4 py-2 rounded bg-primary text-on-primary font-semibold cursor-pointer"
-                >
-                  Proceed to Publish →
-                </button>
-              </div>
-            </div>
-          )}
-
-          {wizardStep === 3 && (
-            <div className="space-y-4">
-              <div className="p-3.5 rounded bg-surface-container-low border border-outline-variant/35 space-y-1 font-mono text-[11px]">
-                <div>Layer Title: {importLayerTitle}</div>
-                <div>Format Driver: GDAL/{importFormat}</div>
-                <div>Target Schema: ops.custom_ingested_vectors</div>
-              </div>
-              <div className="flex justify-between">
-                <button
-                  type="button"
-                  onClick={() => setWizardStep(2)}
-                  className="px-3 py-1.5 rounded bg-surface-container font-semibold cursor-pointer"
-                >
-                  ← Back
-                </button>
-                <button
-                  type="button"
-                  data-testid="import-publish"
-                  disabled={!can('import')}
-                  onClick={handlePublishImportedLayer}
-                  className="px-4 py-2 rounded bg-secondary text-on-secondary font-bold flex items-center gap-1.5 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  <Upload className="w-3.5 h-3.5" />
-                  <span>Publish &amp; Open in Map Viewer</span>
-                </button>
-              </div>
-            </div>
-          )}
+        {ingestedLayers.length > 0 && (
+          <div className="text-[11px] font-mono text-secondary">
+            {ingestedLayers.length} ingested overlay{ingestedLayers.length === 1 ? '' : 's'} currently on the map
+          </div>
+        )}
+        <div className="bg-surface-container-lowest rounded border border-outline-variant/40 p-5">
+          <IngestPanel
+            canImport={can('import')}
+            onToast={onTriggerToast}
+            onPublish={(layers) => {
+              onPublishIngested?.(layers);
+            }}
+          />
         </div>
       </div>
     );

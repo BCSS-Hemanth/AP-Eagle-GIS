@@ -40,6 +40,7 @@ import {
   persistDashboardLayerConfig,
   type DashboardLayerConfig,
 } from './gis/dashboardLayers';
+import type { IngestedLayer } from './gis/ingest';
 
 function AppShell() {
   const { user, canOpen, can, logout } = useAuth();
@@ -92,6 +93,7 @@ function AppShell() {
   const [jobs, setJobs] = useState<GisJob[]>(INITIAL_GIS_JOBS);
   const [alerts, setAlerts] = useState<TacticalAlert[]>(INITIAL_TACTICAL_ALERTS);
   const [digitizedFeatures, setDigitizedFeatures] = useState<DigitizedFeature[]>([]);
+  const [ingestedLayers, setIngestedLayers] = useState<IngestedLayer[]>([]);
   const [topologyRules, setTopologyRules] = useState<TopologyAuditRule[]>(INITIAL_TOPOLOGY_RULES);
   const [auditLogs, setAuditLogs] = useState<AuditLogEntry[]>(INITIAL_AUDIT_LOGS);
 
@@ -229,6 +231,45 @@ function AppShell() {
     appendAudit('COMMIT_VECTOR_GEOMETRY', `${df.name} (${df.type})`);
   };
 
+  const handlePublishIngested = (incoming: IngestedLayer[]) => {
+    if (!can('import')) {
+      triggerToast('Import denied for your RBAC clearance');
+      return;
+    }
+    setIngestedLayers((prev) => [...incoming, ...prev]);
+    const first = incoming[0];
+    if (first?.bbox) {
+      const lat = (first.bbox[1] + first.bbox[3]) / 2;
+      const lon = (first.bbox[0] + first.bbox[2]) / 2;
+      setExternalFocus({ lat, lon, zoom: 10 });
+      setCenterCoords({ lat, lon });
+    }
+    appendAudit(
+      'INGEST_LAYER',
+      incoming.map((layer) => `${layer.driver}:${layer.name}`).join(', ')
+    );
+    triggerToast(
+      `Mounted ${incoming.length} ingested layer${incoming.length === 1 ? '' : 's'} without replacing catalog data`
+    );
+    setActiveWorkspace('interactive-map-viewer');
+  };
+
+  const handleToggleIngested = (id: string) => {
+    setIngestedLayers((prev) =>
+      prev.map((layer) => (layer.id === id ? { ...layer, enabled: !layer.enabled } : layer))
+    );
+  };
+
+  const handleIngestedOpacity = (id: string, opacity: number) => {
+    setIngestedLayers((prev) =>
+      prev.map((layer) => (layer.id === id ? { ...layer, opacity } : layer))
+    );
+  };
+
+  const handleRemoveIngested = (id: string) => {
+    setIngestedLayers((prev) => prev.filter((layer) => layer.id !== id));
+  };
+
   const handleDeleteDigitizedFeature = (id: string) => {
     setDigitizedFeatures((prev) => prev.filter((f) => f.id !== id));
     triggerToast('Removed custom digitized geometry from map');
@@ -333,6 +374,11 @@ function AppShell() {
             featuresMap={INSPECTABLE_FEATURES}
             psRows={kmzRows}
             digitizedFeatures={digitizedFeatures}
+            ingestedLayers={ingestedLayers}
+            onToggleIngested={handleToggleIngested}
+            onChangeIngestedOpacity={handleIngestedOpacity}
+            onRemoveIngested={handleRemoveIngested}
+            onPublishIngested={handlePublishIngested}
             onUpdateCenterCoords={(lat, lon) => setCenterCoords({ lat, lon })}
             onSwitchWorkspace={handleSelectWorkspace}
             onTriggerToast={triggerToast}
@@ -372,8 +418,10 @@ function AppShell() {
             onChangeLayerOpacity={handleChangeLayerOpacity}
             onSaveDashboardLayers={handleSaveDashboardLayers}
             digitizedFeatures={digitizedFeatures}
+            ingestedLayers={ingestedLayers}
             onAddDigitizedFeature={handleAddDigitizedFeature}
             onDeleteDigitizedFeature={handleDeleteDigitizedFeature}
+            onPublishIngested={handlePublishIngested}
             onSwitchWorkspace={handleSelectWorkspace}
             onTriggerToast={triggerToast}
             onFlyToLocation={handleFlyToLocation}

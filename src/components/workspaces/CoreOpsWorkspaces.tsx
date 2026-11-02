@@ -16,6 +16,11 @@ import { ApLeafletMap } from '../gis/ApLeafletMap';
 import { osrmDrivingRoute } from '../../gis/osmServices';
 import { useAuth } from '../../auth/AuthContext';
 import { policeStationsToRows, usePoliceStations } from '../../gis/usePoliceStations';
+import {
+  multiRingBufferRadii,
+  ringsFromPoint,
+  type GeodesicBufferRing,
+} from '../../gis/geodesicBuffer';
 
 interface CoreOpsProps {
   workspace:
@@ -46,10 +51,11 @@ export const CoreOpsWorkspaces: React.FC<CoreOpsProps> = ({
   const kmzRows = kmzStations ? policeStationsToRows(kmzStations) : [];
   // Spatial Analysis state
   const [selectedAlgo, setSelectedAlgo] = useState<string>('buffer');
-  const [targetLayer, setTargetLayer] = useState<string>('ops.interception_checkposts');
+  const [targetLayer, setTargetLayer] = useState<string>('public/geo/ap-police-stations.geojson');
   const [distanceParam, setDistanceParam] = useState<number>(5.0);
   const [analysisAlgo, setAnalysisAlgo] = useState<string>('buffer');
   const [analysisRoute, setAnalysisRoute] = useState<Array<{ lat: number; lon: number }>>([]);
+  const [analysisBuffers, setAnalysisBuffers] = useState<GeodesicBufferRing[]>([]);
 
   // Map Designer state
   const [sheetTitle, setSheetTitle] = useState<string>(
@@ -77,23 +83,23 @@ export const CoreOpsWorkspaces: React.FC<CoreOpsProps> = ({
     const algorithms = [
       {
         id: 'buffer',
-        name: 'Geodesic Multi-Ring Buffer (ST_Buffer)',
-        desc: 'Generate 2.5km / 5km / 10km tactical containment rings around checkposts or hotspots.',
+        name: 'Geodesic Multi-Ring Buffer',
+        desc: 'QGIS native:multiringconstantbuffer analog: 0.5× / 1× / 2× radius rings around KMZ police stations on the WGS84 sphere.',
       },
       {
         id: 'kde',
-        name: 'Contraband Hotspot Kernel Density (KDE)',
-        desc: 'Compute continuous spatial risk surface weighted by NDPS seizure volume (kg).',
+        name: 'Kernel Density (needs NDPS points)',
+        desc: 'Not run: no seizure or hotspot point file is loaded. Supply a verified point layer before KDE.',
       },
       {
         id: 'isochrone',
-        name: 'Highway Escape Isochrone (pgRouting)',
-        desc: 'Model 15, 30, and 45-minute vehicle travel reach from any interception alert point.',
+        name: 'OSRM driving route (not an isochrone)',
+        desc: 'Public OSRM has no isochrone API here. Runs a driving line between the first two KMZ stations.',
       },
       {
         id: 'ndvi',
-        name: 'Eastern Ghats Canopy NDVI Anomaly Diff',
-        desc: 'Compare multi-date Cartosat-3 & Sentinel-2 bands to flag forest clearings.',
+        name: 'NDVI anomaly (needs imagery)',
+        desc: 'Not run: Cartosat-3 / Sentinel-2 rasters are not in this repository.',
       },
     ];
 
@@ -104,18 +110,36 @@ export const CoreOpsWorkspaces: React.FC<CoreOpsProps> = ({
         return;
       }
       const algoObj = algorithms.find((a) => a.id === selectedAlgo) || algorithms[0];
-      const newJob: GisJob = {
-        id: `JOB-${Math.floor(8850 + Math.random() * 140)}`,
-        title: `${algoObj.name.split('(')[0].trim()} (${distanceParam} km)`,
-        algorithm: algoObj.name,
-        progress: 100,
-        status: 'Completed',
-        startedAt: 'Just now',
-        targetLayer,
-        outputFeatures: selectedAlgo === 'buffer' ? kmzRows.length : 0,
-      };
-      onAddJob(newJob);
       setAnalysisAlgo(selectedAlgo);
+      if (selectedAlgo === 'kde' || selectedAlgo === 'ndvi') {
+        setAnalysisBuffers([]);
+        setAnalysisRoute([]);
+        onTriggerToast(`${algoObj.name} skipped — required dataset is not loaded`);
+        return;
+      }
+      if (selectedAlgo === 'buffer' && kmzRows.length) {
+        const radii = multiRingBufferRadii(distanceParam);
+        const rings = kmzRows.flatMap((row) =>
+          ringsFromPoint(row.lat, row.lon, radii, row.id, row.name)
+        );
+        setAnalysisBuffers(rings);
+        setAnalysisRoute([]);
+        onAddJob({
+          id: `JOB-${Math.floor(8850 + Math.random() * 140)}`,
+          title: `Geodesic multi-ring buffer (${radii.join('/')} km)`,
+          algorithm: algoObj.name,
+          progress: 100,
+          status: 'Completed',
+          startedAt: 'Just now',
+          targetLayer,
+          outputFeatures: rings.length,
+        });
+        onTriggerToast(
+          `Drew ${radii.join(' / ')} km geodesic rings around ${kmzRows.length} KMZ police stations`
+        );
+        return;
+      }
+      setAnalysisBuffers([]);
       if (selectedAlgo === 'isochrone' && kmzRows.length >= 2) {
         const origin = kmzRows[0];
         const dest = kmzRows[1];
@@ -125,8 +149,20 @@ export const CoreOpsWorkspaces: React.FC<CoreOpsProps> = ({
         ).then((route) => {
           if (route) setAnalysisRoute(route.points);
         });
+        onAddJob({
+          id: `JOB-${Math.floor(8850 + Math.random() * 140)}`,
+          title: `OSRM driving ${origin.name} → ${dest.name}`,
+          algorithm: algoObj.name,
+          progress: 100,
+          status: 'Completed',
+          startedAt: 'Just now',
+          targetLayer,
+          outputFeatures: 1,
+        });
+        onTriggerToast(`OSRM driving route between ${origin.name} and ${dest.name}`);
+        return;
       }
-      onTriggerToast(`Completed geoprocessing job ${newJob.id} on KMZ police stations`);
+      onTriggerToast('No KMZ police stations loaded for this operation');
     };
 
     const analysisMarkers = kmzRows.map((f) => ({
@@ -142,7 +178,7 @@ export const CoreOpsWorkspaces: React.FC<CoreOpsProps> = ({
         <div className="flex flex-wrap items-center justify-between gap-3 border-b border-outline-variant/35 pb-3">
           <div>
             <span className="text-[10.5px] font-bold uppercase tracking-wider text-secondary block">
-              PostGIS &amp; Raster Spatial Engine
+              Client geodesic / OSRM workbench (no PostGIS)
             </span>
             <h1 className="text-xl font-bold text-primary tracking-tight">
               Spatial Analysis &amp; Geoprocessing Workbench
@@ -206,10 +242,12 @@ export const CoreOpsWorkspaces: React.FC<CoreOpsProps> = ({
                   onChange={(e) => setTargetLayer(e.target.value)}
                   className="w-full h-8 px-2 rounded border border-outline-variant/50 bg-surface-container-low text-xs font-mono"
                 >
-                  <option value="ops.interception_checkposts">ops.interception_checkposts</option>
-                  <option value="intel.contraband_hotspots">intel.contraband_hotspots</option>
-                  <option value="intel.transit_corridors">intel.transit_corridors</option>
-                  <option value="ops.police_station_jurisdictions">ops.police_station_jurisdictions</option>
+                  <option value="public/geo/ap-police-stations.geojson">
+                    KMZ police stations (99 pts)
+                  </option>
+                  <option value="ops.interception_checkposts">ops.interception_checkposts (not loaded)</option>
+                  <option value="intel.contraband_hotspots">intel.contraband_hotspots (not loaded)</option>
+                  <option value="intel.transit_corridors">intel.transit_corridors (not loaded)</option>
                 </select>
               </div>
               <div>
@@ -318,7 +356,10 @@ export const CoreOpsWorkspaces: React.FC<CoreOpsProps> = ({
               showStateBorder
               showDistricts
               showPoliceStations
+              showRivers
+              showWaterbodies
               route={analysisAlgo === 'isochrone' ? analysisRoute : []}
+              bufferRings={analysisAlgo === 'buffer' ? analysisBuffers : []}
               markers={analysisMarkers}
               onMarkerClick={(id) => onSelectFeatureAndFly(id)}
               onPoliceStationClick={(id) => onSelectFeatureAndFly(id)}

@@ -54,7 +54,7 @@ export function placeToInspectable(args: {
 
 export function osmFeatureToInspectable(args: {
   name: string;
-  kind: 'OSM Building' | 'Highway' | 'River';
+  kind: 'OSM Building' | 'Highway' | 'River' | 'Water body';
   lat: number;
   lon: number;
   detail: string;

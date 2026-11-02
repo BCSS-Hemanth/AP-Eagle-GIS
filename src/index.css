@@ -202,6 +202,11 @@
   pointer-events: none;
 }
 
+.ap-hillshade-tiles {
+  mix-blend-mode: multiply;
+  pointer-events: none;
+}
+
 /* Isolated selection: outlines stay, fills stay clickable, basemap shows through. */
 .ap-leaflet-root.is-admin-drill .leaflet-admin-vectors-pane path {
   fill: rgba(0, 0, 0, 0) !important;

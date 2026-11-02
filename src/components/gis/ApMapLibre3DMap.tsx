@@ -33,6 +33,7 @@ import {
   AP_CENTER,
   AP_DEFAULT_ZOOM,
   BASEMAP_TILES,
+  ESRI_HILLSHADE_TILES,
   ESRI_PLACES_TILES,
   ESRI_TRANSPORT_TILES,
   HIKING_TRAIL_TILES,
@@ -40,6 +41,8 @@ import {
   MAPLIBRE_TERRAIN_TILES,
   OPENRAILWAY_TILES,
 } from '../../data/apGeo';
+import type { GeodesicBufferRing } from '../../gis/geodesicBuffer';
+import { ringsToFeatureCollection } from '../../gis/geodesicBuffer';
 import {
   EMPTY_FC,
   MAP_VIEW_3D_LAYER_LIMITS,
@@ -61,6 +64,8 @@ import {
   shouldOverlayRoads,
   shouldOverlaySatellite,
 } from '../../gis/mapDetail';
+import type { IngestedLayer } from '../../gis/ingest';
+import { syncMapLibreIngested } from '../../gis/ingest/maplibreSync';
 
 interface MarkerSpec {
   id: string;
@@ -80,6 +85,8 @@ interface ApMapLibre3DMapProps {
   showAgencyRoutes?: boolean;
   showRailways?: boolean;
   showRivers?: boolean;
+  showWaterbodies?: boolean;
+  showHillshade?: boolean;
   showTrails?: boolean;
   showMandals?: boolean;
   showVillages?: boolean;
@@ -93,6 +100,7 @@ interface ApMapLibre3DMapProps {
   route?: Array<{ lat: number; lon: number }>;
   measurePoints?: Array<{ lat: number; lon: number }>;
   measureMode?: 'dist' | 'area' | null;
+  bufferRings?: GeodesicBufferRing[];
   droppedPin?: { lat: number; lon: number; elev?: number } | null;
   clickMode?: MapClickMode;
   onMapClick?: (lat: number, lon: number) => void;
@@ -126,9 +134,10 @@ interface ApMapLibre3DMapProps {
   onTerrainStatus?: (status: 'ready' | 'flat' | 'blocked') => void;
   viewTarget?: { lat: number; lon: number; zoom: number; token: number };
   viewActive?: boolean;
+  ingestedLayers?: IngestedLayer[];
   onInspectHit?: (hit: {
     name: string;
-    kind: 'OSM Building' | 'Highway' | 'River';
+    kind: 'OSM Building' | 'Highway' | 'River' | 'Water body';
     lat: number;
     lon: number;
     detail: string;
@@ -181,6 +190,8 @@ export const ApMapLibre3DMap = forwardRef<ApLeafletMapHandle, ApMapLibre3DMapPro
       showAgencyRoutes = false,
       showRailways = false,
       showRivers = false,
+      showWaterbodies = false,
+      showHillshade = false,
       showTrails = false,
       showMandals = false,
       showVillages = false,
@@ -194,6 +205,7 @@ export const ApMapLibre3DMap = forwardRef<ApLeafletMapHandle, ApMapLibre3DMapPro
       route = [],
       measurePoints = [],
       measureMode = null,
+      bufferRings = [],
       droppedPin,
       clickMode = 'inspect',
       onMapClick,
@@ -209,6 +221,7 @@ export const ApMapLibre3DMap = forwardRef<ApLeafletMapHandle, ApMapLibre3DMapPro
       onTerrainStatus,
       viewTarget,
       viewActive = true,
+      ingestedLayers = [],
       onInspectHit,
     },
     ref
@@ -253,13 +266,16 @@ export const ApMapLibre3DMap = forwardRef<ApLeafletMapHandle, ApMapLibre3DMapPro
       markerData: EMPTY_FC as GeoJSON.FeatureCollection,
       highways: EMPTY_FC as GeoJSON.GeoJSON,
       rivers: EMPTY_FC as GeoJSON.GeoJSON,
+      water: EMPTY_FC as GeoJSON.GeoJSON,
       agency: EMPTY_FC as GeoJSON.GeoJSON,
+      buffers: EMPTY_FC as GeoJSON.GeoJSON,
       measure: EMPTY_FC as GeoJSON.FeatureCollection,
       route: EMPTY_FC as GeoJSON.FeatureCollection,
       pin: EMPTY_FC as GeoJSON.FeatureCollection,
       showHighways: false,
       showTrails: false,
       showRailways: false,
+      showHillshade: false,
       showImageryOverlay: false,
       showPlaces: false,
       drillActive: false,
@@ -288,7 +304,7 @@ export const ApMapLibre3DMap = forwardRef<ApLeafletMapHandle, ApMapLibre3DMapPro
     const clipFeature = adminDrill ? drillFocusFeature(adminDrill) : null;
 
     const { districts, state, ready: boundsReady } = useApBoundaries();
-    const { highways, rivers, agency } = useApNetwork();
+    const { highways, rivers, agency, water } = useApNetwork();
     const mandals = useApMandals(true);
     const stations = usePoliceStations(showPoliceStations);
     const parentBbox =
@@ -394,7 +410,9 @@ export const ApMapLibre3DMap = forwardRef<ApLeafletMapHandle, ApMapLibre3DMapPro
     const stateData = showStateBorder && state && !drillActive ? state : EMPTY_FC;
     const highwayData = showHighways && highways ? highways : EMPTY_FC;
     const riverData = showRivers && rivers ? rivers : EMPTY_FC;
+    const waterData = showWaterbodies && water ? water : EMPTY_FC;
     const agencyData = showAgencyRoutes && agency ? agency : EMPTY_FC;
+    const bufferData = bufferRings.length ? ringsToFeatureCollection(bufferRings) : EMPTY_FC;
     const measureData =
       measureMode && measurePoints.length ? pointsToFc(measurePoints, true) : EMPTY_FC;
     const routeData = route.length > 1 ? pointsToFc(route, true) : EMPTY_FC;
@@ -418,13 +436,16 @@ export const ApMapLibre3DMap = forwardRef<ApLeafletMapHandle, ApMapLibre3DMapPro
       markerData,
       highways: highwayData,
       rivers: riverData,
+      water: waterData,
       agency: agencyData,
+      buffers: bufferData,
       measure: measureData,
       route: routeData,
       pin: pinData,
       showHighways: overlayRoads,
       showTrails,
       showRailways,
+      showHillshade,
       showImageryOverlay: overlayImagery,
       showPlaces: overlayPlaces,
       drillActive,
@@ -449,7 +470,9 @@ export const ApMapLibre3DMap = forwardRef<ApLeafletMapHandle, ApMapLibre3DMapPro
       setGeojson(map, 'gis-markers', gis.markerData);
       setGeojson(map, 'gis-highways', gis.highways);
       setGeojson(map, 'gis-rivers', gis.rivers);
+      setGeojson(map, 'gis-water', gis.water);
       setGeojson(map, 'gis-agency', gis.agency);
+      setGeojson(map, 'gis-buffers', gis.buffers);
       setGeojson(map, 'gis-measure', gis.measure);
       setGeojson(map, 'gis-route', gis.route);
       setGeojson(map, 'gis-pin', gis.pin);
@@ -494,6 +517,7 @@ export const ApMapLibre3DMap = forwardRef<ApLeafletMapHandle, ApMapLibre3DMapPro
       vis('overlay-places-layer', gis.showPlaces);
       vis('overlay-trails-layer', gis.showTrails);
       vis('overlay-rail-layer', gis.showRailways);
+      vis('overlay-hillshade-layer', gis.showHillshade);
       vis('overlay-imagery-layer', gis.showImageryOverlay);
     };
 
@@ -701,6 +725,12 @@ export const ApMapLibre3DMap = forwardRef<ApLeafletMapHandle, ApMapLibre3DMapPro
             }
           };
           addRaster('overlay-imagery', BASEMAP_TILES.satellite.url, false, 23);
+          addRaster(
+            'overlay-hillshade',
+            ESRI_HILLSHADE_TILES.url,
+            false,
+            ESRI_HILLSHADE_TILES.maxZoom
+          );
           addRaster('overlay-roads', ESRI_TRANSPORT_TILES.url, false, ESRI_TRANSPORT_TILES.maxZoom);
           addRaster('overlay-places', ESRI_PLACES_TILES.url, false, ESRI_PLACES_TILES.maxZoom);
           addRaster('overlay-trails', HIKING_TRAIL_TILES.url, false, HIKING_TRAIL_TILES.maxZoom);
@@ -719,7 +749,9 @@ export const ApMapLibre3DMap = forwardRef<ApLeafletMapHandle, ApMapLibre3DMapPro
           'gis-markers',
           'gis-highways',
           'gis-rivers',
+          'gis-water',
           'gis-agency',
+          'gis-buffers',
           'gis-measure',
           'gis-route',
           'gis-pin',
@@ -796,8 +828,12 @@ export const ApMapLibre3DMap = forwardRef<ApLeafletMapHandle, ApMapLibre3DMapPro
         addLabel('admin-mandals-label', 'admin-mandals', 'mandal_name', 12, 8);
         addLabel('admin-villages-label', 'admin-villages', 'village_name', 11, 11);
         addLine('gis-highways-line', 'gis-highways', '#c2410c', 2.4);
+        addFill('gis-water-fill', 'gis-water', '#38bdf8', 0.28);
+        addLine('gis-water-line', 'gis-water', '#0e7490', 0.8);
         addLine('gis-rivers-line', 'gis-rivers', '#1565c0', 1.8);
         addLine('gis-agency-line', 'gis-agency', '#ba1a1a', 2.4, [2, 1]);
+        addFill('gis-buffers-fill', 'gis-buffers', '#14b8a6', 0.08);
+        addLine('gis-buffers-line', 'gis-buffers', '#0f766e', 1.2, [2, 1]);
         addLine('gis-measure-line', 'gis-measure', '#006a61', 2.4, [2, 1]);
         addLine('gis-route-line', 'gis-route', '#0f766e', 4);
 
@@ -948,9 +984,12 @@ export const ApMapLibre3DMap = forwardRef<ApLeafletMapHandle, ApMapLibre3DMapPro
         }
         const inspectExtra = () => {
           if (cb.clickMode !== 'inspect') return false;
-          const extraLayers = ['osm-3d-buildings', 'gis-highways-line', 'gis-rivers-line'].filter((id) =>
-            Boolean(map.getLayer(id))
-          );
+          const extraLayers = [
+            'osm-3d-buildings',
+            'gis-highways-line',
+            'gis-rivers-line',
+            'gis-water-fill',
+          ].filter((id) => Boolean(map.getLayer(id)));
           const extra = extraLayers.length
             ? map.queryRenderedFeatures(e.point, { layers: extraLayers })[0]
             : undefined;
@@ -959,12 +998,14 @@ export const ApMapLibre3DMap = forwardRef<ApLeafletMapHandle, ApMapLibre3DMapPro
           const heightRaw = Number(props.render_height ?? props.height);
           const heightM = Number.isFinite(heightRaw) && heightRaw > 0 ? heightRaw : undefined;
           const name = String(props.name ?? props.ref ?? extra.sourceLayer ?? extra.layer?.id ?? 'Feature');
-          const kind: 'OSM Building' | 'Highway' | 'River' =
+          const kind: 'OSM Building' | 'Highway' | 'River' | 'Water body' =
             extra.layer?.id === 'osm-3d-buildings'
               ? 'OSM Building'
               : extra.layer?.id === 'gis-rivers-line'
                 ? 'River'
-                : 'Highway';
+                : extra.layer?.id === 'gis-water-fill'
+                  ? 'Water body'
+                  : 'Highway';
           const detailParts = [
             kind,
             heightM != null ? `${heightM} m OSM height` : null,
@@ -1056,6 +1097,7 @@ export const ApMapLibre3DMap = forwardRef<ApLeafletMapHandle, ApMapLibre3DMapPro
         }
         if (inspectExtra()) return;
         if (cb.clickMode === 'boxzoom' || cb.clickMode === 'pan') return;
+        const gis = gisRef.current;
         if (!gis.drillActive && cb.onDistrictClick) {
           const point: [number, number] = [e.lngLat.lng, e.lngLat.lat];
           const districtHit = findContainingFeature(point, gis.districtData.features);
@@ -1100,6 +1142,12 @@ export const ApMapLibre3DMap = forwardRef<ApLeafletMapHandle, ApMapLibre3DMapPro
     useEffect(() => {
       const map = mapRef.current;
       if (!map || !ready) return;
+      syncMapLibreIngested(map, ingestedLayers);
+    }, [ready, ingestedLayers]);
+
+    useEffect(() => {
+      const map = mapRef.current;
+      if (!map || !ready) return;
       applyGisLayers(map);
     }, [
       ready,
@@ -1112,16 +1160,21 @@ export const ApMapLibre3DMap = forwardRef<ApLeafletMapHandle, ApMapLibre3DMapPro
       markerData,
       highwayData,
       riverData,
+      waterData,
       agencyData,
+      bufferData,
       measureData,
       routeData,
       pinData,
       showHighways,
+      showRivers,
+      showWaterbodies,
       overlayRoads,
       overlayPlaces,
       overlayImagery,
       showTrails,
       showRailways,
+      showHillshade,
       showImageryOverlay,
       zoom,
       drillActive,

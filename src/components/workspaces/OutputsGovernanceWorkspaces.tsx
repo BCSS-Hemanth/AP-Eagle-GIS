@@ -12,6 +12,8 @@ import {
 import { AuditLogEntry, GisLayer, TopologyAuditRule, WorkspaceId } from '../../types/gis';
 import { downloadTextFile } from '../../utils/geoMath';
 import { useAuth } from '../../auth/AuthContext';
+import { QGIS_ALIGNED_SOURCES } from '../../gis/gisSources';
+import { QGIS_INGEST_PROVIDERS, QGIS_UNAVAILABLE_IN_BROWSER } from '../../gis/ingest';
 
 interface OutputsGovProps {
   workspace:
@@ -394,13 +396,17 @@ export const OutputsGovernanceWorkspaces: React.FC<OutputsGovProps> = ({
   }
 
   if (workspace === 'conditional-capabilities-and-dependency-register') {
-    const services = [
-      { name: 'PostGIS', endpoint: 'not configured', status: 'NOT CONNECTED', latency: '—' },
-      { name: 'GeoServer', endpoint: 'not configured', status: 'NOT CONNECTED', latency: '—' },
-      { name: 'ANPR / CCTV', endpoint: 'not configured', status: 'NOT CONNECTED', latency: '—' },
-      { name: 'Bhuvan / Cartosat', endpoint: 'not configured', status: 'NOT CONNECTED', latency: '—' },
-      { name: 'CCTNS NDPS', endpoint: 'not configured', status: 'NOT CONNECTED', latency: '—' },
-    ];
+    const services = QGIS_ALIGNED_SOURCES.map((src) => ({
+      name: src.name,
+      endpoint: src.url,
+      status:
+        src.status === 'live'
+          ? 'LIVE · no API key'
+          : src.status === 'local'
+            ? 'LOCAL GEOJSON'
+            : 'NOT CONNECTED',
+      latency: src.cost === 'free' ? src.license : '—',
+    }));
 
     return (
       <div className="p-4 lg:p-6 space-y-4 max-w-[1440px] mx-auto">
@@ -421,6 +427,27 @@ export const OutputsGovernanceWorkspaces: React.FC<OutputsGovProps> = ({
             <Network className="w-3.5 h-3.5" />
             <span>Ping All Endpoints</span>
           </button>
+        </div>
+
+        <div className="bg-surface-container-lowest rounded border border-outline-variant/40 p-3.5 text-xs space-y-2">
+          <div className="font-bold text-primary">QGIS data providers implemented in EAGLE</div>
+          {QGIS_INGEST_PROVIDERS.map((p) => (
+            <div key={p.key} className="flex flex-wrap justify-between gap-2">
+              <div>
+                <span className="font-mono text-secondary">{p.key}</span>
+                <span className="text-on-surface"> — {p.title}</span>
+                <div className="font-mono text-[10.5px] text-on-surface-variant">{p.qgisPath}</div>
+              </div>
+              <span className="px-2 py-0.5 rounded bg-surface-container text-[10px] font-bold h-fit">
+                {p.feasible ? 'BROWSER READY' : 'UNAVAILABLE'}
+              </span>
+            </div>
+          ))}
+          {QGIS_UNAVAILABLE_IN_BROWSER.map((p) => (
+            <div key={p.key} className="text-on-surface-variant">
+              <span className="font-mono">{p.key}</span> — {p.reason}
+            </div>
+          ))}
         </div>
 
         <div className="bg-surface-container-lowest rounded border border-outline-variant/40 divide-y divide-outline-variant/25 text-xs tabular-coord">

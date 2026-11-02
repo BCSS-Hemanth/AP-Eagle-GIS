@@ -88,6 +88,9 @@ describe('map zoom bands and overlays', () => {
     expect(shouldOverlaySatellite(14, 'vector', 'state', false)).toBe(true);
     expect(shouldOverlaySatellite(18, 'satellite', 'village', false)).toBe(false);
     expect(MAP_DETAIL_SOURCES.esriImagery).toMatch(/Not ISRO Cartosat-3/);
+    expect(MAP_DETAIL_SOURCES.esriHillshade).toMatch(/Hillshade/);
+    expect(MAP_DETAIL_SOURCES.osmWater).toMatch(/reservoirs/);
+    expect(MAP_DETAIL_SOURCES.geodesicBuffer).toMatch(/geodesic/);
   });
 
   it('keeps road casings off on the statewide district view', () => {

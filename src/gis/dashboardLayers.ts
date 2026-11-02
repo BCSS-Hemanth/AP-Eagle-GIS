@@ -85,11 +85,13 @@ export function leafletFlagsFromLayers(layers: GisLayer[]) {
     showHighways: isLayerOn(layers, 'lyr-highways'),
     showAgencyRoutes: isLayerOn(layers, 'lyr-drug-routes'),
     showRivers: isLayerOn(layers, 'lyr-rivers'),
+    showWaterbodies: isLayerOn(layers, 'lyr-waterbodies'),
     showRailways: isLayerOn(layers, 'lyr-railways'),
     showTrails: isLayerOn(layers, 'lyr-forest-trails'),
     highlightAgency: isLayerOn(layers, 'lyr-asr-agency'),
     showGraticule: isLayerOn(layers, 'lyr-soi-grid'),
     showImageryOverlay: isLayerOn(layers, 'lyr-cartosat'),
+    showHillshade: isLayerOn(layers, 'lyr-hillshade'),
     showPlaces: isLayerOn(layers, 'lyr-mandals') || isLayerOn(layers, 'lyr-villages'),
   };
 }

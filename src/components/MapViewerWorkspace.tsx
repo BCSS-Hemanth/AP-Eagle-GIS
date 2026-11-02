@@ -2,6 +2,7 @@ import React, { useState, useRef, useMemo, useEffect } from 'react';
 import {
   ChevronDown,
   ChevronRight,
+  CircleDot,
   Compass,
   Crosshair,
   Download,
@@ -81,6 +82,13 @@ import { featureToStationRow, osmFeatureToInspectable, placeToInspectable } from
 import { useAuth } from '../auth/AuthContext';
 import { AP_CENTER } from '../data/apGeo';
 import { clampMapZoom } from '../gis/mapDetail';
+import {
+  DEFAULT_INSPECT_BUFFER_KM,
+  ringsFromPoint,
+  type GeodesicBufferRing,
+} from '../gis/geodesicBuffer';
+import type { IngestedLayer } from '../gis/ingest';
+import { IngestPanel } from './gis/IngestPanel';
 
 interface MapViewerWorkspaceProps {
   layers: GisLayer[];
@@ -97,6 +105,11 @@ interface MapViewerWorkspaceProps {
   featuresMap: Record<string, InspectableFeature>;
   psRows: PoliceStationRow[];
   digitizedFeatures: DigitizedFeature[];
+  ingestedLayers: IngestedLayer[];
+  onToggleIngested: (id: string) => void;
+  onChangeIngestedOpacity: (id: string, opacity: number) => void;
+  onRemoveIngested: (id: string) => void;
+  onPublishIngested: (layers: IngestedLayer[]) => void;
   onUpdateCenterCoords: (lat: number, lon: number) => void;
   onSwitchWorkspace: (ws: WorkspaceId) => void;
   onTriggerToast: (msg: string) => void;
@@ -123,6 +136,11 @@ export const MapViewerWorkspace: React.FC<MapViewerWorkspaceProps> = ({
   featuresMap,
   psRows,
   digitizedFeatures,
+  ingestedLayers,
+  onToggleIngested,
+  onChangeIngestedOpacity,
+  onRemoveIngested,
+  onPublishIngested,
   onUpdateCenterCoords,
   onSwitchWorkspace,
   onTriggerToast,
@@ -154,7 +172,9 @@ export const MapViewerWorkspace: React.FC<MapViewerWorkspaceProps> = ({
     'grp-ops': true,
     'grp-transport': true,
     'grp-raster': true,
+    'grp-ingest': true,
   });
+  const [ingestOpen, setIngestOpen] = useState(false);
 
   const [mapZoom, setMapZoom] = useState<number>(7);
   const [cursorLatLon, setCursorLatLon] = useState<{ lat: number; lon: number }>({
@@ -169,6 +189,7 @@ export const MapViewerWorkspace: React.FC<MapViewerWorkspaceProps> = ({
   const elevTimer = useRef<number | null>(null);
 
   const [measurePoints, setMeasurePoints] = useState<Array<{ lat: number; lon: number }>>([]);
+  const [bufferRings, setBufferRings] = useState<GeodesicBufferRing[]>([]);
   const [droppedPin, setDroppedPin] = useState<{
     lat: number;
     lon: number;
@@ -294,7 +315,10 @@ export const MapViewerWorkspace: React.FC<MapViewerWorkspaceProps> = ({
   const isLayerOn = (id: string) => layers.find((l) => l.id === id)?.enabled ?? false;
   const getLayerOpacity = (id: string) => (layers.find((l) => l.id === id)?.opacity ?? 100) / 100;
 
-  const activeLayerCount = useMemo(() => layers.filter((l) => l.enabled).length, [layers]);
+  const activeLayerCount = useMemo(
+    () => layers.filter((l) => l.enabled).length + ingestedLayers.filter((l) => l.enabled).length,
+    [layers, ingestedLayers]
+  );
 
   const flyToLatLon = (lat: number, lon: number, zoom = 12) => {
     activeMap()?.flyTo(lat, lon, zoom);
@@ -478,7 +502,7 @@ export const MapViewerWorkspace: React.FC<MapViewerWorkspaceProps> = ({
       dist: 'Geodesic Distance Tool: Click points on map to measure distance in km',
       area: 'Geodesic Area Tool: Click 3+ vertices on map to compute sq km & Ha',
       inspect: 'Feature Inspector Active: Click vector targets on map to inspect attributes',
-      buffer: 'Buffer rings are not drawn. No buffer dataset was supplied.',
+      buffer: 'Geodesic buffer: click a point to draw 1 / 2 / 5 km WGS84 rings (QGIS native:buffer analog).',
       coord: 'Coordinate Inspector: Click anywhere on map to sample Lat/Lon & DEM elevation',
     };
     onTriggerToast(descriptions[tool]);
@@ -489,8 +513,9 @@ export const MapViewerWorkspace: React.FC<MapViewerWorkspaceProps> = ({
     setDrivingRoute([]);
     setRouteMeta(null);
     setMeasurePoints([]);
+    setBufferRings([]);
     setDroppedPin(null);
-    onTriggerToast('Cleared routes and measurement geometries');
+    onTriggerToast('Cleared routes, buffers, and measurement geometries');
   };
 
   const sampleElevation = async (lat: number, lon: number): Promise<number> => {
@@ -523,6 +548,21 @@ export const MapViewerWorkspace: React.FC<MapViewerWorkspaceProps> = ({
   const handleLeafletClick = async (lat: number, lon: number) => {
     if (activeTool === 'dist' || activeTool === 'area') {
       setMeasurePoints((prev) => [...prev, { lat, lon }]);
+      return;
+    }
+    if (activeTool === 'buffer') {
+      const rings = ringsFromPoint(
+        lat,
+        lon,
+        DEFAULT_INSPECT_BUFFER_KM,
+        `buf-${lat.toFixed(4)}-${lon.toFixed(4)}`,
+        'Click buffer'
+      );
+      setBufferRings((prev) => [...prev, ...rings]);
+      setDroppedPin({ lat, lon, elev: 0 });
+      onTriggerToast(
+        `Geodesic rings 1 / 2 / 5 km at ${lat.toFixed(4)}° N, ${lon.toFixed(4)}° E`
+      );
       return;
     }
     if (activeTool === 'coord') {
@@ -566,7 +606,13 @@ export const MapViewerWorkspace: React.FC<MapViewerWorkspaceProps> = ({
   };
 
   const handleInspectAdmin = (feature: InspectableFeature) => {
-    if (activeTool === 'dist' || activeTool === 'area' || activeTool === 'boxzoom' || activeTool === 'coord') {
+    if (
+      activeTool === 'dist' ||
+      activeTool === 'area' ||
+      activeTool === 'boxzoom' ||
+      activeTool === 'coord' ||
+      activeTool === 'buffer'
+    ) {
       return;
     }
     setAdminInspect(feature);
@@ -819,6 +865,19 @@ export const MapViewerWorkspace: React.FC<MapViewerWorkspaceProps> = ({
           >
             <Crosshair className="w-3.5 h-3.5" />
           </button>
+          <button
+            type="button"
+            data-testid="tool-buffer"
+            onClick={() => handleSelectTool('buffer')}
+            title="Geodesic buffer rings (1 / 2 / 5 km)"
+            className={`w-7 h-7 flex items-center justify-center rounded transition-colors cursor-pointer ${
+              activeTool === 'buffer'
+                ? 'bg-primary text-on-primary'
+                : 'text-on-surface-variant hover:text-on-surface hover:bg-surface-container-highest'
+            }`}
+          >
+            <CircleDot className="w-3.5 h-3.5" />
+          </button>
 
           <div className="w-px h-4 bg-outline-variant/45 mx-0.5" />
 
@@ -970,7 +1029,8 @@ export const MapViewerWorkspace: React.FC<MapViewerWorkspaceProps> = ({
               <div className="grid grid-cols-4 gap-1">
                 <button
                   type="button"
-                  onClick={() => onSwitchWorkspace('vector-and-raster-data-import')}
+                  data-testid="add-layer"
+                  onClick={() => setIngestOpen(true)}
                   className="px-1 py-1 rounded bg-surface-container hover:bg-surface-container-high text-on-surface flex flex-col items-center gap-0.5 transition-colors cursor-pointer"
                 >
                   <PlusSquare className="w-3.5 h-3.5 text-secondary" />
@@ -1127,6 +1187,12 @@ export const MapViewerWorkspace: React.FC<MapViewerWorkspaceProps> = ({
                                 {lyr.swatchType === 'satellite-raster' && (
                                   <Eye className="w-3 h-3 text-on-surface-variant shrink-0" />
                                 )}
+                                {lyr.swatchType === 'poly-water' && (
+                                  <span className="w-3 h-2 bg-sky-400/40 border border-sky-700 shrink-0" />
+                                )}
+                                {lyr.swatchType === 'hillshade-raster' && (
+                                  <span className="w-3 h-2 bg-stone-400 border border-stone-600 shrink-0" />
+                                )}
 
                                 <span
                                   className={`text-[11.5px] truncate ${
@@ -1172,6 +1238,72 @@ export const MapViewerWorkspace: React.FC<MapViewerWorkspaceProps> = ({
                   </div>
                 );
               })}
+              <div className="border border-secondary/35 rounded overflow-hidden" data-testid="ingest-layer-group">
+                <button
+                  type="button"
+                  onClick={() => setOpenGroups((p) => ({ ...p, 'grp-ingest': !p['grp-ingest'] }))}
+                  className="w-full px-2 py-1.5 bg-secondary-container/20 hover:bg-secondary-container/35 flex items-center justify-between cursor-pointer"
+                >
+                  <div className="flex items-center gap-1 text-[11px] font-bold text-secondary">
+                    {openGroups['grp-ingest'] ? (
+                      <ChevronDown className="w-3.5 h-3.5 shrink-0" />
+                    ) : (
+                      <ChevronRight className="w-3.5 h-3.5 shrink-0" />
+                    )}
+                    <span>User ingested (QGIS providers)</span>
+                  </div>
+                  <span className="text-[10px] font-mono text-on-surface-variant tabular-coord">
+                    {ingestedLayers.filter((l) => l.enabled).length}/{ingestedLayers.length}
+                  </span>
+                </button>
+                {openGroups['grp-ingest'] && (
+                  <div className="p-1.5 space-y-1">
+                    {ingestedLayers.length === 0 ? (
+                      <p className="text-[10.5px] text-on-surface-variant px-1 py-1">
+                        Add Layer to ingest GeoJSON, Shapefile, KMZ, CSV, GPKG, GeoTIFF, WMS/WFS, or ArcGIS REST. Catalog layers stay untouched.
+                      </p>
+                    ) : (
+                      ingestedLayers.map((lyr) => (
+                        <div key={lyr.id} className="rounded px-1 py-0.5 hover:bg-surface-container-low">
+                          <label className="flex items-center gap-1.5 cursor-pointer">
+                            <input
+                              type="checkbox"
+                              data-testid={`ingest-toggle-${lyr.id}`}
+                              checked={lyr.enabled}
+                              onChange={() => onToggleIngested(lyr.id)}
+                              className="w-3.5 h-3.5 accent-secondary cursor-pointer"
+                            />
+                            <span className="w-2.5 h-2.5 rounded-full bg-[#6d28d9] shrink-0" />
+                            <span className="truncate font-semibold text-primary">{lyr.name}</span>
+                            <span className="ml-auto text-[9px] font-mono text-on-surface-variant">
+                              {lyr.driver}
+                            </span>
+                          </label>
+                          {showSymbologySliders && lyr.enabled && (
+                            <div className="pt-1 pb-0.5 pl-5 pr-1 flex items-center gap-2">
+                              <input
+                                type="range"
+                                min={15}
+                                max={100}
+                                value={lyr.opacity}
+                                onChange={(e) => onChangeIngestedOpacity(lyr.id, Number(e.target.value))}
+                                className="w-full h-1 accent-secondary cursor-pointer"
+                              />
+                              <button
+                                type="button"
+                                onClick={() => onRemoveIngested(lyr.id)}
+                                className="text-[9px] font-bold text-error"
+                              >
+                                Remove
+                              </button>
+                            </div>
+                          )}
+                        </div>
+                      ))
+                    )}
+                  </div>
+                )}
+              </div>
             </div>
 
             {/* Map Symbology Legend Footer */}
@@ -1223,10 +1355,12 @@ export const MapViewerWorkspace: React.FC<MapViewerWorkspaceProps> = ({
               showAgencyRoutes={isLayerOn('lyr-drug-routes')}
               showRailways={isLayerOn('lyr-railways')}
               showRivers={isLayerOn('lyr-rivers')}
+              showWaterbodies={isLayerOn('lyr-waterbodies')}
+              showHillshade={isLayerOn('lyr-hillshade')}
               showTrails={isLayerOn('lyr-forest-trails')}
               showMandals={isLayerOn('lyr-mandals')}
               showVillages={isLayerOn('lyr-villages')}
-              showPoliceStations={false}
+              showPoliceStations={isLayerOn('lyr-pss')}
               mandalOpacity={getLayerOpacity('lyr-mandals')}
               villageOpacity={getLayerOpacity('lyr-villages')}
               policeStationOpacity={getLayerOpacity('lyr-pss')}
@@ -1236,6 +1370,7 @@ export const MapViewerWorkspace: React.FC<MapViewerWorkspaceProps> = ({
               route={drivingRoute}
               measurePoints={measurePoints}
               measureMode={activeTool === 'dist' || activeTool === 'area' ? activeTool : null}
+              bufferRings={bufferRings}
               droppedPin={droppedPin}
               clickMode={activeTool as MapClickMode}
               onMapClick={handleLeafletClick}
@@ -1332,6 +1467,7 @@ export const MapViewerWorkspace: React.FC<MapViewerWorkspaceProps> = ({
                   void sampleElevation(lat, lon).then(setCursorElev);
                 }, 700);
               }}
+              ingestedLayers={ingestedLayers}
               onInspectHit={(hit) => handleInspectAdmin(osmFeatureToInspectable(hit))}
             />
             </div>
@@ -1353,11 +1489,13 @@ export const MapViewerWorkspace: React.FC<MapViewerWorkspaceProps> = ({
               showRailways={isLayerOn('lyr-railways')}
               showGraticule={isLayerOn('lyr-soi-grid')}
               showRivers={isLayerOn('lyr-rivers')}
+              showWaterbodies={isLayerOn('lyr-waterbodies')}
+              showHillshade={isLayerOn('lyr-hillshade')}
               showTrails={isLayerOn('lyr-forest-trails')}
               showPlaces={isLayerOn('lyr-mandals') || isLayerOn('lyr-villages')}
               showMandals={isLayerOn('lyr-mandals')}
               showVillages={isLayerOn('lyr-villages')}
-              showPoliceStations={false}
+              showPoliceStations={isLayerOn('lyr-pss')}
               mandalOpacity={getLayerOpacity('lyr-mandals')}
               villageOpacity={getLayerOpacity('lyr-villages')}
               policeStationOpacity={getLayerOpacity('lyr-pss')}
@@ -1366,9 +1504,11 @@ export const MapViewerWorkspace: React.FC<MapViewerWorkspaceProps> = ({
               highlightAgency={isLayerOn('lyr-asr-agency')}
               markers={mapMarkers}
               digitizedFeatures={digitizedFeatures}
+              ingestedLayers={ingestedLayers}
               route={drivingRoute}
               measurePoints={measurePoints}
               measureMode={activeTool === 'dist' || activeTool === 'area' ? activeTool : null}
+              bufferRings={bufferRings}
               droppedPin={droppedPin}
               clickMode={activeTool as MapClickMode}
               onMapClick={handleLeafletClick}
@@ -1641,7 +1781,7 @@ export const MapViewerWorkspace: React.FC<MapViewerWorkspaceProps> = ({
             <div className="flex items-center gap-2.5 shrink-0">
               <div className="flex items-center gap-1 text-secondary font-sans font-bold text-[10px]">
                 <span className="w-1.5 h-1.5 rounded-full bg-secondary" />
-                <span>WMS FEED: ONLINE</span>
+                <span>XYZ TILES: OSM / Esri</span>
               </div>
               <span className="text-outline-variant">|</span>
               <div>
@@ -1652,7 +1792,7 @@ export const MapViewerWorkspace: React.FC<MapViewerWorkspaceProps> = ({
               </div>
               <span className="text-outline-variant hidden xl:inline">|</span>
               <span className="hidden xl:inline text-[10px] font-sans">
-                Survey of India © AP GIS Center
+                OSM · Esri · NWIC/SOI admin
               </span>
             </div>
           </div>
@@ -2190,6 +2330,37 @@ export const MapViewerWorkspace: React.FC<MapViewerWorkspaceProps> = ({
                 Close Dossier
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {ingestOpen && (
+        <div className="fixed inset-0 bg-primary/40 backdrop-blur-xs z-50 flex items-center justify-center p-4">
+          <div className="bg-surface-container-lowest rounded border border-outline-variant/40 max-w-3xl w-full max-h-[90vh] overflow-y-auto p-4 space-y-3">
+            <div className="flex items-center justify-between">
+              <div>
+                <div className="text-[10.5px] font-bold uppercase tracking-wider text-secondary">
+                  QGIS-style data providers
+                </div>
+                <h2 className="text-base font-bold text-primary">Add vector, raster, or web layer</h2>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIngestOpen(false)}
+                className="p-1 rounded hover:bg-surface-container cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <IngestPanel
+              compact
+              canImport={can('import')}
+              onToast={onTriggerToast}
+              onPublish={(layers) => {
+                onPublishIngested(layers);
+                setIngestOpen(false);
+              }}
+            />
           </div>
         </div>
       )}

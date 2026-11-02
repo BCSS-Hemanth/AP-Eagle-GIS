@@ -15,7 +15,7 @@ export const MAP_VIEW_3D_NOTE =
   '3D uses MapLibre GL: OSM raster on a tilted globe. Right-drag rotates, the pitch slider tilts, scroll zooms. Terrain uses Mapzen/AWS DEM only after a tile loads. Buildings extrude only where OSM records height. Not Google Photorealistic 3D.';
 
 export const MAP_VIEW_3D_LAYER_LIMITS =
-  'Works in 3D: district→mandal→village isolation, boundaries, labels, police stations, markers, inspect, measure, routes, rotate/tilt/zoom, terrain when DEM loads, overlay rasters (roads, rail, trails, imagery, places) when those layers are on. 2D-only: box-zoom rectangle, Leaflet digitizer, SOI graticule, 2D basemap picker. Fallback: no WebGL stays on 2D; DEM failure keeps tilt on a flat globe; buildings omit footprints without OSM height.';
+  'Works in 3D: district→mandal→village isolation, boundaries, labels, police stations, markers, inspect, measure, routes, rotate/tilt/zoom, terrain when DEM loads, overlay rasters (roads, rail, trails, imagery, hillshade, places) and OSM water/rivers when those layers are on. 2D-only: box-zoom rectangle, Leaflet digitizer, SOI graticule, 2D basemap picker. Fallback: no WebGL stays on 2D; DEM failure keeps tilt on a flat globe; buildings omit footprints without OSM height.';
 
 /** Web-mercator tile index for a WGS84 lon/lat (used to probe Terrarium DEM). */
 export function lonLatToTile(lon: number, lat: number, z: number): { x: number; y: number; z: number } {

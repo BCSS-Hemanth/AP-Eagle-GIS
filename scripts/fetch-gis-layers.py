@@ -1,4 +1,9 @@
-"""Download authentic OSM / OSRM geometries for Andhra Pradesh GIS overlays."""
+"""Download authentic OSM / OSRM geometries for Andhra Pradesh GIS overlays.
+
+Highways: OSRM driving along documented NH waypoints.
+Rivers: OSM Overpass waterway centerlines for named AP rivers.
+Water bodies: OSM Overpass named lakes / reservoirs (QGIS QuickOSM analog).
+"""
 from __future__ import annotations
 
 import json
@@ -12,7 +17,10 @@ OUT = Path(__file__).resolve().parents[1] / "public" / "geo"
 OUT.mkdir(parents=True, exist_ok=True)
 CTX = ssl.create_default_context()
 
-OVERPASS = "https://overpass-api.de/api/interpreter"
+OVERPASS_ENDPOINTS = [
+    "https://overpass-api.de/api/interpreter",
+    "https://overpass.kumi.systems/api/interpreter",
+]
 OSRM = "https://router.project-osrm.org/route/v1/driving/"
 
 # City / junction waypoints along real NH alignments (WGS84 lat, lon).
@@ -67,12 +75,26 @@ def get(url: str, data: bytes | None = None, retries: int = 4) -> bytes:
                 data=data,
                 headers={"User-Agent": "EAGLE-AP-GIS/1.0 (local development)"},
             )
-            with urllib.request.urlopen(req, context=CTX, timeout=120) as resp:
+            with urllib.request.urlopen(req, context=CTX, timeout=180) as resp:
                 return resp.read()
         except Exception as exc:  # noqa: BLE001
             last = exc
             time.sleep(2 + i * 3)
     raise RuntimeError(f"GET failed {url}: {last}")
+
+
+def overpass(ql: str) -> dict:
+    body = urllib.parse.urlencode({"data": ql}).encode("utf-8")
+    last = None
+    for endpoint in OVERPASS_ENDPOINTS:
+        try:
+            raw = get(endpoint, data=body, retries=3)
+            return json.loads(raw.decode("utf-8"))
+        except Exception as exc:  # noqa: BLE001
+            last = exc
+            print(f"  Overpass miss {endpoint}: {exc}")
+            time.sleep(2)
+    raise RuntimeError(f"Overpass failed: {last}")
 
 
 def downsample(coords: list[list[float]], step: int = 4, ndigits: int = 5) -> list[list[float]]:
@@ -81,13 +103,13 @@ def downsample(coords: list[list[float]], step: int = 4, ndigits: int = 5) -> li
     kept = [coords[0]]
     for pt in coords[step::step]:
         kept.append([round(pt[0], ndigits), round(pt[1], ndigits)])
-    if kept[-1] != [round(coords[-1][0], ndigits), round(coords[-1][1], ndigits)]:
-        kept.append([round(coords[-1][0], ndigits), round(coords[-1][1], ndigits)])
+    last = [round(coords[-1][0], ndigits), round(coords[-1][1], ndigits)]
+    if kept[-1] != last:
+        kept.append(last)
     return kept
 
 
 def osrm_route(points: list[tuple[float, float]], name: str) -> dict | None:
-    # OSRM wants lon,lat
     loc = ";".join(f"{lon:.5f},{lat:.5f}" for lat, lon in points)
     url = f"{OSRM}{loc}?overview=full&geometries=geojson"
     raw = get(url)
@@ -131,11 +153,59 @@ OVERPASS_QL = r"""
 out geom;
 """
 
+WATER_QL = r"""
+[out:json][timeout:180];
+(
+  way["water"="reservoir"]["name"](12.62,76.75,19.22,84.78);
+  relation["water"="reservoir"]["name"](12.62,76.75,19.22,84.78);
+  way["landuse"="reservoir"]["name"](12.62,76.75,19.22,84.78);
+  relation["landuse"="reservoir"]["name"](12.62,76.75,19.22,84.78);
+  way["natural"="water"]["name"~"Lake|Reservoir|Kolleru|Pulicat|Somasila|Srisailam|Nagarjuna|Yeleru|Kandaleru|Sileru|Telineelapuram",i](12.62,76.75,19.22,84.78);
+  relation["natural"="water"]["name"~"Lake|Reservoir|Kolleru|Pulicat|Somasila|Srisailam|Nagarjuna|Yeleru|Kandaleru|Sileru",i](12.62,76.75,19.22,84.78);
+);
+out geom;
+"""
+
+
+def way_coords(el: dict) -> list[list[float]]:
+    geom = el.get("geometry") or []
+    return [[p["lon"], p["lat"]] for p in geom if "lon" in p and "lat" in p]
+
+
+def relation_outers(el: dict) -> list[list[list[float]]]:
+    rings = []
+    for member in el.get("members") or []:
+        if member.get("role") not in ("outer", "", None):
+            continue
+        geom = member.get("geometry") or []
+        coords = [[p["lon"], p["lat"]] for p in geom if "lon" in p and "lat" in p]
+        if len(coords) >= 4:
+            rings.append(coords)
+    return rings
+
+
+def closed_ring(coords: list[list[float]]) -> list[list[float]] | None:
+    if len(coords) < 4:
+        return None
+    ring = downsample(coords, step=5)
+    if ring[0] != ring[-1]:
+        ring.append(ring[0])
+    if len(ring) < 4:
+        return None
+    return ring
+
+
+def bbox_ok(coords: list[list[float]]) -> bool:
+    lons = [c[0] for c in coords]
+    lats = [c[1] for c in coords]
+    if min(lons) < 76.4 or max(lons) > 85.1 or min(lats) < 12.3 or max(lats) > 19.6:
+        return False
+    # Drop tiny farm ponds: need ~800 m extent.
+    return (max(lons) - min(lons) > 0.008) or (max(lats) - min(lats) > 0.008)
+
 
 def fetch_rivers() -> None:
-    body = urllib.parse.urlencode({"data": OVERPASS_QL}).encode("utf-8")
-    raw = get(OVERPASS, data=body)
-    data = json.loads(raw.decode("utf-8"))
+    data = overpass(OVERPASS_QL)
     features = []
     seen = set()
     for el in data.get("elements", []):
@@ -169,11 +239,65 @@ def fetch_rivers() -> None:
     print(f"Wrote {path} ({path.stat().st_size} bytes, {len(features)} features)")
 
 
+def fetch_waterbodies() -> None:
+    data = overpass(WATER_QL)
+    features = []
+    seen: set[tuple] = set()
+    for el in data.get("elements", []):
+        tags = el.get("tags") or {}
+        name = tags.get("name")
+        if not name:
+            continue
+        kind = tags.get("water") or tags.get("landuse") or tags.get("natural") or "water"
+        rings: list[list[list[float]]] = []
+        if el.get("type") == "relation":
+            rings = [ring for ring in (closed_ring(r) for r in relation_outers(el)) if ring]
+        else:
+            ring = closed_ring(way_coords(el))
+            if ring:
+                rings = [ring]
+        if not rings:
+            continue
+        if not all(bbox_ok(ring) for ring in rings):
+            continue
+        key = (name.lower(), round(rings[0][0][0], 3), round(rings[0][0][1], 3), len(rings[0]))
+        if key in seen:
+            continue
+        seen.add(key)
+        geometry = (
+            {"type": "Polygon", "coordinates": rings}
+            if len(rings) == 1
+            else {"type": "MultiPolygon", "coordinates": [[ring] for ring in rings]}
+        )
+        features.append(
+            {
+                "type": "Feature",
+                "properties": {
+                    "name": name,
+                    "water": kind,
+                    "source": "OpenStreetMap Overpass",
+                },
+                "geometry": geometry,
+            }
+        )
+    features.sort(key=lambda f: f["properties"]["name"])
+    fc = {
+        "type": "FeatureCollection",
+        "features": features,
+        "properties": {"source": "OSM Overpass named lakes/reservoirs in AP envelope"},
+    }
+    path = OUT / "ap-waterbodies.geojson"
+    path.write_text(json.dumps(fc, separators=(",", ":")))
+    print(f"Wrote {path} ({path.stat().st_size} bytes, {len(features)} features)")
+
+
 def main() -> None:
     print("Fetching OSM-routed national highways via OSRM...")
     fetch_highways()
     print("Fetching OSM river centerlines via Overpass...")
     fetch_rivers()
+    print("Fetching OSM named lakes and reservoirs via Overpass...")
+    fetch_waterbodies()
     print("Done.")
 
 

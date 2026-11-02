@@ -187,6 +187,10 @@ export const MAP_DETAIL_SOURCES = {
   adminDistricts: '26-district 2022 GeoJSON, WGS84.',
   adminMandals: '654 NWIC/SOI mandal polygons (vintage names; spatially parented to 2022 districts).',
   adminVillages: '18,100 NWIC/SOI village polygons, loaded by view bbox from z9.',
+  osmRivers: 'OSM Overpass centerlines for Godavari, Krishna, Penna, Nagavali, Vamsadhara, Tungabhadra.',
+  osmWater: 'OSM Overpass named lakes and reservoirs in the AP envelope (ODbL).',
+  esriHillshade: 'Esri World Hillshade XYZ overlay (QGIS catalog staple). Attribution required. No API key.',
+  geodesicBuffer: 'Client-side geodesic multi-ring buffer (QGIS native:multiringconstantbuffer analog) on WGS84.',
   unavailable: 'Google Photorealistic 3D, ISRO Cartosat-3, and SOI 1:50K GeoTIFF sheets are not in this repo.',
 } as const;
 

@@ -24,6 +24,8 @@ import {
 } from 'react-leaflet';
 import L, { DivIcon, LatLngExpression } from 'leaflet';
 import { BasemapId, DigitizedFeature, InspectableFeature, RasterBasemapId } from '../../types/gis';
+import type { IngestedLayer } from '../../gis/ingest';
+import { IngestedOverlays } from './IngestedOverlays';
 import { MapLibreBasemap } from './MapLibreBasemap';
 import { useApBoundaries } from '../../gis/useApBoundaries';
 import { useApNetwork } from '../../gis/useApNetwork';
@@ -48,11 +50,14 @@ import {
   AP_CENTER,
   AP_DEFAULT_ZOOM,
   BASEMAP_TILES,
+  ESRI_HILLSHADE_TILES,
   ESRI_PLACES_TILES,
   ESRI_TRANSPORT_TILES,
   HIKING_TRAIL_TILES,
   OPENRAILWAY_TILES,
 } from '../../data/apGeo';
+import type { GeodesicBufferRing } from '../../gis/geodesicBuffer';
+import { geodesicBufferCoordinates } from '../../gis/geodesicBuffer';
 import type { ApDistrictProperties } from '../../gis/useApBoundaries';
 import {
   MAP_CAMERA_MAX_ZOOM,
@@ -124,8 +129,11 @@ interface ApLeafletMapProps {
   showRailways?: boolean;
   showGraticule?: boolean;
   showRivers?: boolean;
+  showWaterbodies?: boolean;
+  showHillshade?: boolean;
   showTrails?: boolean;
   showPlaces?: boolean;
+  bufferRings?: GeodesicBufferRing[];
   showMandals?: boolean;
   showVillages?: boolean;
   showPoliceStations?: boolean;
@@ -138,6 +146,7 @@ interface ApLeafletMapProps {
   markers?: MarkerSpec[];
   selectedFeature?: InspectableFeature;
   digitizedFeatures?: DigitizedFeature[];
+  ingestedLayers?: IngestedLayer[];
   draftPoints?: Array<{ lat: number; lon: number }>;
   draftType?: 'Point' | 'LineString' | 'Polygon';
   route?: Array<{ lat: number; lon: number }>;
@@ -683,8 +692,8 @@ const PoliceStationLayer: React.FC<{
   clipFeature?: GeoJSON.Feature | null;
   onPoliceStationClick?: ApLeafletMapProps['onPoliceStationClick'];
 }> = ({ enabled, opacity, selectedId, clipFeature, onPoliceStationClick }) => {
-  const stations = usePoliceStations(enabled);
-  if (!enabled || !stations) return null;
+  const stations = usePoliceStations(true);
+  if (!stations) return null;
   const features = clipFeature
     ? stations.features.filter((feature) => {
         if (!feature.geometry || feature.geometry.type !== 'Point') return false;
@@ -695,7 +704,7 @@ const PoliceStationLayer: React.FC<{
   return (
     <>
       <div data-testid="ps-layer-ready" data-count={features.length} hidden />
-      {features.map((feature, idx) => {
+      {enabled && features.map((feature, idx) => {
         if (!feature.geometry || feature.geometry.type !== 'Point') return null;
         const [lon, lat] = feature.geometry.coordinates;
         const props = (feature.properties ?? {}) as Partial<PoliceStationProperties>;
@@ -989,6 +998,8 @@ export const ApLeafletMap = forwardRef<ApLeafletMapHandle, ApLeafletMapProps>(fu
     showRailways = false,
     showGraticule = false,
     showRivers = false,
+    showWaterbodies = false,
+    showHillshade = false,
     showTrails = false,
     showPlaces = false,
     showMandals = false,
@@ -1002,11 +1013,13 @@ export const ApLeafletMap = forwardRef<ApLeafletMapHandle, ApLeafletMapProps>(fu
     highlightAgency = false,
     markers = [],
     digitizedFeatures = [],
+    ingestedLayers = [],
     draftPoints = [],
     draftType = 'Point',
     route = [],
     measurePoints = [],
     measureMode = null,
+    bufferRings = [],
     droppedPin,
     clickMode = 'inspect',
     onMapClick,
@@ -1030,7 +1043,7 @@ export const ApLeafletMap = forwardRef<ApLeafletMapHandle, ApLeafletMapProps>(fu
   ref
 ) {
   const { districts, state, ready } = useApBoundaries();
-  const { highways, rivers, agency } = useApNetwork();
+  const { highways, rivers, agency, water } = useApNetwork();
   const drillLevel = adminDrill?.level ?? 'state';
   const drillActive = drillLevel !== 'state';
   const showMandalsEffective = shouldDrawMandals(drillLevel) || showMandals;
@@ -1110,6 +1123,16 @@ export const ApLeafletMap = forwardRef<ApLeafletMapHandle, ApLeafletMapProps>(fu
         {tiles.labelsUrl && !useMapLibre && (
           <TileLayer url={tiles.labelsUrl} pane="overlayPane" {...leafletOverzoom(tiles.maxZoom)} />
         )}
+        {showHillshade && (
+          <TileLayer
+            url={ESRI_HILLSHADE_TILES.url}
+            attribution={ESRI_HILLSHADE_TILES.attribution}
+            opacity={0.45}
+            className="ap-hillshade-tiles"
+            pane="tilePane"
+            {...leafletOverzoom(ESRI_HILLSHADE_TILES.maxZoom)}
+          />
+        )}
         <ZoomAwareDetailStack
           useMapLibre={useMapLibre}
           rasterId={rasterId}
@@ -1139,6 +1162,16 @@ export const ApLeafletMap = forwardRef<ApLeafletMapHandle, ApLeafletMapProps>(fu
           />
         )}
         {showGraticule && <Graticule />}
+        {water && showWaterbodies && (
+          <GeoJSON
+            data={water}
+            style={{ color: '#0e7490', weight: 0.8, fillColor: '#38bdf8', fillOpacity: 0.28 }}
+            onEachFeature={(feature, layer) => {
+              const name = (feature.properties as { name?: string } | null)?.name;
+              if (name) layer.bindTooltip(name, { sticky: true });
+            }}
+          />
+        )}
         {rivers && showRivers && (
           <GeoJSON
             data={rivers}
@@ -1255,6 +1288,7 @@ export const ApLeafletMap = forwardRef<ApLeafletMapHandle, ApLeafletMapProps>(fu
             </Popup>
           </Marker>
         ))}
+        <IngestedOverlays layers={ingestedLayers} />
         {digitizedFeatures.map((df) => {
           const latlngs = df.points.map((p) => [p.lat, p.lon] as LatLngExpression);
           if (df.type === 'Point' && df.points[0]) {
@@ -1317,6 +1351,23 @@ export const ApLeafletMap = forwardRef<ApLeafletMapHandle, ApLeafletMapProps>(fu
             />
           )
         )}
+        {bufferRings.map((ring) => (
+          <Polygon
+            key={ring.id}
+            positions={geodesicBufferCoordinates(ring.lat, ring.lon, ring.radiusKm).map(
+              ([lon, lat]) => [lat, lon] as LatLngExpression
+            )}
+            pathOptions={{
+              color: '#0f766e',
+              weight: 1.2,
+              dashArray: '4 3',
+              fillColor: '#14b8a6',
+              fillOpacity: 0.08,
+            }}
+          >
+            <Tooltip sticky>{ring.label}</Tooltip>
+          </Polygon>
+        ))}
         {droppedPin && (
           <Marker position={[droppedPin.lat, droppedPin.lon]} icon={markerIcon('city', true)}>
             <Popup>

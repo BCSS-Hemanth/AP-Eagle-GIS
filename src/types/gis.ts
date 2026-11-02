@@ -54,7 +54,9 @@ export interface GisLayer {
     | 'line-trail'
     | 'line-rail'
     | 'grid-topo'
-    | 'satellite-raster';
+    | 'satellite-raster'
+    | 'poly-water'
+    | 'hillshade-raster';
   metaRight: string;
   geometryType: 'Polygon' | 'MultiPolygon' | 'LineString' | 'Point' | 'RasterGrid';
   featureCount: number;
@@ -90,7 +92,8 @@ export interface InspectableFeature {
     | 'Village'
     | 'OSM Building'
     | 'Highway'
-    | 'River';
+    | 'River'
+    | 'Water body';
   statusBadge: string;
   liveIndicator: string;
   severity: 'operational' | 'critical' | 'warning' | 'intel';

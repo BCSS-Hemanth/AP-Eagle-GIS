@@ -35,12 +35,16 @@ describe('dashboard layer catalog save', () => {
     expect(flags.showDistricts).toBe(true);
     expect(flags.showPoliceStations).toBe(false);
     expect(flags.showHighways).toBe(false);
+    expect(flags.showWaterbodies).toBe(false);
+    expect(flags.showHillshade).toBe(false);
   });
 
   it('applies a catalog snapshot onto dashboard flags including opacity', () => {
     const catalog = INITIAL_GIS_LAYERS.map((layer) =>
       layer.id === 'lyr-highways'
         ? { ...layer, enabled: true }
+        : layer.id === 'lyr-waterbodies' || layer.id === 'lyr-hillshade'
+          ? { ...layer, enabled: true }
         : layer.id === 'lyr-pss'
           ? { ...layer, enabled: true, opacity: 40 }
           : layer
@@ -49,6 +53,8 @@ describe('dashboard layer catalog save', () => {
     const applied = applyLayerConfig(INITIAL_GIS_LAYERS, saved);
     const flags = leafletFlagsFromLayers(applied);
     expect(flags.showHighways).toBe(true);
+    expect(flags.showWaterbodies).toBe(true);
+    expect(flags.showHillshade).toBe(true);
     expect(flags.showPoliceStations).toBe(true);
     expect(flags.policeStationOpacity).toBeCloseTo(0.4);
     expect(countEnabledLayers(applied)).toBeGreaterThan(countEnabledLayers(applyLayerConfig(INITIAL_GIS_LAYERS, defaultDashboardLayerConfig())));
