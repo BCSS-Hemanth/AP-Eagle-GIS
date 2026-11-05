@@ -22,35 +22,27 @@ describe('authenticate', () => {
 
 describe('RBAC workspace matrix', () => {
   it('gives state admin every workspace', () => {
-    expect(allowedWorkspaces('STATE_SPATIAL_ADMIN')).toContain(
-      'feature-editor-and-digitizer'
-    );
-    expect(canAccessWorkspace('STATE_SPATIAL_ADMIN', 'user-roles-and-audit-trail')).toBe(
-      true
-    );
+    expect(allowedWorkspaces('STATE_SPATIAL_ADMIN')).toContain('feature-editor');
+    expect(canAccessWorkspace('STATE_SPATIAL_ADMIN', 'users-audit-trail')).toBe(true);
+    expect(canAccessWorkspace('STATE_SPATIAL_ADMIN', 'administrative-layers')).toBe(true);
+    expect(canAccessWorkspace('STATE_SPATIAL_ADMIN', 'atlas-map-books')).toBe(true);
   });
 
   it('hides write workspaces from analyst viewers', () => {
-    expect(canAccessWorkspace('ANALYST_VIEWER', 'interactive-map-viewer')).toBe(true);
-    expect(canAccessWorkspace('ANALYST_VIEWER', 'feature-editor-and-digitizer')).toBe(false);
-    expect(canAccessWorkspace('ANALYST_VIEWER', 'vector-and-raster-data-import')).toBe(
+    expect(canAccessWorkspace('ANALYST_VIEWER', 'interactive-map')).toBe(true);
+    expect(canAccessWorkspace('ANALYST_VIEWER', 'feature-editor')).toBe(false);
+    expect(canAccessWorkspace('ANALYST_VIEWER', 'import-export')).toBe(
       false
     );
-    expect(
-      canAccessWorkspace('ANALYST_VIEWER', 'spatial-analysis-and-geoprocessing')
-    ).toBe(false);
-    expect(canAccessWorkspace('ANALYST_VIEWER', 'mobile-gis-export')).toBe(false);
+    expect(canAccessWorkspace('ANALYST_VIEWER', 'mobile-locus-export')).toBe(false);
   });
 
-  it('lets field commanders digitize and geoprocess but not import', () => {
-    expect(canAccessWorkspace('FIELD_COMMANDER_EAGLE', 'feature-editor-and-digitizer')).toBe(
+  it('lets field commanders digitize but not import', () => {
+    expect(canAccessWorkspace('FIELD_COMMANDER_EAGLE', 'feature-editor')).toBe(
       true
     );
     expect(
-      canAccessWorkspace('FIELD_COMMANDER_EAGLE', 'spatial-analysis-and-geoprocessing')
-    ).toBe(true);
-    expect(
-      canAccessWorkspace('FIELD_COMMANDER_EAGLE', 'vector-and-raster-data-import')
+      canAccessWorkspace('FIELD_COMMANDER_EAGLE', 'import-export')
     ).toBe(false);
   });
 });
@@ -58,7 +50,6 @@ describe('RBAC workspace matrix', () => {
 describe('RBAC action permissions', () => {
   it('enforces write vs view permissions', () => {
     expect(hasPermission('STATE_SPATIAL_ADMIN', 'digitize')).toBe(true);
-    expect(hasPermission('STATE_SPATIAL_ADMIN', 'fixTopology')).toBe(true);
     expect(hasPermission('FIELD_COMMANDER_EAGLE', 'digitize')).toBe(true);
     expect(hasPermission('FIELD_COMMANDER_EAGLE', 'import')).toBe(false);
     expect(hasPermission('DISTRICT_NODAL_ASR', 'export')).toBe(true);

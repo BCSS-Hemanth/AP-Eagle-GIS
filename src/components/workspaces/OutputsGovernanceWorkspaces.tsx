@@ -3,29 +3,22 @@ import {
   BookOpen,
   Download,
   FileSpreadsheet,
-  Network,
-  RefreshCw,
   Share2,
   ShieldCheck,
-  Wrench,
 } from 'lucide-react';
-import { AuditLogEntry, GisLayer, TopologyAuditRule, WorkspaceId } from '../../types/gis';
+import { AuditLogEntry, GisLayer, WorkspaceId } from '../../types/gis';
+import { INITIAL_SEIZURE_REPORT_ROWS } from '../../data/apGisData';
 import { downloadTextFile } from '../../utils/geoMath';
 import { useAuth } from '../../auth/AuthContext';
-import { QGIS_ALIGNED_SOURCES } from '../../gis/gisSources';
-import { QGIS_INGEST_PROVIDERS, QGIS_UNAVAILABLE_IN_BROWSER } from '../../gis/ingest';
+import { MapFormatExportButtons } from '../gis/MapFormatExportButtons';
 
 interface OutputsGovProps {
   workspace:
-    | 'mobile-gis-export'
-    | 'atlas-map-book-generator'
-    | 'reports-and-seizure-analytics'
-    | 'data-quality-and-topology-audits'
-    | 'conditional-capabilities-and-dependency-register'
-    | 'user-roles-and-audit-trail';
+    | 'mobile-locus-export'
+    | 'atlas-map-books'
+    | 'reports-seizure-analytics'
+    | 'users-audit-trail';
   layers: GisLayer[];
-  topologyRules: TopologyAuditRule[];
-  onFixTopologyRule: (id: string) => void;
   auditLogs: AuditLogEntry[];
   onSwitchWorkspace: (ws: WorkspaceId) => void;
   onTriggerToast: (msg: string) => void;
@@ -34,8 +27,6 @@ interface OutputsGovProps {
 export const OutputsGovernanceWorkspaces: React.FC<OutputsGovProps> = ({
   workspace,
   layers,
-  topologyRules,
-  onFixTopologyRule,
   auditLogs,
   onSwitchWorkspace,
   onTriggerToast,
@@ -51,7 +42,7 @@ export const OutputsGovernanceWorkspaces: React.FC<OutputsGovProps> = ({
   // Reports horizon
   const [reportPeriod, setReportPeriod] = useState<'FY25-26' | 'Q3-2026'>('FY25-26');
 
-  if (workspace === 'mobile-gis-export') {
+  if (workspace === 'mobile-locus-export') {
     const enabledCount = layers.filter((l) => l.enabled).length;
     const estSizeMb = (enabledCount * 3.4 + (includeMbTiles ? 64.5 : 0)).toFixed(1);
 
@@ -61,27 +52,27 @@ export const OutputsGovernanceWorkspaces: React.FC<OutputsGovProps> = ({
         return;
       }
       const manifest = {
-        packageFormat: 'OGC GeoPackage 1.3 (.gpkg)',
-        targetPlatform: 'EAGLE Force QField / ATAK Field Tablet',
+        packageFormat: 'Locus Map / OGC GeoPackage field package',
+        targetPlatform: 'Locus Map and compatible open-source mobile GIS',
         sectorExtent: selectedSector,
         crs: 'EPSG:4326',
         offlineSatelliteTilesIncluded: includeMbTiles,
         bundledLayers: layers.filter((l) => l.enabled).map((l) => l.sourceTable),
         estimatedSizeMB: Number(estSizeMb),
-        generatedAt: '2026-10-28T04:44:00+05:30',
+        generatedAt: new Date().toISOString(),
       };
-      downloadTextFile('eagle_field_deployment_gpkg_manifest.json', JSON.stringify(manifest, null, 2));
-      onTriggerToast(`Generated Offline Field GeoPackage bundle (${estSizeMb} MB)`);
+      downloadTextFile('eagle_locus_mobile_export_manifest.json', JSON.stringify(manifest, null, 2));
+      onTriggerToast(`Prepared Locus / mobile GIS export manifest (${estSizeMb} MB est.)`);
     };
 
     return (
-      <div className="p-4 lg:p-6 space-y-5 max-w-5xl mx-auto">
+      <div className="p-4 pb-10 lg:p-6 lg:pb-12 space-y-5 max-w-5xl mx-auto">
         <div className="border-b border-outline-variant/35 pb-3">
           <span className="text-[10.5px] font-bold uppercase tracking-wider text-secondary block">
-            Zero-Connectivity Eastern Ghats Field Sync
+            M3.5 Mobile GIS / Locus (DOCX §6)
           </span>
           <h1 className="text-xl font-bold text-primary tracking-tight">
-            Mobile GIS Offline Package Builder (OGC GeoPackage / MBTiles)
+            Prepare &amp; export approved layers for Locus Map
           </h1>
         </div>
 
@@ -143,7 +134,7 @@ export const OutputsGovernanceWorkspaces: React.FC<OutputsGovProps> = ({
     );
   }
 
-  if (workspace === 'atlas-map-book-generator') {
+  if (workspace === 'atlas-map-books') {
     const sheets: Array<{
       id: string;
       circle: string;
@@ -154,11 +145,11 @@ export const OutputsGovernanceWorkspaces: React.FC<OutputsGovProps> = ({
     const current = sheets[activeSheetIdx];
 
     return (
-      <div className="p-4 lg:p-6 space-y-4 max-w-[1440px] mx-auto">
+      <div className="p-4 pb-10 lg:p-6 lg:pb-12 space-y-4 max-w-[1440px] mx-auto">
         <div className="flex flex-wrap items-center justify-between gap-3 border-b border-outline-variant/35 pb-3">
           <div>
             <span className="text-[10.5px] font-bold uppercase tracking-wider text-secondary block">
-              Data-Driven Multi-Sheet Cartography
+              M3.2 Atlas &amp; Map Books
             </span>
             <h1 className="text-xl font-bold text-primary tracking-tight">
               Circle &amp; Jurisdiction Atlas Map Book Generator
@@ -172,6 +163,16 @@ export const OutputsGovernanceWorkspaces: React.FC<OutputsGovProps> = ({
             <BookOpen className="w-3.5 h-3.5" />
             <span>Compile Full Circle Atlas</span>
           </button>
+        </div>
+
+        <div className="rounded border border-outline-variant/40 bg-surface-container-lowest p-3">
+          <MapFormatExportButtons
+            layers={layers}
+            context="atlas-map-books"
+            canExport={can('export')}
+            onDenied={() => onTriggerToast('Export denied for your RBAC clearance')}
+            onToast={onTriggerToast}
+          />
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
@@ -235,33 +236,27 @@ export const OutputsGovernanceWorkspaces: React.FC<OutputsGovProps> = ({
     );
   }
 
-  if (workspace === 'reports-and-seizure-analytics') {
-    const rows: Array<{
-      corridor: string;
-      firs: number;
-      cannabisKg: number;
-      vehicles: number;
-      hitRate: string;
-    }> = [];
+  if (workspace === 'reports-seizure-analytics') {
+    const rows = INITIAL_SEIZURE_REPORT_ROWS;
 
     const handleDownloadCsv = () => {
       const csv = [
-        'Corridor,FIRs,Seized_Kg,Vehicles_Impounded,ANPR_Hit_Rate',
-        ...rows.map((r) => `"${r.corridor}",${r.firs},${r.cannabisKg},${r.vehicles},${r.hitRate}`),
+        'Seizure_Location,FIRs,Seized_Kg,Vehicles_Impounded,Remarks',
+        ...rows.map((r) => `"${r.location}",${r.firs},${r.cannabisKg},${r.vehicles},"${r.remarks}"`),
       ].join('\n');
-      downloadTextFile(`eagle_ap_seizure_analytics_${reportPeriod}.csv`, csv, 'text/csv');
-      onTriggerToast('Downloaded NDPS Seizure Corridor Report (.csv)');
+      downloadTextFile(`eagle_ap_seizure_report_${reportPeriod}.csv`, csv, 'text/csv');
+      onTriggerToast('Downloaded seizure report (.csv)');
     };
 
     return (
-      <div className="p-4 lg:p-6 space-y-4 max-w-[1440px] mx-auto">
+      <div className="p-4 pb-10 lg:p-6 lg:pb-12 space-y-4 max-w-[1440px] mx-auto">
         <div className="flex flex-wrap items-center justify-between gap-3 border-b border-outline-variant/35 pb-3">
           <div>
             <span className="text-[10.5px] font-bold uppercase tracking-wider text-secondary block">
-              NDPS Enforcement Telemetry &amp; Corridor Attribution
+              Reports, Downloads and Planning Support
             </span>
             <h1 className="text-xl font-bold text-primary tracking-tight">
-              Reports &amp; Contraband Seizure Analytics
+              Reports &amp; Seizure Analytics
             </h1>
           </div>
           <div className="flex items-center gap-2">
@@ -285,7 +280,7 @@ export const OutputsGovernanceWorkspaces: React.FC<OutputsGovProps> = ({
               className="px-3 py-1.5 rounded bg-primary text-on-primary text-xs font-semibold flex items-center gap-1.5 cursor-pointer"
             >
               <FileSpreadsheet className="w-3.5 h-3.5" />
-              <span>Export CSV Ledger</span>
+              <span>Export CSV</span>
             </button>
           </div>
         </div>
@@ -294,31 +289,31 @@ export const OutputsGovernanceWorkspaces: React.FC<OutputsGovProps> = ({
           <table className="w-full text-left border-collapse text-xs tabular-coord whitespace-nowrap">
             <thead className="bg-surface-container text-[10.5px] font-bold uppercase tracking-wider text-on-surface-variant border-b border-outline-variant/35">
               <tr>
-                <th className="py-2.5 px-4">Strategic Transit Corridor</th>
+                <th className="py-2.5 px-4">Seizure location</th>
                 <th className="py-2.5 px-4 text-right">Registered FIRs</th>
-                <th className="py-2.5 px-4 text-right">Seized Contraband (kg)</th>
-                <th className="py-2.5 px-4 text-right">Vehicles Impounded</th>
-                <th className="py-2.5 px-4 text-right">ANPR Correlation</th>
+                <th className="py-2.5 px-4 text-right">Seized quantity (kg)</th>
+                <th className="py-2.5 px-4 text-right">Vehicles impounded</th>
+                <th className="py-2.5 px-4 text-right">Remarks</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-outline-variant/25">
               {rows.length === 0 && (
                 <tr>
                   <td colSpan={5} className="py-6 px-4 text-on-surface-variant">
-                    No seizure or FIR ledger was provided. This table stays empty until a verified file is loaded.
+                    No seizure report rows yet. Load verified ganja seizure / FIR data to populate this table.
                   </td>
                 </tr>
               )}
               {rows.map((r) => (
-                <tr key={r.corridor} className="hover:bg-surface-container-low/50">
-                  <td className="py-2.5 px-4 font-semibold text-primary">{r.corridor}</td>
+                <tr key={r.location} className="hover:bg-surface-container-low/50">
+                  <td className="py-2.5 px-4 font-semibold text-primary">{r.location}</td>
                   <td className="py-2.5 px-4 text-right font-mono">{r.firs}</td>
                   <td className="py-2.5 px-4 text-right font-mono font-bold text-error">
                     {r.cannabisKg.toLocaleString()} kg
                   </td>
                   <td className="py-2.5 px-4 text-right font-mono">{r.vehicles}</td>
                   <td className="py-2.5 px-4 text-right font-mono font-semibold text-secondary">
-                    {r.hitRate}
+                    {r.remarks}
                   </td>
                 </tr>
               ))}
@@ -329,169 +324,28 @@ export const OutputsGovernanceWorkspaces: React.FC<OutputsGovProps> = ({
     );
   }
 
-  if (workspace === 'data-quality-and-topology-audits') {
-    return (
-      <div className="p-4 lg:p-6 space-y-4 max-w-[1440px] mx-auto">
-        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-outline-variant/35 pb-3">
-          <div>
-            <span className="text-[10.5px] font-bold uppercase tracking-wider text-secondary block">
-              OGC Simple Features &amp; PostGIS Topology Engine
-            </span>
-            <h1 className="text-xl font-bold text-primary tracking-tight">
-              Data Quality &amp; Spatial Topology Audits
-            </h1>
-          </div>
-          <button
-            type="button"
-            onClick={() => onTriggerToast('No topology engine is connected. Only loaded KMZ points are listed.')}
-            className="px-3 py-1.5 rounded bg-primary text-on-primary text-xs font-semibold flex items-center gap-1.5 cursor-pointer"
-          >
-            <RefreshCw className="w-3.5 h-3.5" />
-            <span>Re-Run Topology Audit</span>
-          </button>
-        </div>
-
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 tabular-coord">
-          {topologyRules.map((rule) => (
-            <div
-              key={rule.id}
-              className="bg-surface-container-lowest rounded border border-outline-variant/40 p-4 space-y-2.5 text-xs"
-            >
-              <div className="flex items-center justify-between gap-2">
-                <span className="font-bold text-primary text-sm">{rule.ruleName}</span>
-                <span
-                  className={`px-2 py-0.5 rounded text-[10px] font-bold ${
-                    rule.violations === 0
-                      ? 'bg-secondary-container/50 text-on-secondary-container'
-                      : 'bg-error-container text-on-error-container'
-                  }`}
-                >
-                  {rule.violations === 0 ? '0 VIOLATIONS (PASS)' : `${rule.violations} VIOLATIONS`}
-                </span>
-              </div>
-              <div className="font-mono text-[11px] text-secondary">{rule.layerName}</div>
-              <p className="text-on-surface-variant leading-relaxed">{rule.description}</p>
-              <div className="pt-1 flex items-center justify-between border-t border-outline-variant/25">
-                <span className="font-mono text-[10.5px] text-outline">
-                  Checked: {rule.checkedFeatures.toLocaleString()} features
-                </span>
-                {rule.violations > 0 && (
-                  <button
-                    type="button"
-                    data-testid={`topology-fix-${rule.id}`}
-                    disabled={!can('fixTopology')}
-                    onClick={() => onFixTopologyRule(rule.id)}
-                    className="px-2.5 py-1 rounded bg-secondary text-on-secondary text-[11px] font-semibold flex items-center gap-1 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
-                  >
-                    <Wrench className="w-3 h-3" />
-                    <span>Auto-Snap &amp; Resolve</span>
-                  </button>
-                )}
-              </div>
-            </div>
-          ))}
-        </div>
-      </div>
-    );
-  }
-
-  if (workspace === 'conditional-capabilities-and-dependency-register') {
-    const services = QGIS_ALIGNED_SOURCES.map((src) => ({
-      name: src.name,
-      endpoint: src.url,
-      status:
-        src.status === 'live'
-          ? 'LIVE · no API key'
-          : src.status === 'local'
-            ? 'LOCAL GEOJSON'
-            : 'NOT CONNECTED',
-      latency: src.cost === 'free' ? src.license : '—',
-    }));
-
-    return (
-      <div className="p-4 lg:p-6 space-y-4 max-w-[1440px] mx-auto">
-        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-outline-variant/35 pb-3">
-          <div>
-            <span className="text-[10.5px] font-bold uppercase tracking-wider text-secondary block">
-              OGC &amp; Inter-Agency Upstream Connectors
-            </span>
-            <h1 className="text-xl font-bold text-primary tracking-tight">
-              Capabilities &amp; Spatial Dependency Register
-            </h1>
-          </div>
-          <button
-            type="button"
-            onClick={() => onTriggerToast('No upstream endpoints are configured')}
-            className="px-3 py-1.5 rounded bg-surface-container hover:bg-surface-container-high text-primary text-xs font-semibold flex items-center gap-1.5 cursor-pointer"
-          >
-            <Network className="w-3.5 h-3.5" />
-            <span>Ping All Endpoints</span>
-          </button>
-        </div>
-
-        <div className="bg-surface-container-lowest rounded border border-outline-variant/40 p-3.5 text-xs space-y-2">
-          <div className="font-bold text-primary">QGIS data providers implemented in EAGLE</div>
-          {QGIS_INGEST_PROVIDERS.map((p) => (
-            <div key={p.key} className="flex flex-wrap justify-between gap-2">
-              <div>
-                <span className="font-mono text-secondary">{p.key}</span>
-                <span className="text-on-surface"> — {p.title}</span>
-                <div className="font-mono text-[10.5px] text-on-surface-variant">{p.qgisPath}</div>
-              </div>
-              <span className="px-2 py-0.5 rounded bg-surface-container text-[10px] font-bold h-fit">
-                {p.feasible ? 'BROWSER READY' : 'UNAVAILABLE'}
-              </span>
-            </div>
-          ))}
-          {QGIS_UNAVAILABLE_IN_BROWSER.map((p) => (
-            <div key={p.key} className="text-on-surface-variant">
-              <span className="font-mono">{p.key}</span> — {p.reason}
-            </div>
-          ))}
-        </div>
-
-        <div className="bg-surface-container-lowest rounded border border-outline-variant/40 divide-y divide-outline-variant/25 text-xs tabular-coord">
-          {services.map((svc) => (
-            <div key={svc.name} className="p-3.5 flex flex-wrap items-center justify-between gap-3">
-              <div>
-                <div className="font-bold text-primary">{svc.name}</div>
-                <div className="font-mono text-[11px] text-on-surface-variant">{svc.endpoint}</div>
-              </div>
-              <div className="flex items-center gap-3 font-mono">
-                <span className="text-on-surface-variant">{svc.latency}</span>
-                <span className="px-2 py-0.5 rounded bg-surface-container text-on-surface-variant text-[10px] font-bold">
-                  {svc.status}
-                </span>
-              </div>
-            </div>
-          ))}
-        </div>
-      </div>
-    );
-  }
-
   // USER ROLES & AUDIT TRAIL
   return (
-    <div className="p-4 lg:p-6 space-y-5 max-w-[1440px] mx-auto">
+    <div className="p-4 pb-10 lg:p-6 lg:pb-12 space-y-5 max-w-[1440px] mx-auto">
       <div className="flex flex-wrap items-center justify-between gap-3 border-b border-outline-variant/35 pb-3">
         <div>
           <span className="text-[10.5px] font-bold uppercase tracking-wider text-secondary block">
-            Zero-Trust Spatial Governance &amp; Chain of Custody
+            System &amp; Governance
           </span>
           <h1 className="text-xl font-bold text-primary tracking-tight">
-            Law Enforcement RBAC &amp; Cryptographic GIS Audit Trail
+            Users &amp; Audit Trail
           </h1>
         </div>
         <button
           type="button"
           onClick={() => {
             downloadTextFile('eagle_gis_audit_trail.json', JSON.stringify(auditLogs, null, 2));
-            onTriggerToast('Exported signed cryptographic GIS audit ledger');
+            onTriggerToast('Exported GIS audit log');
           }}
           className="px-3 py-1.5 rounded bg-primary text-on-primary text-xs font-semibold flex items-center gap-1.5 cursor-pointer"
         >
           <Download className="w-3.5 h-3.5" />
-          <span>Export Signed Audit Log</span>
+          <span>Export Audit Log</span>
         </button>
       </div>
 
@@ -505,7 +359,6 @@ export const OutputsGovernanceWorkspaces: React.FC<OutputsGovProps> = ({
               <th className="py-2.5 px-3">RBAC Clearance</th>
               <th className="py-2.5 px-3">Action</th>
               <th className="py-2.5 px-3">Target Spatial Resource</th>
-              <th className="py-2.5 px-3">Integrity Hash</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-outline-variant/25">
@@ -520,7 +373,6 @@ export const OutputsGovernanceWorkspaces: React.FC<OutputsGovProps> = ({
                 <td className="py-2 px-3 font-mono text-[10.5px]">{entry.role}</td>
                 <td className="py-2 px-3 font-mono font-semibold text-secondary">{entry.action}</td>
                 <td className="py-2 px-3 font-mono text-[11px]">{entry.resource}</td>
-                <td className="py-2 px-3 font-mono text-[10.5px] text-outline">{entry.signatureHash}</td>
               </tr>
             ))}
           </tbody>

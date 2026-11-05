@@ -1,0 +1,41 @@
+---
+description: GIS-Source inspection safety — when not to replace primary app layers
+alwaysApply: true
+---
+
+# GIS-Source inspection safety (remember for further folders)
+
+**Raw pack location:** `c:\AP-GIS\GIS-Source` (not under the app repo). Runtime layers remain the converted copies under `public/geo/gis-source/`.
+
+When analyzing or integrating `GIS-Source` (Admin, OPS, Raster, etc.), **inspect actual content** (CRS, attributes, feature identity, era, size). Do **not** replace primary app layers by folder/filename alone.
+
+## Recurring safety point types
+
+1. **Geographic regime mismatch (era / admin split)**  
+   Source may be older or undivided (e.g. pre-2014 AP+Telangana districts, IND_adm1 with no Telangana).  
+   **Do not** replace primary drill, post-2014 AP state border, or India overview.  
+   **May** expose as labeled historical/overlay-only layers.
+
+2. **Same theme, different product**  
+   e.g. border PS vs user PS KMZ; taluk vs NWIC mandals; SOI map-no **points** vs sheet **polygons** vs topo mosaic.  
+   Keep complementary layers; fix legend/geometry to match real data; avoid duplicate “same id” layers.
+
+3. **Payload / browser feasibility**  
+   Huge vectors (e.g. full `ap_roads` ~153k) must not ship as one untiled GeoJSON.  
+   Prefer independent subsets, tiling, or deferred dependent pipelines.
+
+4. **CRS / projection**  
+   PRJ text can disagree with coordinates (e.g. rail LCC metres). Always validate bbox; reproject before use.
+
+5. **Explicit safety gate before replacement**  
+   If GIS-Source conflicts with working primary data: run a content comparison (names, counts, Telangana/AP split, bbox).  
+   Block replace when unsafe; document reason; integrate as overlay or subset instead.  
+   Prefer GIS-Source only when content is the same kind of geography/product the feature needs.
+
+## Already decided (Admin)
+
+- Primary districts: `ap-districts-2022` (26) — GIS-Source undivided 25 = overlay only.  
+- Primary state border: post-2014 `ap-state` — IND_adm1 AP = overlay only.  
+- India overview: DataMeet — not IND_adm1.  
+- Roads: major subset authoritative for browser; full SHP deferred.  
+- Policy code: `src/gis/adminGisSourceSafety.ts`.

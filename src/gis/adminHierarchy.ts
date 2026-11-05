@@ -370,6 +370,12 @@ export type AdminDrillLevel = 'state' | 'district' | 'mandal' | 'village';
 
 export interface AdminDrill {
   level: AdminDrillLevel;
+  /**
+   * When level === 'state':
+   * - false/undefined = India overview (no isolation)
+   * - true = Andhra Pradesh state frame (neighbors still visible; no district isolation yet)
+   */
+  apFocused?: boolean;
   districtName?: string;
   districtFeature?: GeoJSON.Feature;
   mandalName?: string;
@@ -378,7 +384,19 @@ export interface AdminDrill {
   villageFeature?: GeoJSON.Feature;
 }
 
-export const STATE_ADMIN_DRILL: AdminDrill = { level: 'state' };
+/** India-wide overview — starting frame. */
+export const STATE_ADMIN_DRILL: AdminDrill = { level: 'state', apFocused: false };
+
+/** AP state frame without isolating a district. */
+export const AP_STATE_FOCUS_DRILL: AdminDrill = { level: 'state', apFocused: true };
+
+export function isApStateFocus(drill: AdminDrill | null | undefined): boolean {
+  return Boolean(drill && drill.level === 'state' && drill.apFocused);
+}
+
+export function isIndiaOverview(drill: AdminDrill | null | undefined): boolean {
+  return Boolean(!drill || (drill.level === 'state' && !drill.apFocused));
+}
 
 export function drillFocusFeature(drill: AdminDrill): GeoJSON.Feature | null {
   if (drill.level === 'village') return drill.villageFeature ?? null;
@@ -391,6 +409,7 @@ export function adminDrillUp(drill: AdminDrill): AdminDrill {
   if (drill.level === 'village') {
     return {
       level: 'mandal',
+      apFocused: true,
       districtName: drill.districtName,
       districtFeature: drill.districtFeature,
       mandalName: drill.mandalName,
@@ -400,18 +419,29 @@ export function adminDrillUp(drill: AdminDrill): AdminDrill {
   if (drill.level === 'mandal') {
     return {
       level: 'district',
+      apFocused: true,
       districtName: drill.districtName,
       districtFeature: drill.districtFeature,
     };
+  }
+  if (drill.level === 'district') {
+    return AP_STATE_FOCUS_DRILL;
+  }
+  if (drill.level === 'state' && drill.apFocused) {
+    return STATE_ADMIN_DRILL;
   }
   return STATE_ADMIN_DRILL;
 }
 
 export function adminDrillTo(drill: AdminDrill, level: AdminDrillLevel): AdminDrill {
-  if (level === 'state') return STATE_ADMIN_DRILL;
+  if (level === 'state') {
+    // Prefer AP frame when coming from a deeper drill; India overview only via explicit back.
+    return drill.apFocused || drill.level !== 'state' ? AP_STATE_FOCUS_DRILL : STATE_ADMIN_DRILL;
+  }
   if (level === 'district') {
     return {
       level: 'district',
+      apFocused: true,
       districtName: drill.districtName,
       districtFeature: drill.districtFeature,
     };
@@ -419,6 +449,7 @@ export function adminDrillTo(drill: AdminDrill, level: AdminDrillLevel): AdminDr
   if (level === 'mandal') {
     return {
       level: 'mandal',
+      apFocused: true,
       districtName: drill.districtName,
       districtFeature: drill.districtFeature,
       mandalName: drill.mandalName,

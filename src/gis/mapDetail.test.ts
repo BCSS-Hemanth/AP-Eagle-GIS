@@ -81,14 +81,14 @@ describe('map zoom bands and overlays', () => {
     expect(shouldOverlayOsmRaster(18, false, false)).toBe(false);
   });
 
-  it('overlays Esri imagery at village isolation and at z≥14, never as Cartosat', () => {
+  it('overlays GIS-Source satellite at village isolation and at z≥14', () => {
     expect(shouldOverlaySatellite(12, 'vector', 'village', false)).toBe(true);
     expect(shouldOverlaySatellite(13, 'vector', 'mandal', false)).toBe(true);
     expect(shouldOverlaySatellite(13, 'vector', 'district', false)).toBe(false);
     expect(shouldOverlaySatellite(14, 'vector', 'state', false)).toBe(true);
     expect(shouldOverlaySatellite(18, 'satellite', 'village', false)).toBe(false);
-    expect(MAP_DETAIL_SOURCES.esriImagery).toMatch(/Not ISRO Cartosat-3/);
-    expect(MAP_DETAIL_SOURCES.esriHillshade).toMatch(/Hillshade/);
+    expect(MAP_DETAIL_SOURCES.esriImagery).toMatch(/gap-fill/);
+    expect(MAP_DETAIL_SOURCES.esriHillshade).toMatch(/google_terrain/);
     expect(MAP_DETAIL_SOURCES.osmWater).toMatch(/reservoirs/);
     expect(MAP_DETAIL_SOURCES.geodesicBuffer).toMatch(/geodesic/);
   });
@@ -114,10 +114,16 @@ describe('map zoom bands and overlays', () => {
     expect(shouldOverlayPlaces(8, false, true)).toBe(true);
   });
 
-  it('captions the live stack without claiming Cartosat', () => {
+  it('captions imagery as Esri gap-fill plus GIS-Source sat AOI', () => {
     const text = mapDetailCaption(15, 'vector', true, true);
-    expect(text).toContain('Esri World Imagery');
-    expect(text).toContain('not Cartosat-3');
+    expect(text).toContain('Esri imagery + GIS-Source sat AOI');
+    expect(text).toContain('OSM raster');
+  });
+
+  it('captions satellite basemap as Esri only (no GIS-Source AOI patch)', () => {
+    const text = mapDetailCaption(7, 'satellite', false, false);
+    expect(text).toContain('Esri imagery');
+    expect(text).not.toContain('GIS-Source sat AOI');
   });
 });
 

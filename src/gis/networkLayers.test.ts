@@ -16,7 +16,7 @@ function lonLatFromGeometry(geometry: GeoJSON.Geometry): [number, number] {
 }
 
 describe('OSM / OSRM network overlays', () => {
-  it('stores NH-16, NH-40, and NH-44 OSRM alignments', () => {
+  it('keeps legacy OSRM highway sketch file as offline fallback only', () => {
     const data = JSON.parse(readFileSync(resolve(root, 'public/geo/ap-highways.geojson'), 'utf8')) as GeoJSON.FeatureCollection;
     const names = data.features.map((f) => String(f.properties?.name ?? ''));
     expect(names).toEqual(['NH-16', 'NH-40', 'NH-44']);
@@ -63,9 +63,13 @@ describe('layer catalog and QGIS-aligned sources', () => {
     expect(byId['lyr-rivers']?.featureCount).toBe(127);
     expect(byId['lyr-rivers']?.sourceTable).toBe('public/geo/ap-rivers.geojson');
     expect(byId['lyr-waterbodies']?.featureCount).toBe(353);
-    expect(byId['lyr-highways']?.featureCount).toBe(3);
-    expect(byId['lyr-hillshade']?.sourceTable).toMatch(/World_Hillshade/);
-    expect(byId['lyr-cartosat']?.metaRight).toMatch(/not Cartosat-3/);
+    expect(byId['lyr-highways']?.featureCount).toBe(2487);
+    expect(byId['lyr-highways']?.sourceTable).toContain('layer=nh');
+    expect(byId['lyr-ap-roads-full']?.featureCount).toBe(153655);
+    expect(byId['lyr-ops-vsp-roads']?.featureCount).toBe(12021);
+    expect(byId['lyr-hillshade']?.sourceTable).toContain('gis-source/raster/google_terrain');
+    expect(byId['lyr-cartosat']?.sourceTable).toContain('gis-source/raster');
+    expect(byId['lyr-soi-topo']?.sourceTable).toContain('soi_topo');
   });
 
   it('does not require API keys for live or local sources', () => {
@@ -73,7 +77,9 @@ describe('layer catalog and QGIS-aligned sources', () => {
       expect(source.apiKey).toBe(false);
       expect(source.cost).toBe('free');
     }
-    expect(QGIS_ALIGNED_SOURCES.some((s) => s.id === 'esri-hillshade' && s.status === 'live')).toBe(true);
+    expect(QGIS_ALIGNED_SOURCES.some((s) => s.id === 'gis-source-terrain' && s.status === 'live')).toBe(
+      true
+    );
     expect(QGIS_ALIGNED_SOURCES.some((s) => s.id === 'bhuvan-cartosat' && s.status === 'not connected')).toBe(
       true
     );

@@ -1,0 +1,15 @@
+{
+  "generatedAt": "2026-11-03T10:24:39.860092+00:00",
+  "sourceRoot": "C:\\Users\\HEMANTH\\OneDrive\\Desktop\\GIS-Source\\Admin\\Admin",
+  "layers": [
+    "ap_state_gis_source",
+    "ap_districts_gis_source",
+    "ap_taluk_gis_source",
+    "vsp_villages_pts",
+    "border_ps",
+    "soi_50k_grid",
+    "rail_nt",
+    "ap_roads_major"
+  ],
+  "phase": "1A-admin"
+}

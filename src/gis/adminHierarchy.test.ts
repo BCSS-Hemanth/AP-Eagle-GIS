@@ -18,6 +18,9 @@ import {
   invertMaskLocalGeoJSON,
   invertMaskLatLngs,
   pointInFeature,
+  AP_STATE_FOCUS_DRILL,
+  isApStateFocus,
+  isIndiaOverview,
   STATE_ADMIN_DRILL,
   WORLD_MASK_RING,
 } from './adminHierarchy';
@@ -122,7 +125,11 @@ describe('admin hierarchy spatial join', () => {
     expect(mandalLevel.villageFeature).toBeUndefined();
     expect(mandalLevel.mandalFeature).toBe(mandal);
     expect(adminDrillTo(mandalLevel, 'district').level).toBe('district');
-    expect(adminDrillUp(adminDrillUp(mandalLevel))).toEqual(STATE_ADMIN_DRILL);
+    // district → AP state focus (not India); AP focus → India overview
+    expect(adminDrillUp(adminDrillUp(mandalLevel))).toEqual(AP_STATE_FOCUS_DRILL);
+    expect(adminDrillUp(AP_STATE_FOCUS_DRILL)).toEqual(STATE_ADMIN_DRILL);
+    expect(isApStateFocus(AP_STATE_FOCUS_DRILL)).toBe(true);
+    expect(isIndiaOverview(STATE_ADMIN_DRILL)).toBe(true);
     expect(featureCentroid(village)).toEqual([2.75, 2.75]);
   });
 

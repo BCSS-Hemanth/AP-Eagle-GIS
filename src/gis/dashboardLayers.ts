@@ -12,8 +12,8 @@ export type JsonStorage = {
   setItem: (key: string, value: string) => void;
 };
 
-/** Dashboard stays district-only until the catalog Save button publishes a snapshot. */
-export const DASHBOARD_DEFAULT_ON = ['lyr-state-border', 'lyr-districts'] as const;
+/** Dashboard defaults to India/state frame; districts appear after drill-in or catalog enable. */
+export const DASHBOARD_DEFAULT_ON = ['lyr-state-border'] as const;
 
 export function layerConfigFromGisLayers(layers: GisLayer[]): DashboardLayerConfig {
   const out: DashboardLayerConfig = {};
@@ -46,6 +46,90 @@ export function applyLayerConfig(layers: GisLayer[], config: DashboardLayerConfi
       opacity: clampOpacity(saved.opacity, layer.opacity),
     };
   });
+}
+
+/**
+ * Layers currently assigned+enabled on a destination (Dashboard / Routing / Routing New).
+ * Strict: catalog checkbox state is ignored — only config.enabled === true counts.
+ */
+/**
+ * Config a Save button should write from the current selection.
+ * `snapshot` (Dashboard) records every layer: selected on, the rest off.
+ * `assigned` (Roads Routing / Roads Routing New) keeps only selected layers,
+ * hidden on the map by default (`enabled: false`). The Eye icon turns them on.
+ * Re-saving keeps the previous Eye state for layers that were already assigned.
+ * `accept` drops layers that destination cannot store; unselected layers are omitted, so a later Save removes them.
+ */
+export function destinationConfigFromSelection(
+  layers: GisLayer[],
+  selectedIds: ReadonlySet<string>,
+  mode: 'snapshot' | 'assigned',
+  accept?: (layer: GisLayer) => boolean,
+  previous?: DashboardLayerConfig | null
+): DashboardLayerConfig {
+  const out: DashboardLayerConfig = {};
+  for (const layer of layers) {
+    if (accept && !accept(layer)) continue;
+    const selected = selectedIds.has(layer.id);
+    if (mode === 'assigned' && !selected) continue;
+    if (mode === 'assigned') {
+      out[layer.id] = {
+        enabled: previous?.[layer.id]?.enabled ?? false,
+        opacity: layer.opacity,
+      };
+      continue;
+    }
+    out[layer.id] = { enabled: selected, opacity: layer.opacity };
+  }
+  return out;
+}
+
+export function layersEnabledInConfig(
+  layers: GisLayer[],
+  config: DashboardLayerConfig | null | undefined
+): GisLayer[] {
+  if (!config) return [];
+  const out: GisLayer[] = [];
+  for (const layer of layers) {
+    const saved = config[layer.id];
+    if (!saved?.enabled) continue;
+    out.push({
+      ...layer,
+      enabled: true,
+      opacity: clampOpacity(saved.opacity, layer.opacity),
+    });
+  }
+  return out;
+}
+
+/**
+ * Save-button hover list: live catalog Visible ticks ∪ destination-assigned layers.
+ * If this destination explicitly has enabled:false, the layer stays off here even when
+ * still Visible / assigned on another destination (independent Unselect All).
+ */
+export function hoverLayersForDestination(
+  layers: GisLayer[],
+  config: DashboardLayerConfig | null | undefined,
+  predicate?: (layer: GisLayer) => boolean
+): GisLayer[] {
+  const byId = new Map<string, GisLayer>();
+  for (const layer of layersEnabledInConfig(layers, config)) {
+    if (predicate && !predicate(layer)) continue;
+    byId.set(layer.id, layer);
+  }
+  for (const layer of layers) {
+    if (!layer.enabled) continue;
+    if (predicate && !predicate(layer)) continue;
+    // Destination-local opt-out (Unselect All / remove) — do not re-add from live ticks.
+    if (config?.[layer.id]?.enabled === false) continue;
+    const prev = byId.get(layer.id);
+    byId.set(layer.id, {
+      ...layer,
+      enabled: true,
+      opacity: prev?.opacity ?? layer.opacity,
+    });
+  }
+  return layers.filter((layer) => byId.has(layer.id)).map((layer) => byId.get(layer.id)!);
 }
 
 export function configsEqual(a: DashboardLayerConfig, b: DashboardLayerConfig): boolean {
@@ -83,15 +167,36 @@ export function leafletFlagsFromLayers(layers: GisLayer[]) {
     showPoliceStations: isLayerOn(layers, 'lyr-pss'),
     policeStationOpacity: layerOpacity(layers, 'lyr-pss'),
     showHighways: isLayerOn(layers, 'lyr-highways'),
+    showApRoadsFull: isLayerOn(layers, 'lyr-ap-roads-full'),
+    showOpsVspRoads: isLayerOn(layers, 'lyr-ops-vsp-roads'),
+    showApRoadsMajor: isLayerOn(layers, 'lyr-ap-roads-major'),
     showAgencyRoutes: isLayerOn(layers, 'lyr-drug-routes'),
     showRivers: isLayerOn(layers, 'lyr-rivers'),
     showWaterbodies: isLayerOn(layers, 'lyr-waterbodies'),
     showRailways: isLayerOn(layers, 'lyr-railways'),
     showTrails: isLayerOn(layers, 'lyr-forest-trails'),
     highlightAgency: isLayerOn(layers, 'lyr-asr-agency'),
+    showAsrBoundary: isLayerOn(layers, 'lyr-asr-agency'),
+    showHotspots: isLayerOn(layers, 'lyr-hotspots'),
+    showCheckPosts: isLayerOn(layers, 'lyr-checkposts'),
+    showTollPlazas: isLayerOn(layers, 'lyr-toll-plazas'),
+    showGanjaSeized: isLayerOn(layers, 'lyr-seizure-polys'),
+    showPharmaHubs: isLayerOn(layers, 'lyr-pharma-hubs'),
+    showDdacs: isLayerOn(layers, 'lyr-ddacs'),
+    showEntryExit: isLayerOn(layers, 'lyr-entry-exit'),
+    showStockPoints: isLayerOn(layers, 'lyr-stock-points'),
+    showOpsMainRoads: isLayerOn(layers, 'lyr-ops-main-roads'),
+    showOpsInternalRoads: isLayerOn(layers, 'lyr-ops-internal-roads'),
     showGraticule: isLayerOn(layers, 'lyr-soi-grid'),
+    showBorderPs: isLayerOn(layers, 'lyr-border-ps'),
+    showTalukGis: isLayerOn(layers, 'lyr-taluk-gis'),
+    showVspVillagePts: isLayerOn(layers, 'lyr-vsp-village-pts'),
+    showDistrictsGisHist: isLayerOn(layers, 'lyr-districts-gis-hist'),
+    showStateGisHist: isLayerOn(layers, 'lyr-state-gis-hist'),
     showImageryOverlay: isLayerOn(layers, 'lyr-cartosat'),
     showHillshade: isLayerOn(layers, 'lyr-hillshade'),
+    showGoogleRoadmap: isLayerOn(layers, 'lyr-google-roadmap'),
+    showSoiTopo: isLayerOn(layers, 'lyr-soi-topo'),
     showPlaces: isLayerOn(layers, 'lyr-mandals') || isLayerOn(layers, 'lyr-villages'),
   };
 }

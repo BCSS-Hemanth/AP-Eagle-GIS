@@ -89,5 +89,5 @@ export function useAuth(): AuthContextValue {
 
 export function useDefaultWorkspace(): WorkspaceId {
   const { user } = useAuth();
-  return user ? defaultWorkspace(user.role) : 'gis-dashboard';
+  return user ? defaultWorkspace(user.role) : 'ndps-spatial-dashboard';
 }

@@ -1,6 +1,7 @@
 import React from 'react';
 import { GeoJSON, ImageOverlay, TileLayer, WMSTileLayer } from 'react-leaflet';
 import type { IngestedLayer } from '../../gis/ingest';
+import { formatFeatureTooltip } from '../../gis/featureLabel';
 
 const VECTOR_STYLE = {
   color: '#6d28d9',
@@ -24,10 +25,10 @@ export const IngestedOverlays: React.FC<{ layers: IngestedLayer[] }> = ({ layers
                 style={() => ({ ...VECTOR_STYLE, opacity, fillOpacity: 0.22 * opacity })}
                 onEachFeature={(feature, leafletLayer) => {
                   const props = (feature.properties ?? {}) as Record<string, unknown>;
-                  const name = String(props.name ?? props.NAME ?? layer.name);
+                  const name = formatFeatureTooltip(props, layer.name || 'Feature');
                   leafletLayer.bindTooltip(
                     `${name} · ${layer.driver} · ${layer.displayCrs}`,
-                    { sticky: true }
+                    { sticky: true, direction: 'top', opacity: 0.96 }
                   );
                 }}
               />

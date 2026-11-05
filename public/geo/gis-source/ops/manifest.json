@@ -1,0 +1,97 @@
+{
+  "phase": "1B-ops-kmz-independent",
+  "generatedAt": "2026-11-03T09:35:55.090697+00:00",
+  "sourceRoot": "C:\\Users\\HEMANTH\\OneDrive\\Desktop\\GIS-Source\\ops_lyrs\\ops_lyrs",
+  "layers": [
+    {
+      "id": "asr_boundary",
+      "file": "asr_boundary.geojson",
+      "features": 1,
+      "source": "ASR_Dist-Admin.kmz"
+    },
+    {
+      "id": "pharma_hubs",
+      "file": "pharma_hubs.geojson",
+      "features": 4,
+      "source": "ChemicalPharma hub.kmz"
+    },
+    {
+      "id": "check_posts",
+      "file": "check_posts.geojson",
+      "features": 9,
+      "source": "check posts.kmz"
+    },
+    {
+      "id": "d_routes",
+      "file": "d_routes.geojson",
+      "features": 148,
+      "source": "d-routes.kmz"
+    },
+    {
+      "id": "ddacs",
+      "file": "ddacs.geojson",
+      "features": 6,
+      "source": "DDACs.kmz"
+    },
+    {
+      "id": "entry_exit",
+      "file": "entry_exit.geojson",
+      "features": 12,
+      "source": "Entry & Exits.kmz"
+    },
+    {
+      "id": "ganja_seized",
+      "file": "ganja_seized.geojson",
+      "features": 4,
+      "source": "Ganja Seized .kmz"
+    },
+    {
+      "id": "hotspots",
+      "file": "hotspots.geojson",
+      "features": 43,
+      "source": "Hotspots.kmz"
+    },
+    {
+      "id": "foot_tracks",
+      "file": "foot_tracks.geojson",
+      "features": 194,
+      "source": "Foot_Tracks.kmz"
+    },
+    {
+      "id": "internal_roads",
+      "file": "internal_roads.geojson",
+      "features": 404,
+      "source": "Internal_Roads.kmz"
+    },
+    {
+      "id": "main_roads",
+      "file": "main_roads.geojson",
+      "features": 161,
+      "source": "Main_Roads.kmz"
+    },
+    {
+      "id": "stock_points",
+      "file": "stock_points.geojson",
+      "features": 13,
+      "source": "Stock Points.kmz"
+    },
+    {
+      "id": "toll_plazas",
+      "file": "toll_plazas.geojson",
+      "features": 37,
+      "source": "Tole Plazas.kmz"
+    }
+  ],
+  "deferred": [
+    "vsp road/VSP.shp \u2014 LCC projected; not independent KMZ"
+  ],
+  "conflictPolicy": {
+    "d_routes": "Replaces public/geo/ap-agency-route.geojson for lyr-drug-routes",
+    "foot_tracks": "Replaces Waymarked Trails OSM tiles for lyr-forest-trails",
+    "check_posts": "Authoritative for lyr-checkposts (was empty stub)",
+    "hotspots": "Authoritative for lyr-hotspots (was empty stub)",
+    "ganja_seized": "Authoritative for lyr-seizure-points (replaces empty seizure polys stub)",
+    "asr_boundary": "Authoritative for lyr-asr-agency (was empty stub)",
+    "main_roads": "OPS main roads layer; Admin ap_roads_major remains Admin catalog"
+  }
+}

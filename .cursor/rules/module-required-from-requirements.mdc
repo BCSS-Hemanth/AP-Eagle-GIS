@@ -1,0 +1,12 @@
+---
+description: When asked if a module/submodule is required, check project requirements first
+alwaysApply: true
+---
+
+# “Is this module required?” answers
+
+When the user asks whether a **module, submodule, or sub-submodule** is required:
+
+1. **Check project requirements first** — e.g. `GIS_Project_Sample_Data_and_Features.docx` (GIS-Source), app nav (`src/nav/appModules.ts`), RBAC/workspace IDs, and any other explicit requirement docs in the repo/source pack. Do not answer from assumption or folder names alone.
+2. **Answer briefly** — typically yes/no (or required vs optional) with at most one short reason tied to what the requirements say. Do not implement or expand unless asked.
+3. If requirements are missing or ambiguous, say that plainly after checking — do not invent a requirement.

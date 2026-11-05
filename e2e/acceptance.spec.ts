@@ -16,21 +16,19 @@ test('rejects invalid credentials', async ({ page }) => {
 test('admin login opens the GIS shell with write workspaces', async ({ page }) => {
   await login(page, 'admin', 'admin123');
   await expect(page.getByTestId('session-user')).toContainText('Administrator');
-  await expect(page.getByTestId('nav-gis-dashboard')).toBeVisible();
-  await expect(page.getByTestId('nav-feature-editor-and-digitizer')).toBeVisible();
-  await expect(page.getByTestId('nav-vector-and-raster-data-import')).toBeVisible();
-  await expect(page.getByTestId('nav-spatial-analysis-and-geoprocessing')).toBeVisible();
+  await expect(page.getByTestId('nav-ndps-spatial-dashboard')).toBeVisible();
+  await expect(page.getByTestId('nav-feature-editor')).toBeVisible();
+  await expect(page.getByTestId('nav-import-export')).toBeVisible();
 });
 
-test('viewer RBAC hides digitize, import, and geoprocess workspaces', async ({ page }) => {
+test('viewer RBAC hides digitize and import workspaces', async ({ page }) => {
   await login(page, 'viewer', 'viewer123');
   await expect(page.getByTestId('session-user')).toContainText('Viewer');
-  await expect(page.getByTestId('nav-interactive-map-viewer')).toBeVisible();
-  await expect(page.getByTestId('nav-reports-and-seizure-analytics')).toBeVisible();
-  await expect(page.getByTestId('nav-feature-editor-and-digitizer')).toHaveCount(0);
-  await expect(page.getByTestId('nav-vector-and-raster-data-import')).toHaveCount(0);
-  await expect(page.getByTestId('nav-spatial-analysis-and-geoprocessing')).toHaveCount(0);
-  await expect(page.getByTestId('nav-user-roles-and-audit-trail')).toHaveCount(0);
+  await expect(page.getByTestId('nav-interactive-map')).toBeVisible();
+  await expect(page.getByTestId('nav-reports-seizure-analytics')).toBeVisible();
+  await expect(page.getByTestId('nav-feature-editor')).toHaveCount(0);
+  await expect(page.getByTestId('nav-import-export')).toHaveCount(0);
+  await expect(page.getByTestId('nav-users-audit-trail')).toHaveCount(0);
 });
 
 test('map viewer loads real mandal polygons and zoom-gated village tiles', async ({
@@ -44,9 +42,9 @@ test('map viewer loads real mandal polygons and zoom-gated village tiles', async
     (res) => res.url().includes('/geo/ap-police-stations.geojson') && res.ok()
   );
   await login(page, 'admin', 'admin123');
-  await page.getByTestId('nav-interactive-map-viewer').click();
+  await page.getByTestId('nav-interactive-map').click();
   await expect(page.getByTestId('admin-drill-bar')).toBeVisible();
-  await expect(page.getByTestId('admin-drill-state')).toHaveText('Andhra Pradesh');
+  await expect(page.getByTestId('admin-drill-india')).toHaveText('India');
   await page.getByTestId('layer-toggle-lyr-mandals').check();
   const mandals = await mandalResponse;
   expect(mandals.status()).toBe(200);

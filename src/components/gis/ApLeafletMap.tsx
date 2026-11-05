@@ -4,6 +4,7 @@ import React, {
   useContext,
   useEffect,
   useImperativeHandle,
+  useLayoutEffect,
   useMemo,
   useState,
 } from 'react';
@@ -30,6 +31,19 @@ import { MapLibreBasemap } from './MapLibreBasemap';
 import { useApBoundaries } from '../../gis/useApBoundaries';
 import { useApNetwork } from '../../gis/useApNetwork';
 import { useApMandals, useVillagePolygons } from '../../gis/useApAdmin';
+import { useGisSourceAdmin } from '../../gis/useGisSourceAdmin';
+import { useGisSourceOps } from '../../gis/useGisSourceOps';
+import { useGisPostgisRoadBbox } from '../../gis/useGisPostgisRoadBbox';
+import type { GisPostgisRoadLayer } from '../../gis/gisPostgisRoads';
+import {
+  cleanOverviewLabelTier,
+  isAndhraPradesh,
+  shouldShowPermanentStateLabel,
+  stateDisplayName,
+  stateLabelLatLng,
+  stateMapLabel,
+  useIndiaStates,
+} from '../../gis/useIndiaStates';
 import { usePoliceStations } from '../../gis/usePoliceStations';
 import type { PoliceStationProperties } from '../../gis/usePoliceStations';
 import type { MandalProperties, VillageProperties } from '../../gis/useApAdmin';
@@ -40,25 +54,45 @@ import {
   featureBbox,
   filterByAdminName,
   filterFeaturesInParent,
+  isApStateFocus,
+  isIndiaOverview,
   isolateChildFeature,
   invertMaskLatLngs,
   pointInFeature,
 } from '../../gis/adminHierarchy';
 import {
-  AGENCY_DISTRICT_NAMES,
   AP_BOUNDS,
-  AP_CENTER,
-  AP_DEFAULT_ZOOM,
+  INDIA_BOUNDS,
+  INDIA_CENTER,
+  INDIA_DEFAULT_ZOOM,
+  INDIA_OVERVIEW_UNDERLAY_TILES,
   BASEMAP_TILES,
-  ESRI_HILLSHADE_TILES,
   ESRI_PLACES_TILES,
   ESRI_TRANSPORT_TILES,
-  HIKING_TRAIL_TILES,
   OPENRAILWAY_TILES,
 } from '../../data/apGeo';
 import type { GeodesicBufferRing } from '../../gis/geodesicBuffer';
 import { geodesicBufferCoordinates } from '../../gis/geodesicBuffer';
 import type { ApDistrictProperties } from '../../gis/useApBoundaries';
+import { GisSourceRasterOverlays } from './GisSourceRasterOverlays';
+import {
+  formatFeatureTooltip,
+  type LayerNameFallback,
+} from '../../gis/featureLabel';
+import {
+  coordsFromFeature,
+  hotspotDetailsFromFeature,
+  hotspotDetailsHtml,
+  resolveHotspotAdminContext,
+} from '../../gis/hotspotDetails';
+import {
+  formatRailTooltip,
+  RAIL_CASING_COLOR,
+  RAIL_DASH_ARRAY,
+  RAIL_LINE_COLOR,
+  railWeightForZoom,
+  type RailFeatureProps,
+} from '../../gis/railStyle';
 import {
   MAP_CAMERA_MAX_ZOOM,
   MAP_CAMERA_MIN_ZOOM,
@@ -68,7 +102,6 @@ import {
   formatIdentifyHtml,
   identifyAdminAtPoint,
   leafletOverzoom,
-  mapDetailCaption,
   shouldDrawMandals,
   shouldDrawVillages,
   shouldOverlayOsmRaster,
@@ -112,22 +145,37 @@ interface MarkerSpec {
   id: string;
   lat: number;
   lon: number;
-  kind: 'checkpost' | 'hotspot' | 'station' | 'hq' | 'seizure' | 'city';
+  kind: 'checkpost' | 'hotspot' | 'station' | 'hq' | 'seizure' | 'city' | 'location';
   label: string;
+  /** Short text drawn inside the pin. Defaults to the kind badge (HQ, PS, …). */
+  badge?: string;
+  /** Optional second line in the hover tooltip (e.g. case count). */
+  detail?: string;
   selected?: boolean;
 }
 
 interface ApLeafletMapProps {
   basemap: BasemapId;
+  /**
+   * Dashboard India overview only: white political map (no basemap tiles/watermarks).
+   * Ignored once the user focuses Andhra Pradesh or drills further.
+   */
+  cleanIndiaOverview?: boolean;
   showStateBorder?: boolean;
   showDistricts?: boolean;
   districtOpacity?: number;
   stateOpacity?: number;
   choropleth?: boolean;
   showHighways?: boolean;
+  showApRoadsFull?: boolean;
+  showOpsVspRoads?: boolean;
+  showApRoadsMajor?: boolean;
   showAgencyRoutes?: boolean;
   showRailways?: boolean;
   showGraticule?: boolean;
+  showBorderPs?: boolean;
+  showTalukGis?: boolean;
+  showVspVillagePts?: boolean;
   showRivers?: boolean;
   showWaterbodies?: boolean;
   showHillshade?: boolean;
@@ -142,7 +190,23 @@ interface ApLeafletMapProps {
   policeStationOpacity?: number;
   selectedPoliceStationId?: string;
   showImageryOverlay?: boolean;
+  showGoogleRoadmap?: boolean;
+  showSoiTopo?: boolean;
+  showDistrictsGisHist?: boolean;
+  showStateGisHist?: boolean;
+  /** @deprecated Prefer showAsrBoundary — kept for callers; renders ASR Dist-Admin KMZ polygon. */
   highlightAgency?: boolean;
+  showAsrBoundary?: boolean;
+  showHotspots?: boolean;
+  showCheckPosts?: boolean;
+  showTollPlazas?: boolean;
+  showGanjaSeized?: boolean;
+  showPharmaHubs?: boolean;
+  showDdacs?: boolean;
+  showEntryExit?: boolean;
+  showStockPoints?: boolean;
+  showOpsMainRoads?: boolean;
+  showOpsInternalRoads?: boolean;
   markers?: MarkerSpec[];
   selectedFeature?: InspectableFeature;
   digitizedFeatures?: DigitizedFeature[];
@@ -150,12 +214,33 @@ interface ApLeafletMapProps {
   draftPoints?: Array<{ lat: number; lon: number }>;
   draftType?: 'Point' | 'LineString' | 'Polygon';
   route?: Array<{ lat: number; lon: number }>;
+  /** Multi-route overlays (e.g. Roads Routing alternatives). */
+  overlayRoutes?: Array<{
+    id: string;
+    points: Array<{ lat: number; lon: number }>;
+    color: string;
+    weight?: number;
+    opacity?: number;
+    dashArray?: string;
+    visible?: boolean;
+  }>;
+  /** Multi-layer GeoJSON overlays (e.g. Roads Routing New network visualisation). */
+  geoJsonOverlays?: Array<{
+    id: string;
+    data: GeoJSON.FeatureCollection;
+    color: string;
+    weight?: number;
+    opacity?: number;
+    visible?: boolean;
+    featureStyle?: (feature: GeoJSON.Feature) => { color: string; weight?: number } | null;
+  }>;
   measurePoints?: Array<{ lat: number; lon: number }>;
   measureMode?: 'dist' | 'area' | null;
   droppedPin?: { lat: number; lon: number; elev?: number } | null;
   clickMode?: MapClickMode;
   onMapClick?: (lat: number, lon: number) => void;
   onMarkerClick?: (id: string) => void;
+  onApStateFocus?: () => void;
   onDistrictClick?: (
     name: string,
     lat: number,
@@ -185,14 +270,63 @@ interface ApLeafletMapProps {
   initialZoom?: number;
   initialCenter?: [number, number];
   interactive?: boolean;
+  /** District/mandal/village pointer identify tip. Disable for compact analytics maps. */
+  adminHoverIdentify?: boolean;
+  /** Soft cyan/blue fill on AP + districts when focused. Default on. */
+  highlightApFill?: boolean;
+  /**
+   * Hide basemap detail outside Andhra Pradesh (flat mask).
+   * Neighbor states keep outline + name only for context.
+   */
+  maskOutsideAp?: boolean;
+  /** Skip the permanent “Andhra Pradesh” state pill. Neighbor names stay. */
+  hideApStateLabel?: boolean;
+  showScale?: boolean;
+  showAttribution?: boolean;
   layoutRevision?: string | number;
   fitToState?: boolean;
   viewTarget?: { lat: number; lon: number; zoom: number; token: number };
+  /**
+   * Fit a box without clipping to a polygon mask.
+   * With `lock: true`, maxBounds/minZoom keep the camera on that region
+   * (neighbors may stay visible via pad, but pan/zoom-out beyond the lock is blocked).
+   */
+  boundsView?: {
+    south: number;
+    west: number;
+    north: number;
+    east: number;
+    token: number | string;
+    maxZoom?: number;
+    /** Expand the fit box so surrounding geography stays in frame. */
+    padRatio?: number;
+    /** When true, prevent panning/zooming away from this box. */
+    lock?: boolean;
+    /** Extra pad on maxBounds so neighbors remain visible around the focus area. */
+    lockPadRatio?: number;
+  } | null;
+  /**
+   * Opt-in India state hit targets that do not start admin isolation.
+   * `pick` — a state click reports the feature and does not reach the map.
+   * `pass` — state polygons ignore clicks so the map can place points.
+   */
+  indiaStatePick?: 'pick' | 'pass';
+  onIndiaStatePick?: (feature: GeoJSON.Feature, name: string) => void;
+  selectedIndiaStateName?: string | null;
   viewActive?: boolean;
 }
 
-function markerIcon(kind: MarkerSpec['kind'], selected: boolean): DivIcon {
-  const palette: Record<MarkerSpec['kind'], string> = {
+function markerIcon(kind: MarkerSpec['kind'], selected: boolean, badge?: string): DivIcon {
+  if (kind === 'location') {
+    const size = selected ? 16 : 12;
+    return L.divIcon({
+      className: 'ap-gis-marker ap-gis-marker-location',
+      iconSize: [size, size],
+      iconAnchor: [size / 2, size / 2],
+      html: `<div style="width:${size}px;height:${size}px;border-radius:999px;background:#e11d48;border:1.5px solid #1e293b;box-shadow:0 1px 2px rgba(15,23,42,0.35);"></div>`,
+    });
+  }
+  const palette: Record<Exclude<MarkerSpec['kind'], 'location'>, string> = {
     checkpost: '#006a61',
     hotspot: '#ba1a1a',
     station: '#0f2942',
@@ -203,7 +337,8 @@ function markerIcon(kind: MarkerSpec['kind'], selected: boolean): DivIcon {
   const color = palette[kind];
   const size = selected ? 22 : 16;
   const label =
-    kind === 'checkpost' ? 'CP' : kind === 'hotspot' ? 'H' : kind === 'hq' ? 'HQ' : kind === 'station' ? 'PS' : '';
+    badge ??
+    (kind === 'checkpost' ? 'CP' : kind === 'hotspot' ? 'H' : kind === 'hq' ? 'HQ' : kind === 'station' ? 'PS' : '');
   return L.divIcon({
     className: 'ap-gis-marker',
     iconSize: [size, size],
@@ -212,7 +347,7 @@ function markerIcon(kind: MarkerSpec['kind'], selected: boolean): DivIcon {
   });
 }
 
-const WORLD_BOUNDS = L.latLngBounds(L.latLng(-85, -180), L.latLng(85, 180));
+const INDIA_MAX_BOUNDS = L.latLngBounds(INDIA_BOUNDS[0], INDIA_BOUNDS[1]).pad(0.06);
 
 function featureBounds(feature: GeoJSON.Feature): L.LatLngBounds | null {
   const bounds = L.geoJSON(feature as GeoJSON.GeoJsonObject).getBounds();
@@ -234,12 +369,25 @@ function bindIsolateClick(layer: L.Layer, onClick: (e: L.LeafletMouseEvent) => v
   });
 }
 
+/** Sticky hover/click name for any vector feature. */
+function bindNamedTooltip(
+  feature: GeoJSON.Feature,
+  layer: L.Layer,
+  fallback: LayerNameFallback = 'Feature'
+) {
+  const label = formatFeatureTooltip(
+    (feature.properties ?? {}) as Record<string, unknown>,
+    fallback
+  );
+  layer.bindTooltip(label, { sticky: true, direction: 'top', opacity: 0.96 });
+}
+
 function constrainToFeature(map: L.Map, feature: GeoJSON.Feature | null) {
-  map.options.maxBoundsViscosity = feature ? 1 : 0;
+  map.options.maxBoundsViscosity = feature ? 1 : 0.9;
   map.setMaxZoom(MAP_CAMERA_MAX_ZOOM);
   if (!feature) {
     map.setMinZoom(MAP_CAMERA_MIN_ZOOM);
-    map.setMaxBounds(WORLD_BOUNDS);
+    map.setMaxBounds(INDIA_MAX_BOUNDS);
     return null;
   }
   const bounds = featureBounds(feature);
@@ -270,11 +418,23 @@ const MapController = forwardRef<
     fitToState?: boolean;
     clipFeature?: GeoJSON.Feature | null;
     clipKey?: string;
+    apFocused?: boolean;
     viewTarget?: { lat: number; lon: number; zoom: number; token: number };
+    boundsView?: ApLeafletMapProps['boundsView'];
     viewActive?: boolean;
   }
 >(
-  ({ onViewChange, layoutRevision, fitToState, clipFeature = null, clipKey = '', viewTarget, viewActive = true }, ref) => {
+  ({
+    onViewChange,
+    layoutRevision,
+    fitToState,
+    clipFeature = null,
+    clipKey = '',
+    apFocused = false,
+    viewTarget,
+    boundsView = null,
+    viewActive = true,
+  }, ref) => {
     const map = useMap();
     const layoutToken = useContext(MapLayoutContext);
     const revision = `${layoutToken}:${layoutRevision ?? ''}`;
@@ -287,7 +447,7 @@ const MapController = forwardRef<
       fitState: () => {
         map.invalidateSize({ animate: false });
         constrainToFeature(map, null);
-        map.fitBounds(AP_BOUNDS, { padding: [24, 24] });
+        map.fitBounds(INDIA_BOUNDS, { padding: [20, 20] });
       },
       fitFeature: (feature) => {
         const bounds = featureBounds(feature);
@@ -334,9 +494,13 @@ const MapController = forwardRef<
             Math.abs(size.x - lastW) > 24 || Math.abs(size.y - lastH) > 24 || lastW === 0;
           lastW = size.x;
           lastH = size.y;
-          if (fitToState && !fitted && grew) {
+          if (fitToState && !fitted && grew && !boundsView) {
             fitted = true;
-            map.fitBounds(AP_BOUNDS, { padding: [24, 24], animate: false });
+            map.fitBounds(apFocused ? AP_BOUNDS : INDIA_BOUNDS, {
+              padding: apFocused ? [28, 28] : [20, 20],
+              animate: false,
+              maxZoom: apFocused ? 8 : undefined,
+            });
           }
         });
       };
@@ -352,21 +516,41 @@ const MapController = forwardRef<
         if (frame) window.cancelAnimationFrame(frame);
         window.removeEventListener('resize', syncSize);
       };
-    }, [map, revision, fitToState]);
+    }, [map, revision, fitToState, boundsView, apFocused]);
+    const lastApFocus = React.useRef<boolean | null>(null);
     useEffect(() => {
       if (!viewActive) return;
+      // Locked boundsView owns maxBounds/minZoom — do not reset to India envelope.
+      if (boundsView?.lock) {
+        lastApFocus.current = apFocused;
+        return;
+      }
       if (!clipFeature) {
         constrainToFeature(map, null);
+        map.invalidateSize({ animate: false });
         if (hadClip.current) {
-          map.invalidateSize({ animate: false });
-          map.fitBounds(AP_BOUNDS, { padding: [24, 24], animate: true });
+          hadClip.current = false;
+          map.fitBounds(apFocused ? AP_BOUNDS : INDIA_BOUNDS, {
+            padding: apFocused ? [40, 40] : [20, 20],
+            animate: true,
+          });
+          lastApFocus.current = apFocused;
+          return;
         }
-        hadClip.current = false;
+        if (lastApFocus.current !== apFocused) {
+          lastApFocus.current = apFocused;
+          map.fitBounds(apFocused ? AP_BOUNDS : INDIA_BOUNDS, {
+            padding: apFocused ? [40, 40] : [20, 20],
+            animate: true,
+            maxZoom: apFocused ? 8 : undefined,
+          });
+        }
         return;
       }
       const bounds = constrainToFeature(map, clipFeature);
       if (!bounds) return;
       hadClip.current = true;
+      lastApFocus.current = true;
       map.invalidateSize({ animate: false });
       const maxZoom =
         clipFeature.properties && 'village_name' in (clipFeature.properties as object)
@@ -375,7 +559,7 @@ const MapController = forwardRef<
             ? 14
             : 11;
       map.fitBounds(bounds, { padding: [28, 28], maxZoom: Math.min(maxZoom, MAP_CAMERA_MAX_ZOOM), animate: true });
-    }, [map, clipKey, clipFeature, viewActive]);
+    }, [map, clipKey, clipFeature, viewActive, apFocused, boundsView?.lock]);
     const lastViewToken = React.useRef<number | null>(null);
     useEffect(() => {
       if (!viewTarget || clipFeature) return;
@@ -384,6 +568,41 @@ const MapController = forwardRef<
       map.invalidateSize({ animate: false });
       map.flyTo([viewTarget.lat, viewTarget.lon], clampMapZoom(viewTarget.zoom), { duration: 0 });
     }, [map, viewTarget, clipFeature]);
+    const lastBoundsToken = React.useRef<string | number | null>(null);
+    useEffect(() => {
+      if (!boundsView || clipFeature) return;
+      if (lastBoundsToken.current === boundsView.token) return;
+      lastBoundsToken.current = boundsView.token;
+      const bounds = L.latLngBounds(
+        [boundsView.south, boundsView.west],
+        [boundsView.north, boundsView.east]
+      );
+      if (!bounds.isValid()) return;
+      map.invalidateSize({ animate: false });
+      const fitPad = boundsView.padRatio ?? 0.5;
+      const fitTarget = bounds.pad(fitPad);
+      if (boundsView.lock) {
+        const lockPad = boundsView.lockPadRatio ?? Math.max(fitPad, 0.12);
+        const lockBounds = bounds.pad(lockPad);
+        map.setMaxBounds(lockBounds);
+        map.options.maxBoundsViscosity = 1;
+        const fitted = map.getBoundsZoom(fitTarget, false);
+        if (Number.isFinite(fitted) && fitted > 0) {
+          // Keep AP dominant: cannot zoom out past a near-fit of the focus box.
+          map.setMinZoom(
+            Math.min(
+              MAP_CAMERA_MAX_ZOOM - 1,
+              Math.max(MAP_CAMERA_MIN_ZOOM, Math.floor(fitted * 10) / 10)
+            )
+          );
+        }
+      }
+      map.fitBounds(fitTarget, {
+        padding: [28, 28],
+        maxZoom: boundsView.maxZoom ?? 7,
+        animate: true,
+      });
+    }, [map, boundsView, clipFeature]);
     useMapEvents({
       moveend: () => {
         if (!viewActive) return;
@@ -405,11 +624,21 @@ const ClickSink: React.FC<{
   mode: MapClickMode;
   interactive: boolean;
   drillLevel: string;
+  apFocused: boolean;
   districts: GeoJSON.FeatureCollection | null;
   onDistrictClick?: ApLeafletMapProps['onDistrictClick'];
   onMapClick?: (lat: number, lon: number) => void;
   onCursorMove?: ApLeafletMapProps['onCursorMove'];
-}> = ({ mode, interactive, drillLevel, districts, onDistrictClick, onMapClick, onCursorMove }) => {
+}> = ({
+  mode,
+  interactive,
+  drillLevel,
+  apFocused,
+  districts,
+  onDistrictClick,
+  onMapClick,
+  onCursorMove,
+}) => {
   const map = useMap();
   useEffect(() => {
     if (!interactive) {
@@ -438,7 +667,14 @@ const ClickSink: React.FC<{
   useMapEvents({
     click: (e) => {
       if (mode === 'boxzoom' || mode === 'pan') return;
-      if (mode === 'inspect' && drillLevel === 'state' && onDistrictClick && districts) {
+      // District isolation only after AP state focus — never from India overview.
+      if (
+        mode === 'inspect' &&
+        drillLevel === 'state' &&
+        apFocused &&
+        onDistrictClick &&
+        districts
+      ) {
         const hit = findContainingFeature([e.latlng.lng, e.latlng.lat], districts.features);
         const name = String((hit?.properties as ApDistrictProperties | undefined)?.district_name ?? '');
         if (hit && name) {
@@ -638,6 +874,7 @@ const AdminPolygonLayers: React.FC<{
           }}
           onEachFeature={(feature, layer) => {
             const props = feature.properties as MandalProperties;
+            bindNamedTooltip(feature, layer, 'Mandal');
             bindIsolateClick(layer, (e) => {
               onMandalClick?.(
                 props.mandal_name,
@@ -664,6 +901,7 @@ const AdminPolygonLayers: React.FC<{
           }}
           onEachFeature={(feature, layer) => {
             const props = feature.properties as VillageProperties;
+            bindNamedTooltip(feature, layer, 'Village');
             bindIsolateClick(layer, (e) => {
               onVillageClick?.(
                 props.village_name,
@@ -685,6 +923,42 @@ const AdminPolygonLayers: React.FC<{
   );
 };
 
+function ensurePsMarkersPane(map: L.Map) {
+  if (!map.getPane('ps-markers')) {
+    const pane = map.createPane('ps-markers');
+    // Above imagery / admin vectors so dots stay visible when zoomed in.
+    pane.style.zIndex = '620';
+  }
+}
+
+/** OPS point markers above admin polygons so hotspot hover is not stolen by villages. */
+function ensureOpsMarkersPane(map: L.Map) {
+  if (!map.getPane('ops-markers')) {
+    const pane = map.createPane('ops-markers');
+    // Below hotspot tooltips (750) so markers never paint over the popup.
+    pane.style.zIndex = '640';
+  } else {
+    map.getPane('ops-markers')!.style.zIndex = '640';
+  }
+}
+
+/** Hotspot hover cards above markers / admin identify tips. */
+function ensureHotspotTooltipPane(map: L.Map) {
+  if (!map.getPane('hotspot-tooltips')) {
+    const pane = map.createPane('hotspot-tooltips');
+    pane.style.zIndex = '750';
+    pane.style.pointerEvents = 'none';
+  } else {
+    map.getPane('hotspot-tooltips')!.style.zIndex = '750';
+  }
+}
+
+function isEventOverOpsMarkers(ev: MouseEvent | undefined): boolean {
+  const t = ev?.target;
+  if (!(t instanceof Element)) return false;
+  return Boolean(t.closest('.leaflet-ops-markers-pane'));
+}
+
 const PoliceStationLayer: React.FC<{
   enabled: boolean;
   opacity: number;
@@ -692,8 +966,24 @@ const PoliceStationLayer: React.FC<{
   clipFeature?: GeoJSON.Feature | null;
   onPoliceStationClick?: ApLeafletMapProps['onPoliceStationClick'];
 }> = ({ enabled, opacity, selectedId, clipFeature, onPoliceStationClick }) => {
+  const map = useMap();
+  const [zoom, setZoom] = useState(map.getZoom());
+  const [paneReady, setPaneReady] = useState(() => Boolean(map.getPane('ps-markers')));
+
+  useMapEvents({
+    zoomend: () => setZoom(map.getZoom()),
+    zoom: () => setZoom(map.getZoom()),
+  });
+
+  // Pane must exist before CircleMarker mounts (missing pane → Leaflet throw → blank page).
+  useLayoutEffect(() => {
+    ensurePsMarkersPane(map);
+    setPaneReady(true);
+  }, [map]);
+
   const stations = usePoliceStations(true);
-  if (!stations) return null;
+  if (!paneReady || !stations) return null;
+
   const features = clipFeature
     ? stations.features.filter((feature) => {
         if (!feature.geometry || feature.geometry.type !== 'Point') return false;
@@ -701,36 +991,97 @@ const PoliceStationLayer: React.FC<{
         return pointInFeature([lon, lat], clipFeature);
       })
     : stations.features;
+
+  const baseRadius = zoom >= 12 ? 7 : zoom >= 9 ? 6 : 5.5;
+
   return (
     <>
       <div data-testid="ps-layer-ready" data-count={features.length} hidden />
-      {enabled && features.map((feature, idx) => {
-        if (!feature.geometry || feature.geometry.type !== 'Point') return null;
-        const [lon, lat] = feature.geometry.coordinates;
-        const props = (feature.properties ?? {}) as Partial<PoliceStationProperties>;
-        const id = props.id || String(feature.id || `ps-${idx}`);
-        const selected = Boolean(selectedId && id === selectedId);
-        const label = [props.name, props.district, props.state].filter(Boolean).join(' • ');
-        return (
-          <CircleMarker
-            key={id}
-            center={[lat, lon]}
-            radius={selected ? 8 : 5.5}
-            pathOptions={{
-              color: selected ? '#ba1a1a' : '#001428',
-              weight: selected ? 2 : 1.3,
-              fillColor: selected ? '#f97316' : '#0d9488',
-              fillOpacity: 0.92 * opacity,
-              opacity,
-            }}
-            eventHandlers={{
-              click: () => onPoliceStationClick?.(id, props.name || id, lat, lon),
-            }}
-          >
-            <Tooltip sticky>{label}</Tooltip>
-          </CircleMarker>
-        );
-      })}
+      {enabled &&
+        features.map((feature, idx) => {
+          if (!feature.geometry || feature.geometry.type !== 'Point') return null;
+          const [lon, lat] = feature.geometry.coordinates;
+          const props = (feature.properties ?? {}) as Partial<PoliceStationProperties>;
+          const id = props.id || String(feature.id || `ps-${idx}`);
+          const selected = Boolean(selectedId && id === selectedId);
+          const name = (props.name || id).trim();
+          const detail = [props.district, props.state].filter(Boolean).join(' • ');
+          return (
+            <CircleMarker
+              key={id}
+              center={[lat, lon]}
+              radius={selected ? Math.max(baseRadius, 8) : baseRadius}
+              pane="ps-markers"
+              pathOptions={{
+                color: selected ? '#ba1a1a' : '#001428',
+                weight: selected ? 2 : 1.4,
+                fillColor: selected ? '#f97316' : '#0d9488',
+                fillOpacity: 0.95 * opacity,
+                opacity,
+              }}
+              eventHandlers={{
+                click: (e) => {
+                  L.DomEvent.stopPropagation(e);
+                  onPoliceStationClick?.(id, props.name || id, lat, lon);
+                },
+              }}
+            >
+              <Popup className="ap-ps-popup" closeButton autoClose closeOnClick>
+                <div className="ap-ps-label">
+                  <div className="ap-ps-label__name">{name}</div>
+                  {detail ? <div className="ap-ps-label__meta">{detail}</div> : null}
+                </div>
+              </Popup>
+            </CircleMarker>
+          );
+        })}
+    </>
+  );
+};
+
+const bindIndianRailwayTooltip = (feature: GeoJSON.Feature, layer: L.Layer) => {
+  layer.bindTooltip(formatRailTooltip(feature.properties as RailFeatureProps), {
+    sticky: true,
+    className: 'ap-rail-tooltip',
+  });
+};
+
+/** Violet casing + dashed track, zoom-scaled; rendered above road layers. */
+const IndianRailwayLayer: React.FC<{ data: GeoJSON.FeatureCollection }> = ({ data }) => {
+  const map = useMap();
+  const [zoom, setZoom] = useState(map.getZoom());
+  useMapEvents({
+    zoomend: () => setZoom(map.getZoom()),
+    zoom: () => setZoom(map.getZoom()),
+  });
+  const { casing, line } = railWeightForZoom(zoom);
+  return (
+    <>
+      <GeoJSON
+        key={`rail-casing-${casing}`}
+        data={data}
+        interactive={false}
+        style={{
+          color: RAIL_CASING_COLOR,
+          weight: casing,
+          opacity: 0.95,
+          lineCap: 'round',
+          lineJoin: 'round',
+        }}
+      />
+      <GeoJSON
+        key={`rail-line-${line}`}
+        data={data}
+        style={{
+          color: RAIL_LINE_COLOR,
+          weight: line,
+          opacity: 1,
+          dashArray: RAIL_DASH_ARRAY,
+          lineCap: 'butt',
+          lineJoin: 'round',
+        }}
+        onEachFeature={bindIndianRailwayTooltip}
+      />
     </>
   );
 };
@@ -778,29 +1129,7 @@ const ZoomAwareDetailStack: React.FC<{
   const osmBoost = shouldOverlayOsmRaster(zoom, useMapLibre, drillActive);
   const imagery = shouldOverlaySatellite(zoom, rasterId, drillLevel, showImageryOverlay);
   const roads = shouldOverlayRoads(zoom, showHighways, useMapLibre, drillActive);
-  const caption = mapDetailCaption(zoom, rasterId, useMapLibre, imagery);
   const overlayPane = useMapLibre || drillActive || imagery ? 'overlayPane' : undefined;
-  const captionEl = React.useRef<HTMLDivElement | null>(null);
-
-  useEffect(() => {
-    const ctrl = new L.Control({ position: 'bottomright' });
-    ctrl.onAdd = () => {
-      const el = L.DomUtil.create('div', 'ap-map-detail-caption');
-      el.textContent = caption;
-      captionEl.current = el;
-      return el;
-    };
-    ctrl.addTo(map);
-    return () => {
-      captionEl.current = null;
-      ctrl.remove();
-    };
-    // Caption text is updated in the effect below; this mounts the control once.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [map]);
-  useEffect(() => {
-    if (captionEl.current) captionEl.current.textContent = caption;
-  }, [caption]);
 
   return (
     <>
@@ -811,15 +1140,6 @@ const ZoomAwareDetailStack: React.FC<{
           pane="overlayPane"
           opacity={imagery ? 0.35 : 1}
           {...leafletOverzoom(BASEMAP_TILES.vector.maxZoom)}
-        />
-      )}
-      {imagery && rasterId !== 'satellite' && rasterId !== 'hybrid' && (
-        <TileLayer
-          url={BASEMAP_TILES.satellite.url}
-          attribution={BASEMAP_TILES.satellite.attribution}
-          opacity={0.88}
-          pane="overlayPane"
-          {...leafletOverzoom(BASEMAP_TILES.satellite.maxZoom)}
         />
       )}
       {roads && (
@@ -875,6 +1195,11 @@ const AdminHoverIdentify: React.FC<{
     },
     mousemove: (e) => {
       if (!enabled) return;
+      // OPS hotspots sit above admin fills; suppress village tip while over them.
+      if (isEventOverOpsMarkers(e.originalEvent)) {
+        tooltipRef.current?.remove();
+        return;
+      }
       const now = Date.now();
       if (now - lastAt.current < 90) return;
       lastAt.current = now;
@@ -920,7 +1245,7 @@ const AdminHoverIdentify: React.FC<{
 
 const AdminClipPanes: React.FC = () => {
   const map = useMap();
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (!map.getPane('admin-clip')) {
       const clip = map.createPane('admin-clip');
       clip.style.zIndex = '450';
@@ -930,28 +1255,363 @@ const AdminClipPanes: React.FC = () => {
       const vectors = map.createPane('admin-vectors');
       vectors.style.zIndex = '460';
     }
+    ensurePsMarkersPane(map);
+    ensureOpsMarkersPane(map);
+    ensureHotspotTooltipPane(map);
   }, [map]);
   return null;
 };
 
-const AdminClipMask: React.FC<{ feature: GeoJSON.Feature | null }> = ({ feature }) => {
+function hotspotCollectionBbox(
+  data: GeoJSON.FeatureCollection
+): [number, number, number, number] | null {
+  let west = Infinity;
+  let south = Infinity;
+  let east = -Infinity;
+  let north = -Infinity;
+  for (const feature of data.features) {
+    const c = coordsFromFeature(feature);
+    if (!c) continue;
+    west = Math.min(west, c[0]);
+    east = Math.max(east, c[0]);
+    south = Math.min(south, c[1]);
+    north = Math.max(north, c[1]);
+  }
+  if (!Number.isFinite(west)) return null;
+  const pad = 0.05;
+  return [west - pad, south - pad, east + pad, north + pad];
+}
+
+const OpsHotspotsLayer: React.FC<{
+  data: GeoJSON.FeatureCollection;
+  clipFeature?: GeoJSON.Feature | null;
+}> = ({ data, clipFeature = null }) => {
+  const map = useMap();
+  const { districts, state } = useApBoundaries();
+  const mandals = useApMandals(true);
+  const visible = useMemo(() => {
+    if (!clipFeature) return data;
+    const features = data.features.filter((feature) => {
+      const coords = coordsFromFeature(feature);
+      return coords ? pointInFeature(coords, clipFeature) : false;
+    });
+    return { type: 'FeatureCollection' as const, features };
+  }, [data, clipFeature]);
+  const hotspotBbox = useMemo(() => hotspotCollectionBbox(visible), [visible]);
+  const villages = useVillagePolygons(Boolean(hotspotBbox), hotspotBbox, 20, 0);
+  const [paneReady, setPaneReady] = useState(() => Boolean(map.getPane('ops-markers')));
+
+  useLayoutEffect(() => {
+    ensureOpsMarkersPane(map);
+    ensureHotspotTooltipPane(map);
+    setPaneReady(true);
+  }, [map]);
+
+  const tooltipHtmlByIndex = useMemo(() => {
+    const stateFt = state?.features?.[0] ?? null;
+    const districtFeats = districts?.features ?? [];
+    const mandalFeats = mandals?.features ?? [];
+    const villageFeats = villages?.features ?? [];
+    return visible.features.map((feature, index) => {
+      const coords = coordsFromFeature(feature);
+      const admin =
+        coords && (districtFeats.length || mandalFeats.length)
+          ? resolveHotspotAdminContext(
+              coords,
+              districtFeats,
+              mandalFeats,
+              villageFeats,
+              stateFt
+            )
+          : null;
+      return hotspotDetailsHtml(
+        hotspotDetailsFromFeature(feature, { serial: index + 1, admin })
+      );
+    });
+  }, [visible, districts, mandals, villages, state]);
+
+  if (!paneReady) return null;
+
+  return (
+    <GeoJSON
+      key={`ops-hotspots-${visible.features.length}-${clipFeature ? 'clip' : 'all'}-${districts ? 'd' : ''}-${mandals ? 'm' : ''}-${villages ? 'v' : ''}`}
+      data={visible}
+      pane="ops-markers"
+      pointToLayer={(_feature, latlng) =>
+        L.circleMarker(latlng, {
+          radius: 7,
+          color: '#7f1d1d',
+          weight: 2,
+          fillColor: '#ba1a1a',
+          fillOpacity: 0.95,
+          pane: 'ops-markers',
+          bubblingMouseEvents: false,
+        })
+      }
+      onEachFeature={(feature, layer) => {
+        const index = visible.features.indexOf(feature);
+        const html =
+          tooltipHtmlByIndex[index] ??
+          hotspotDetailsHtml(hotspotDetailsFromFeature(feature, { serial: index + 1 }));
+        layer.bindTooltip(html, {
+          className: 'ap-hotspot-tooltip',
+          pane: 'hotspot-tooltips',
+          direction: 'right',
+          offset: [12, 0],
+          opacity: 1,
+          sticky: false,
+          interactive: false,
+        });
+      }}
+    />
+  );
+};
+
+const AdminClipMask: React.FC<{
+  feature: GeoJSON.Feature | null;
+  /** Outside-India fill (dashboard clean overview uses pure white). */
+  fillColor?: string;
+  strokeColor?: string;
+  strokeWeight?: number;
+}> = ({ feature, fillColor = '#cfe4f3', strokeColor = '#0f2942', strokeWeight }) => {
   const rings = useMemo(() => (feature ? invertMaskLatLngs(feature) : []), [feature]);
   if (!feature || rings.length < 2) return null;
+  const weight = strokeWeight ?? (fillColor === '#ffffff' ? 1 : 1.5);
   return (
     <Polygon
       pane="admin-clip"
       positions={rings as LatLngExpression[][]}
       pathOptions={{
-        fillColor: '#cfe4f3',
+        fillColor,
         fillOpacity: 1,
         fillRule: 'evenodd',
-        color: '#0f2942',
-        weight: 1.5,
+        color: strokeColor,
+        weight,
         opacity: 1,
         interactive: false,
-        stroke: true,
+        // weight 0 → fill-only mask so state/outline strokes are not double-drawn.
+        stroke: weight > 0,
       }}
     />
+  );
+};
+
+/** Permanent state names for dashboard overview — anchored at curated label points. */
+const IndiaCleanStateLabels: React.FC<{
+  states: GeoJSON.FeatureCollection;
+  zoom: number;
+}> = ({ states, zoom }) => (
+  <>
+    {states.features.map((feature, idx) => {
+      const ll = stateLabelLatLng(feature);
+      if (!ll) return null;
+      const name = stateMapLabel(feature) || 'State';
+      const ap = isAndhraPradesh(feature);
+      const area = Number(
+        (feature.properties as { area_deg2?: number } | null)?.area_deg2 ?? 0
+      );
+      const tier = cleanOverviewLabelTier(zoom, { ap, areaDeg2: area });
+      const icon = new DivIcon({
+        className: `india-state-name-marker india-state-name-marker--${tier}${
+          ap ? ' india-state-name-marker--ap' : ''
+        }`,
+        html: `<span class="india-state-name-marker__text">${name
+          .replace(/&/g, '&amp;')
+          .replace(/</g, '&lt;')}</span>`,
+        iconSize: [0, 0],
+        iconAnchor: [0, 0],
+      });
+      return (
+        <Marker
+          key={`clean-label-${name}-${idx}`}
+          position={ll}
+          icon={icon}
+          interactive={false}
+          keyboard={false}
+        />
+      );
+    })}
+  </>
+);
+
+const IndiaStatesLayer: React.FC<{
+  states: GeoJSON.FeatureCollection;
+  apFocused?: boolean;
+  onApStateFocus?: () => void;
+  /** Outline-only so satellite / hybrid imagery stays readable nationwide. */
+  imageryBasemap?: boolean;
+  /** Dashboard India overview: beige fills, visible borders, aligned state names. */
+  politicalClean?: boolean;
+  /** Soft cyan fill over Andhra when focused. */
+  highlightApFill?: boolean;
+  /** Flat neighbor states (name only) when AP is the focus frame. */
+  simplifyNeighbors?: boolean;
+  /** Omit the Andhra Pradesh name pill. */
+  hideApStateLabel?: boolean;
+  statePick?: 'pick' | 'pass';
+  onStatePick?: (feature: GeoJSON.Feature, name: string) => void;
+  selectedStateName?: string | null;
+}> = ({
+  states,
+  apFocused = false,
+  onApStateFocus,
+  imageryBasemap = false,
+  politicalClean = false,
+  highlightApFill = true,
+  simplifyNeighbors = false,
+  hideApStateLabel = false,
+  statePick,
+  onStatePick,
+  selectedStateName = null,
+}) => {
+  const map = useMap();
+  const [zoom, setZoom] = useState(map.getZoom());
+  useEffect(() => {
+    const onZoom = () => setZoom(map.getZoom());
+    map.on('zoomend', onZoom);
+    return () => {
+      map.off('zoomend', onZoom);
+    };
+  }, [map]);
+
+  return (
+    <>
+      <GeoJSON
+        key={`india-states-${apFocused ? 'ap' : 'in'}-${highlightApFill ? 'fill' : 'outline'}-${simplifyNeighbors ? 'simple' : 'full'}-${hideApStateLabel ? 'noap' : 'ap'}-${politicalClean ? 'clean' : `z${zoom.toFixed(0)}-${imageryBasemap ? 'sat' : 'vec'}`}-${statePick ?? 'drill'}-${selectedStateName ?? ''}`}
+        pane="admin-vectors"
+        data={states}
+        style={(feature) => {
+          const ap = isAndhraPradesh(feature);
+          const name = stateDisplayName(feature);
+          const selected = Boolean(selectedStateName && name === selectedStateName);
+          const picking = statePick === 'pick';
+          // Clean overview: clear, uniform internal borders; AP keeps stronger highlight.
+          const base = politicalClean
+            ? {
+                color: ap ? '#9a3412' : '#57534e',
+                weight: ap ? 2.1 : 1.15,
+                fillColor: ap ? '#e8c98a' : '#efe6d0',
+                fillOpacity: 1,
+                opacity: 1,
+                lineJoin: 'round' as const,
+                lineCap: 'round' as const,
+              }
+            : simplifyNeighbors
+              ? {
+                  color: ap ? '#0f2942' : '#94a3b8',
+                  weight: ap ? 2.6 : 1.1,
+                  fillColor: ap ? '#ffffff' : '#e2e8f0',
+                  fillOpacity: ap ? 0 : 1,
+                  opacity: 1,
+                  lineJoin: 'round' as const,
+                  lineCap: 'round' as const,
+                }
+            : imageryBasemap
+              ? {
+                  color: selected ? '#fef08a' : ap ? '#0f2942' : '#cbd5e1',
+                  weight: selected ? 2.8 : ap ? (apFocused ? 2.8 : 1.8) : 0.6,
+                  fill: picking || (ap && apFocused && highlightApFill),
+                  fillColor: ap ? '#93c5fd' : '#ffffff',
+                  fillOpacity: ap && apFocused && highlightApFill ? 0.32 : 0,
+                  opacity: selected ? 1 : ap ? 0.98 : 0.45,
+                }
+              : {
+                  color: selected ? '#ca8a04' : ap ? '#0f2942' : '#64748b',
+                  weight: selected ? 2.8 : ap ? (apFocused ? 2.8 : 2.1) : 0.95,
+                  fillColor: ap ? (highlightApFill ? '#93c5fd' : '#ffffff') : '#f1f5f9',
+                  fillOpacity: ap
+                    ? highlightApFill
+                      ? apFocused
+                        ? 0.34
+                        : 0.22
+                      : 0
+                    : 0.08,
+                  opacity: 1,
+                };
+          if (statePick === 'pick') {
+            return { ...base, interactive: true, className: 'india-state-pick-hit' };
+          }
+          if (statePick === 'pass') {
+            return { ...base, interactive: false };
+          }
+          return base;
+        }}
+        onEachFeature={(feature, layer) => {
+          const name = stateDisplayName(feature) || 'State';
+          const ap = isAndhraPradesh(feature);
+          const area = Number(
+            (feature.properties as { area_deg2?: number } | null)?.area_deg2 ?? 99
+          );
+          if (hideApStateLabel && ap) {
+            // NDPS heat map: keep neighbor names, drop the AP pill.
+          } else if (politicalClean) {
+            // Hover still shows full official name; permanent labels use map anchors.
+            layer.bindTooltip(name, {
+              sticky: true,
+              direction: 'top',
+              opacity: 0.96,
+              className: ap
+                ? 'india-state-label india-state-label--hover india-state-label--ap'
+                : 'india-state-label india-state-label--hover',
+            });
+            // Prevent the thick black SVG focus rectangle on click.
+            layer.on('add', () => {
+              const el = (layer as L.Path).getElement?.();
+              el?.setAttribute('focusable', 'false');
+              if (el instanceof SVGElement) el.style.outline = 'none';
+            });
+            layer.on('click', () => {
+              const el = (layer as L.Path).getElement?.();
+              if (el instanceof HTMLElement) el.blur();
+              else if (el instanceof SVGElement) (el as SVGElement & { blur?: () => void }).blur?.();
+            });
+          } else {
+            const showPermanent =
+              simplifyNeighbors && !ap
+                ? true
+                : shouldShowPermanentStateLabel(zoom, {
+                    ap,
+                    areaDeg2: area,
+                    name,
+                  });
+            if (showPermanent) {
+              layer.bindTooltip(name, {
+                permanent: true,
+                direction: 'center',
+                className: ap
+                  ? 'india-state-label india-state-label--ap'
+                  : 'india-state-label',
+                opacity: 1,
+              });
+            } else {
+              layer.bindTooltip(name, {
+                sticky: true,
+                direction: 'top',
+                opacity: 0.96,
+                className: 'india-state-label india-state-label--hover',
+              });
+            }
+          }
+          if (statePick === 'pick' && onStatePick) {
+            layer.on('click', (e) => {
+              L.DomEvent.stop(e);
+              onStatePick(feature, name);
+            });
+            return;
+          }
+          if (!statePick && ap && !apFocused && onApStateFocus) {
+            layer.on('click', (e) => {
+              L.DomEvent.stopPropagation(e);
+              onApStateFocus();
+            });
+            if (layer instanceof L.Path) {
+              layer.setStyle({ className: 'india-state-ap-hit' });
+            }
+          }
+        }}
+      />
+      {politicalClean && <IndiaCleanStateLabels states={states} zoom={zoom} />}
+    </>
   );
 };
 
@@ -985,18 +1645,68 @@ const Graticule: React.FC = () => {
   );
 };
 
+/** Bbox-clipped PostGIS roads (full network / VSP) — never load statewide GeoJSON. */
+const PostgisBboxRoadLayer: React.FC<{
+  layer: GisPostgisRoadLayer;
+  enabled: boolean;
+  color: string;
+  weight: number;
+  label: string;
+}> = ({ layer, enabled, color, weight, label }) => {
+  const map = useMap();
+  const [bbox, setBbox] = useState<{
+    west: number;
+    south: number;
+    east: number;
+    north: number;
+  } | null>(null);
+
+  const refresh = () => {
+    const b = map.getBounds();
+    setBbox({
+      west: b.getWest(),
+      south: b.getSouth(),
+      east: b.getEast(),
+      north: b.getNorth(),
+    });
+  };
+  useMapEvents({ moveend: refresh, zoomend: refresh });
+  useEffect(() => {
+    refresh();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [map]);
+
+  const fc = useGisPostgisRoadBbox(layer, enabled, bbox);
+  if (!enabled || fc.features.length === 0) return null;
+  return (
+    <GeoJSON
+      key={`${layer}-${fc.features.length}-${bbox?.west?.toFixed(3)}`}
+      data={fc}
+      style={() => ({ color, weight, opacity: 0.82 })}
+      onEachFeature={(feature, lyr) => bindNamedTooltip(feature, lyr, label)}
+    />
+  );
+};
+
 export const ApLeafletMap = forwardRef<ApLeafletMapHandle, ApLeafletMapProps>(function ApLeafletMap(
   {
     basemap,
+    cleanIndiaOverview = false,
     showStateBorder = true,
     showDistricts = true,
     districtOpacity = 1,
     stateOpacity = 1,
     choropleth: _choropleth = false,
     showHighways = false,
+    showApRoadsFull = false,
+    showOpsVspRoads = false,
+    showApRoadsMajor = false,
     showAgencyRoutes = false,
     showRailways = false,
     showGraticule = false,
+    showBorderPs = false,
+    showTalukGis = false,
+    showVspVillagePts = false,
     showRivers = false,
     showWaterbodies = false,
     showHillshade = false,
@@ -1010,13 +1720,30 @@ export const ApLeafletMap = forwardRef<ApLeafletMapHandle, ApLeafletMapProps>(fu
     policeStationOpacity = 1,
     selectedPoliceStationId,
     showImageryOverlay = false,
+    showGoogleRoadmap = false,
+    showSoiTopo = false,
+    showDistrictsGisHist = false,
+    showStateGisHist = false,
     highlightAgency = false,
+    showAsrBoundary = false,
+    showHotspots = false,
+    showCheckPosts = false,
+    showTollPlazas = false,
+    showGanjaSeized = false,
+    showPharmaHubs = false,
+    showDdacs = false,
+    showEntryExit = false,
+    showStockPoints = false,
+    showOpsMainRoads = false,
+    showOpsInternalRoads = false,
     markers = [],
     digitizedFeatures = [],
     ingestedLayers = [],
     draftPoints = [],
     draftType = 'Point',
     route = [],
+    overlayRoutes = [],
+    geoJsonOverlays = [],
     measurePoints = [],
     measureMode = null,
     bufferRings = [],
@@ -1024,6 +1751,7 @@ export const ApLeafletMap = forwardRef<ApLeafletMapHandle, ApLeafletMapProps>(fu
     clickMode = 'inspect',
     onMapClick,
     onMarkerClick,
+    onApStateFocus,
     onDistrictClick,
     onMandalClick,
     onVillageClick,
@@ -1031,24 +1759,92 @@ export const ApLeafletMap = forwardRef<ApLeafletMapHandle, ApLeafletMapProps>(fu
     onViewChange,
     onCursorMove,
     className = '',
-    initialZoom = AP_DEFAULT_ZOOM,
-    initialCenter = AP_CENTER,
+    initialZoom = INDIA_DEFAULT_ZOOM,
+    initialCenter = INDIA_CENTER,
     interactive = true,
+    adminHoverIdentify = true,
+    highlightApFill = true,
+    maskOutsideAp = false,
+    hideApStateLabel = false,
+    showScale = true,
+    showAttribution = true,
     layoutRevision = 0,
     fitToState = false,
     adminDrill = null,
     viewTarget,
+    boundsView = null,
+    indiaStatePick,
+    onIndiaStatePick,
+    selectedIndiaStateName = null,
     viewActive = true,
   },
   ref
 ) {
   const { districts, state, ready } = useApBoundaries();
-  const { highways, rivers, agency, water } = useApNetwork();
+  const { states: indiaStates, outline: indiaOutline, ready: indiaReady } = useIndiaStates();
+  const { highways, rivers, water } = useApNetwork();
+  const apFocused = isApStateFocus(adminDrill);
+  const indiaOverview = isIndiaOverview(adminDrill);
+  /** Dashboard-only white political India (before AP click). */
+  const politicalClean = Boolean(cleanIndiaOverview && indiaOverview);
+  const {
+    taluk: talukGis,
+    vspVillages,
+    borderPs,
+    soiGrid,
+    rail: railVector,
+    roadsMajor,
+    districtsHist,
+    stateHist,
+  } = useGisSourceAdmin({
+    showTaluk: showTalukGis,
+    showVspVillages: showVspVillagePts,
+    showBorderPs,
+    showSoiGrid: showGraticule,
+    showRailVector: showRailways,
+    showRoadsMajor: showApRoadsMajor,
+    showDistrictsHist: showDistrictsGisHist,
+    showStateHist: showStateGisHist,
+  });
+  const asrOn = showAsrBoundary || highlightAgency;
+  const {
+    asrBoundary,
+    pharmaHubs,
+    checkPosts,
+    dRoutes,
+    ddacs,
+    entryExit,
+    ganjaSeized,
+    hotspots: opsHotspots,
+    footTracks,
+    internalRoads,
+    mainRoads,
+    stockPoints,
+    tollPlazas,
+  } = useGisSourceOps({
+    showAsrBoundary: asrOn,
+    showPharmaHubs,
+    showCheckPosts,
+    showDRoutes: showAgencyRoutes,
+    showDdacs,
+    showEntryExit,
+    showGanjaSeized,
+    showHotspots,
+    showFootTracks: showTrails,
+    showInternalRoads: showOpsInternalRoads,
+    showMainRoads: showOpsMainRoads,
+    showStockPoints,
+    showTollPlazas,
+  });
   const drillLevel = adminDrill?.level ?? 'state';
   const drillActive = drillLevel !== 'state';
   const showMandalsEffective = shouldDrawMandals(drillLevel) || showMandals;
   const showVillagesEffective = shouldDrawVillages(drillLevel) || showVillages;
-  const showDistrictsEffective = drillActive ? drillLevel === 'district' : showDistricts;
+  // India overview: no districts. AP state focus: districts visible for next-level pick (no isolation).
+  // Deeper drill: isolation as before.
+  const showDistrictsEffective = drillActive
+    ? drillLevel === 'district' || showDistricts
+    : apFocused;
   const districtData =
     districts && drillActive && adminDrill?.districtFeature
       ? asFeatureCollection([adminDrill.districtFeature])
@@ -1058,6 +1854,21 @@ export const ApLeafletMap = forwardRef<ApLeafletMapHandle, ApLeafletMapProps>(fu
   const rasterId: RasterBasemapId = basemap === 'maplibre' ? 'vector' : basemap;
   const tiles = BASEMAP_TILES[rasterId];
   const useMapLibre = basemap === 'maplibre';
+  /**
+   * Satellite/hybrid: Esri World Imagery statewide (no GIS-Source sat AOI rectangles).
+   * Topo: OSM underlay + GIS-Source SOI AOI overlays (coverage is local).
+   */
+  const gisSatBasemap = rasterId === 'satellite' || rasterId === 'hybrid';
+  const gisTopoBasemap = rasterId === 'topo';
+  const gisRasterBasemap = gisSatBasemap || gisTopoBasemap;
+  /** India overview: label-free underlay so OSM/Carto city names do not fight state tooltips. */
+  const underlayTiles =
+    indiaOverview && !useMapLibre && rasterId === 'vector'
+      ? INDIA_OVERVIEW_UNDERLAY_TILES
+      : gisTopoBasemap
+        ? BASEMAP_TILES.vector
+        : tiles;
+  const underlayOpacity = gisTopoBasemap ? 0.35 : 1;
   const controllerRef = React.useRef<ApLeafletMapHandle>(null);
 
   useImperativeHandle(ref, () => ({
@@ -1069,38 +1880,66 @@ export const ApLeafletMap = forwardRef<ApLeafletMapHandle, ApLeafletMapProps>(fu
     getView: () => controllerRef.current?.getView() ?? null,
   }));
 
-  const districtStyle = (feature?: GeoJSON.Feature) => {
-    const name = (feature?.properties as ApDistrictProperties | undefined)?.district_name ?? '';
-    const isAgency = highlightAgency && AGENCY_DISTRICT_NAMES.includes(name);
-    return {
-      color: isAgency ? '#5b21b6' : '#0f2942',
-      weight: isAgency ? 1.3 : drillActive ? 0.8 : 1.4,
-      fillColor: isAgency ? '#7c3aed' : '#0f2942',
-      fillOpacity: isAgency ? 0.22 * districtOpacity : drillActive ? 0 : 0.05 * districtOpacity,
-      opacity: districtOpacity,
+  const districtStyle = (_feature?: GeoJSON.Feature) => ({
+    color: '#0f2942',
+    weight: drillActive ? 0.8 : apFocused ? 1.15 : 1.4,
+    fillColor: highlightApFill ? '#93c5fd' : '#0f2942',
+    fillOpacity: drillActive
+      ? 0
+      : highlightApFill
+        ? apFocused
+          ? 0.04 * districtOpacity
+          : 0.05 * districtOpacity
+        : 0,
+    opacity: districtOpacity,
+  });
+
+  const bindOpsName =
+    (fallback: LayerNameFallback = 'Feature') =>
+    (feature: GeoJSON.Feature, layer: L.Layer) => {
+      bindNamedTooltip(feature, layer, fallback);
     };
-  };
+
+  const pointCircle =
+    (color: string, radius = 6) =>
+    (_feature: GeoJSON.Feature, latlng: L.LatLng) =>
+      L.circleMarker(latlng, {
+        radius,
+        color,
+        weight: 1.5,
+        fillColor: color,
+        fillOpacity: 0.85,
+      });
 
   const draftLatLngs = draftPoints.map((p) => [p.lat, p.lon] as LatLngExpression);
   const measureLatLngs = measurePoints.map((p) => [p.lat, p.lon] as LatLngExpression);
   const routeLatLngs = route.map((p) => [p.lat, p.lon] as LatLngExpression);
 
   return (
-    <div className={`ap-leaflet-root ${drillActive ? 'is-admin-drill' : ''} ${className}`}>
+    <div
+      className={`ap-leaflet-root ${drillActive ? 'is-admin-drill' : ''} ${politicalClean ? 'is-political-clean' : ''} ${className}`}
+    >
       <MapContainer
+        key={politicalClean ? 'political-clean' : 'basemap'}
         center={initialCenter}
         zoom={initialZoom}
         minZoom={MAP_CAMERA_MIN_ZOOM}
         maxZoom={MAP_CAMERA_MAX_ZOOM}
+        maxBounds={INDIA_MAX_BOUNDS}
+        maxBoundsViscosity={0.9}
         zoomSnap={0}
         zoomDelta={0.5}
         wheelPxPerZoomLevel={80}
         zoomControl={false}
-        attributionControl
-        worldCopyJump
+        attributionControl={!politicalClean && showAttribution}
+        worldCopyJump={false}
         keyboard={interactive}
         boxZoom={false}
-        style={{ height: '100%', width: '100%' }}
+        style={{
+          height: '100%',
+          width: '100%',
+          background: politicalClean ? '#ffffff' : undefined,
+        }}
         dragging={interactive}
         inertia={interactive}
         scrollWheelZoom={interactive}
@@ -1109,93 +1948,226 @@ export const ApLeafletMap = forwardRef<ApLeafletMapHandle, ApLeafletMapProps>(fu
         bounceAtZoomLimits={false}
       >
         <AdminClipPanes />
-        {useMapLibre ? (
+        {!politicalClean && useMapLibre && (
           <MapLibreBasemap
             viewSync={`${adminDrill?.level ?? 'state'}:${adminDrill?.districtName ?? ''}:${adminDrill?.mandalName ?? ''}:${adminDrill?.villageName ?? ''}`}
           />
-        ) : (
+        )}
+        {!politicalClean && !useMapLibre && (
           <TileLayer
-            attribution={tiles.attribution}
-            url={tiles.url}
-            {...leafletOverzoom(tiles.maxZoom)}
+            attribution={
+              gisRasterBasemap
+                ? `${underlayTiles.attribution} · GIS-Source Raster overlays`
+                : underlayTiles.attribution
+            }
+            url={underlayTiles.url}
+            opacity={underlayOpacity}
+            {...leafletOverzoom(underlayTiles.maxZoom)}
           />
         )}
-        {tiles.labelsUrl && !useMapLibre && (
+        {!politicalClean && rasterId === 'hybrid' && !useMapLibre && tiles.labelsUrl && (
           <TileLayer url={tiles.labelsUrl} pane="overlayPane" {...leafletOverzoom(tiles.maxZoom)} />
         )}
-        {showHillshade && (
-          <TileLayer
-            url={ESRI_HILLSHADE_TILES.url}
-            attribution={ESRI_HILLSHADE_TILES.attribution}
-            opacity={0.45}
-            className="ap-hillshade-tiles"
-            pane="tilePane"
-            {...leafletOverzoom(ESRI_HILLSHADE_TILES.maxZoom)}
+        {!politicalClean && (
+          <GisSourceRasterOverlays
+            rasterId={rasterId}
+            drillLevel={drillLevel}
+            showImageryOverlay={showImageryOverlay}
+            showHillshade={showHillshade}
+            showGoogleRoadmap={showGoogleRoadmap}
+            showSoiTopo={showSoiTopo}
           />
         )}
-        <ZoomAwareDetailStack
-          useMapLibre={useMapLibre}
-          rasterId={rasterId}
-          drillActive={drillActive}
-          drillLevel={drillLevel}
-          showImageryOverlay={showImageryOverlay}
-          showHighways={showHighways}
-          showPlaces={showPlaces}
-        />
-        <AdminHoverIdentify adminDrill={adminDrill} />
-        {showTrails && (
-          <TileLayer
-            url={HIKING_TRAIL_TILES.url}
-            attribution={HIKING_TRAIL_TILES.attribution}
-            opacity={0.85}
-            pane={drillActive ? 'overlayPane' : undefined}
-            {...leafletOverzoom(HIKING_TRAIL_TILES.maxZoom)}
+        {!politicalClean && (
+          <ZoomAwareDetailStack
+            useMapLibre={useMapLibre}
+            rasterId={rasterId}
+            drillActive={drillActive}
+            drillLevel={drillLevel}
+            showImageryOverlay={showImageryOverlay}
+            showHighways={showHighways}
+            showPlaces={showPlaces}
           />
         )}
-        {showRailways && (
-          <TileLayer
-            attribution={OPENRAILWAY_TILES.attribution}
-            url={OPENRAILWAY_TILES.url}
-            opacity={0.85}
-            pane={drillActive ? 'overlayPane' : undefined}
-            {...leafletOverzoom(OPENRAILWAY_TILES.maxZoom)}
+        {!politicalClean && (
+          <AdminHoverIdentify adminDrill={adminDrill} enabled={adminHoverIdentify} />
+        )}
+        {!politicalClean && showGraticule && soiGrid && soiGrid.features.length > 0 && (
+          <GeoJSON
+            data={soiGrid}
+            pointToLayer={(_feature, latlng) =>
+              L.circleMarker(latlng, {
+                radius: 4,
+                color: '#78716c',
+                weight: 1,
+                fillColor: '#a8a29e',
+                fillOpacity: 0.85,
+              })
+            }
+            onEachFeature={(feature, layer) => bindNamedTooltip(feature, layer, 'SOI Map No')}
           />
         )}
-        {showGraticule && <Graticule />}
-        {water && showWaterbodies && (
+        {!politicalClean && showGraticule && (!soiGrid || soiGrid.features.length === 0) && (
+          <Graticule />
+        )}
+        {!politicalClean && showStateGisHist && stateHist && stateHist.features.length > 0 && (
+          <GeoJSON
+            data={stateHist}
+            style={{
+              color: '#9a3412',
+              weight: 2.2,
+              fill: false,
+              opacity: 0.9,
+              dashArray: '6 4',
+            }}
+            onEachFeature={(feature, layer) => {
+              const name = (feature.properties as { NAME_1?: string } | null)?.NAME_1;
+              layer.bindTooltip(name ? `${name} (GIS-Source undivided)` : 'GIS-Source AP state', {
+                sticky: true,
+                direction: 'top',
+                opacity: 0.96,
+              });
+            }}
+          />
+        )}
+        {!politicalClean && showDistrictsGisHist && districtsHist && districtsHist.features.length > 0 && (
+          <GeoJSON
+            data={districtsHist}
+            style={{
+              color: '#b45309',
+              weight: 1,
+              fillColor: '#f59e0b',
+              fillOpacity: 0.12,
+              opacity: 0.85,
+            }}
+            onEachFeature={(feature, layer) => {
+              const props = (feature.properties ?? {}) as Record<string, unknown>;
+              const base = formatFeatureTooltip(props, 'District');
+              layer.bindTooltip(`${base} · pre-2014`, {
+                sticky: true,
+                direction: 'top',
+                opacity: 0.96,
+              });
+            }}
+          />
+        )}
+        {!politicalClean && showTalukGis && talukGis && (
+          <GeoJSON
+            data={talukGis}
+            style={{ color: '#475569', weight: 0.9, fillColor: '#94a3b8', fillOpacity: 0.12 }}
+            onEachFeature={(feature, layer) => bindNamedTooltip(feature, layer, 'Taluk')}
+          />
+        )}
+        {!politicalClean && showBorderPs && borderPs && (
+          <GeoJSON
+            data={borderPs}
+            pointToLayer={(_feature, latlng) =>
+              L.circleMarker(latlng, {
+                radius: 4,
+                color: '#0f766e',
+                weight: 1.2,
+                fillColor: '#14b8a6',
+                fillOpacity: 0.9,
+              })
+            }
+            onEachFeature={(feature, layer) =>
+              bindNamedTooltip(feature, layer, 'Border Police Station')
+            }
+          />
+        )}
+        {!politicalClean && showVspVillagePts && vspVillages && (
+          <GeoJSON
+            data={vspVillages}
+            pointToLayer={(_feature, latlng) =>
+              L.circleMarker(latlng, {
+                radius: 2.2,
+                color: '#64748b',
+                weight: 0.6,
+                fillColor: '#cbd5e1',
+                fillOpacity: 0.85,
+              })
+            }
+            onEachFeature={(feature, layer) => bindNamedTooltip(feature, layer, 'Village')}
+          />
+        )}
+        {!politicalClean && water && showWaterbodies && (
           <GeoJSON
             data={water}
             style={{ color: '#0e7490', weight: 0.8, fillColor: '#38bdf8', fillOpacity: 0.28 }}
-            onEachFeature={(feature, layer) => {
-              const name = (feature.properties as { name?: string } | null)?.name;
-              if (name) layer.bindTooltip(name, { sticky: true });
-            }}
+            onEachFeature={(feature, layer) => bindNamedTooltip(feature, layer, 'Water body')}
           />
         )}
-        {rivers && showRivers && (
+        {!politicalClean && rivers && showRivers && (
           <GeoJSON
             data={rivers}
             style={{ color: '#1565c0', weight: 1.6, opacity: 0.75 }}
-            onEachFeature={(feature, layer) => {
-              const name = (feature.properties as { name?: string } | null)?.name;
-              if (name) layer.bindTooltip(name, { sticky: true });
-            }}
+            onEachFeature={(feature, layer) => bindNamedTooltip(feature, layer, 'River')}
           />
         )}
-        {ready && state && showStateBorder && (
+        {indiaReady && indiaStates && !drillActive && (
+          <IndiaStatesLayer
+            states={indiaStates}
+            apFocused={apFocused}
+            imageryBasemap={!politicalClean && gisSatBasemap}
+            politicalClean={politicalClean}
+            highlightApFill={highlightApFill}
+            simplifyNeighbors={maskOutsideAp}
+            hideApStateLabel={hideApStateLabel}
+            onApStateFocus={indiaStatePick ? undefined : indiaOverview ? onApStateFocus : undefined}
+            statePick={indiaStatePick}
+            onStatePick={onIndiaStatePick}
+            selectedStateName={selectedIndiaStateName}
+          />
+        )}
+        {politicalClean && indiaReady && indiaOutline && (
+          <GeoJSON
+            key="india-outer-boundary-clean"
+            pane="admin-vectors"
+            data={indiaOutline}
+            style={{
+              color: '#292524',
+              weight: 2.2,
+              fill: false,
+              opacity: 1,
+              interactive: false,
+              lineJoin: 'round',
+              lineCap: 'round',
+            }}
+            interactive={false}
+          />
+        )}
+        {!politicalClean && ready && state && showStateBorder && drillActive && (
           <GeoJSON
             data={state}
-            interactive={false}
             style={{ color: '#001428', weight: 1.5, fill: false, opacity: stateOpacity }}
+            onEachFeature={(feature, layer) => bindNamedTooltip(feature, layer, 'State')}
           />
         )}
         <AdminClipMask
-          key={`clip-${adminDrill?.level ?? 'state'}-${adminDrill?.villageName ?? adminDrill?.mandalName ?? adminDrill?.districtName ?? 'none'}`}
-          feature={clipFeature}
+          key={`clip-${adminDrill?.level ?? 'state'}-${adminDrill?.villageName ?? adminDrill?.mandalName ?? adminDrill?.districtName ?? 'none'}-${politicalClean ? 'w' : 'b'}-${maskOutsideAp ? 'apmask' : 'in'}-${highlightApFill ? 'c' : 'n'}`}
+          feature={
+            clipFeature ??
+            (maskOutsideAp && state?.features[0]
+              ? state.features[0]
+              : indiaReady
+                ? indiaOutline
+                : null)
+          }
+          fillColor={
+            politicalClean
+              ? '#ffffff'
+              : maskOutsideAp
+                ? '#e2e8f0'
+                : highlightApFill
+                  ? '#cfe4f3'
+                  : '#e8eef2'
+          }
+          strokeColor={politicalClean ? '#57534e' : '#0f2942'}
+          strokeWeight={politicalClean || maskOutsideAp ? 0 : undefined}
         />
-        {ready && districtData && showDistrictsEffective && (
+        {!politicalClean && ready && districtData && showDistrictsEffective && (
           <GeoJSON
-            key={`districts-${districtOpacity}-${highlightAgency ? 'ag' : 'std'}-${adminDrill?.districtName ?? 'all'}`}
+            key={`districts-${districtOpacity}-${asrOn ? 'asr' : 'std'}-${adminDrill?.districtName ?? 'all'}`}
             pane="admin-vectors"
             data={districtData}
             style={(feature) => {
@@ -1205,9 +2177,11 @@ export const ApLeafletMap = forwardRef<ApLeafletMapHandle, ApLeafletMapProps>(fu
               }
               return base;
             }}
-            interactive={!drillActive}
+            interactive={!drillActive && adminHoverIdentify}
             onEachFeature={(feature, layer) => {
+              if (!adminHoverIdentify) return;
               const name = (feature.properties as ApDistrictProperties).district_name;
+              bindNamedTooltip(feature, layer, 'District');
               bindIsolateClick(layer, (e) => {
                 onDistrictClick?.(
                   name,
@@ -1219,7 +2193,7 @@ export const ApLeafletMap = forwardRef<ApLeafletMapHandle, ApLeafletMapProps>(fu
             }}
           />
         )}
-        {ready && (
+        {!politicalClean && ready && (
           <AdminPolygonLayers
             showMandals={showMandalsEffective}
             showVillages={showVillagesEffective}
@@ -1230,66 +2204,242 @@ export const ApLeafletMap = forwardRef<ApLeafletMapHandle, ApLeafletMapProps>(fu
             onVillageClick={onVillageClick}
           />
         )}
-        <PoliceStationLayer
-          enabled={showPoliceStations}
-          opacity={policeStationOpacity}
-          selectedId={selectedPoliceStationId}
-          clipFeature={clipStations}
-          onPoliceStationClick={onPoliceStationClick}
-        />
-        {highways && showHighways && (
+        {!politicalClean && (
+          <PoliceStationLayer
+            enabled={showPoliceStations}
+            opacity={policeStationOpacity}
+            selectedId={selectedPoliceStationId}
+            clipFeature={clipStations}
+            onPoliceStationClick={onPoliceStationClick}
+          />
+        )}
+        {!politicalClean && highways && showHighways && (
           <GeoJSON
             data={highways}
-            style={(feature) => ({
-              color: feature?.properties?.name === 'NH-16' ? '#c2410c' : '#b45309',
-              weight: feature?.properties?.name === 'NH-16' ? 3 : 2.2,
+            style={() => ({
+              color: '#c2410c',
+              weight: 2.6,
               opacity: 0.95,
             })}
             onEachFeature={(feature, layer) => {
-              const props = feature.properties as { name?: string; length_km?: number };
-              layer.bindTooltip(
-                `${props.name ?? 'NH'}${props.length_km ? ` • ${props.length_km} km (OSM)` : ''}`,
-                { sticky: true }
-              );
+              const props = (feature.properties ?? {}) as Record<string, unknown>;
+              const sub = String(props.rd_sub_typ ?? props.name ?? 'National Highway');
+              layer.bindTooltip(sub, { sticky: true, direction: 'top', opacity: 0.96 });
             }}
           />
         )}
-        {agency && showAgencyRoutes && (
+        {!politicalClean && showApRoadsFull && (
+          <PostgisBboxRoadLayer
+            layer="full"
+            enabled={showApRoadsFull}
+            color="#1e3a8a"
+            weight={1.1}
+            label="AP Road"
+          />
+        )}
+        {!politicalClean && showOpsVspRoads && (
+          <PostgisBboxRoadLayer
+            layer="vsp"
+            enabled={showOpsVspRoads}
+            color="#0f766e"
+            weight={1.4}
+            label="VSP Road"
+          />
+        )}
+        {!politicalClean && showApRoadsMajor && roadsMajor && (
           <GeoJSON
-            data={agency}
-            style={{ color: '#ba1a1a', weight: 2.6, dashArray: '7 4', opacity: 0.95 }}
-            onEachFeature={(feature, layer) => {
-              const props = feature.properties as { name?: string; length_km?: number };
-              layer.bindTooltip(
-                `${props.name ?? 'Agency corridor'}${props.length_km ? ` • ${props.length_km} km OSM driving` : ''}`,
-                { sticky: true }
-              );
+            data={roadsMajor}
+            style={(feature) => {
+              const rd = String(
+                (feature?.properties as { RD_TYPE?: string; RD_SUB_TYP?: string } | null)?.RD_TYPE ??
+                  (feature?.properties as { RD_SUB_TYP?: string } | null)?.RD_SUB_TYP ??
+                  ''
+              ).toUpperCase();
+              const isNh = /\bNH\b|NATIONAL/.test(rd);
+              return {
+                color: isNh ? '#c2410c' : '#a16207',
+                weight: isNh ? 2.2 : 1.4,
+                opacity: 0.85,
+              };
             }}
+            onEachFeature={(feature, layer) => bindNamedTooltip(feature, layer, 'Major Road')}
           />
         )}
-        {routeLatLngs.length > 1 && (
+        {!politicalClean && showOpsMainRoads && mainRoads && mainRoads.features.length > 0 && (
+          <GeoJSON
+            data={mainRoads}
+            style={{ color: '#9a3412', weight: 2.1, opacity: 0.9 }}
+            onEachFeature={bindOpsName('Main Road')}
+          />
+        )}
+        {!politicalClean && showOpsInternalRoads && internalRoads && internalRoads.features.length > 0 && (
+          <GeoJSON
+            data={internalRoads}
+            style={{ color: '#57534e', weight: 1.2, opacity: 0.8 }}
+            onEachFeature={bindOpsName('Internal Road')}
+          />
+        )}
+        {!politicalClean && showTrails && footTracks && footTracks.features.length > 0 && (
+          <GeoJSON
+            data={footTracks}
+            style={{ color: '#65a30d', weight: 2.2, opacity: 0.95, dashArray: '5 3' }}
+            onEachFeature={bindOpsName('Foot Track')}
+          />
+        )}
+        {!politicalClean && showAgencyRoutes && dRoutes && dRoutes.features.length > 0 && (
+          <GeoJSON
+            data={dRoutes}
+            style={{ color: '#ba1a1a', weight: 2.4, dashArray: '7 4', opacity: 0.95 }}
+            onEachFeature={bindOpsName('Drug Route')}
+          />
+        )}
+        {/* Rail above roads: violet casing + dash so IR stays distinct from NH/SH/metal. */}
+        {!politicalClean && showRailways && railVector && railVector.features.length > 0 && (
+          <IndianRailwayLayer data={railVector} />
+        )}
+        {!politicalClean && showRailways && (!railVector || railVector.features.length === 0) && (
+          <TileLayer
+            attribution={OPENRAILWAY_TILES.attribution}
+            url={OPENRAILWAY_TILES.url}
+            opacity={0.85}
+            pane={drillActive ? 'overlayPane' : undefined}
+            {...leafletOverzoom(OPENRAILWAY_TILES.maxZoom)}
+          />
+        )}
+        {!politicalClean && asrOn && asrBoundary && asrBoundary.features.length > 0 && (
+          <GeoJSON
+            data={asrBoundary}
+            style={{
+              color: '#5b21b6',
+              weight: 2,
+              fillColor: '#7c3aed',
+              fillOpacity: 0.18,
+              opacity: 0.95,
+            }}
+            onEachFeature={bindOpsName('ASR Boundary')}
+          />
+        )}
+        {!politicalClean && showHotspots && opsHotspots && (
+          <OpsHotspotsLayer data={opsHotspots} clipFeature={clipFeature} />
+        )}
+        {!politicalClean && showCheckPosts && checkPosts && (
+          <GeoJSON
+            data={checkPosts}
+            pointToLayer={pointCircle('#1d4ed8', 7)}
+            onEachFeature={bindOpsName('Check Post')}
+          />
+        )}
+        {!politicalClean && showTollPlazas && tollPlazas && (
+          <GeoJSON
+            data={tollPlazas}
+            style={{ color: '#0f766e', weight: 1.2, fillColor: '#14b8a6', fillOpacity: 0.35 }}
+            pointToLayer={pointCircle('#0f766e', 6)}
+            onEachFeature={bindOpsName('Toll Plaza')}
+          />
+        )}
+        {!politicalClean && showGanjaSeized && ganjaSeized && (
+          <GeoJSON
+            data={ganjaSeized}
+            pointToLayer={pointCircle('#4338ca', 7)}
+            onEachFeature={bindOpsName('Seizure')}
+          />
+        )}
+        {!politicalClean && showPharmaHubs && pharmaHubs && (
+          <GeoJSON
+            data={pharmaHubs}
+            pointToLayer={pointCircle('#a16207', 7)}
+            onEachFeature={bindOpsName('Pharma Hub')}
+          />
+        )}
+        {!politicalClean && showDdacs && ddacs && (
+          <GeoJSON
+            data={ddacs}
+            pointToLayer={pointCircle('#7c2d12', 7)}
+            onEachFeature={bindOpsName('DDAC')}
+          />
+        )}
+        {!politicalClean && showEntryExit && entryExit && (
+          <GeoJSON
+            data={entryExit}
+            pointToLayer={pointCircle('#0369a1', 6)}
+            onEachFeature={bindOpsName('Entry / Exit')}
+          />
+        )}
+        {!politicalClean && showStockPoints && stockPoints && (
+          <GeoJSON
+            data={stockPoints}
+            pointToLayer={pointCircle('#9f1239', 7)}
+            onEachFeature={bindOpsName('Stock Point')}
+          />
+        )}
+        {!politicalClean && routeLatLngs.length > 1 && (
           <Polyline positions={routeLatLngs} pathOptions={{ color: '#0f766e', weight: 4, opacity: 0.95 }} />
         )}
-        {(clipFeature
-          ? markers.filter((m) => pointInFeature([m.lon, m.lat], clipFeature))
-          : markers
-        ).map((m) => (
+        {!politicalClean &&
+          overlayRoutes
+            .filter((r) => r.visible !== false && r.points.length > 1)
+            .map((r) => (
+              <Polyline
+                key={r.id}
+                positions={r.points.map((p) => [p.lat, p.lon] as LatLngExpression)}
+                pathOptions={{
+                  color: r.color,
+                  weight: r.weight ?? 4,
+                  opacity: r.opacity ?? 0.92,
+                  dashArray: r.dashArray,
+                  lineCap: 'round',
+                  lineJoin: 'round',
+                }}
+              />
+            ))}
+        {!politicalClean &&
+          geoJsonOverlays
+            .filter((o) => o.visible !== false && o.data.features.length > 0)
+            .map((o) => (
+              <GeoJSON
+                key={`gj-${o.id}-${o.data.features.length}`}
+                data={o.data}
+                style={(feature) => {
+                  const stroke = o.featureStyle?.(feature as GeoJSON.Feature);
+                  return {
+                    color: stroke?.color ?? o.color,
+                    weight: stroke?.weight ?? o.weight ?? 1.6,
+                    opacity: o.opacity ?? 0.9,
+                    lineCap: 'round',
+                    lineJoin: 'round',
+                  };
+                }}
+              />
+            ))}
+        {!politicalClean &&
+          (clipFeature
+            ? markers.filter((m) => pointInFeature([m.lon, m.lat], clipFeature))
+            : markers
+          ).map((m) => (
           <Marker
             key={m.id}
             position={[m.lat, m.lon]}
-            icon={markerIcon(m.kind, Boolean(m.selected))}
+            icon={markerIcon(m.kind, Boolean(m.selected), m.badge)}
             eventHandlers={{ click: () => onMarkerClick?.(m.id) }}
           >
+            <Tooltip sticky direction="top" opacity={0.96}>
+              <div className="text-[11px] leading-snug">
+                <div className="font-semibold">{m.label}</div>
+                {m.detail ? <div className="text-slate-600 font-medium">{m.detail}</div> : null}
+              </div>
+            </Tooltip>
             <Popup>
               <div className="text-xs font-semibold">{m.label}</div>
+              {m.detail ? <div className="text-[11px] text-slate-600">{m.detail}</div> : null}
               <div className="font-mono text-[10px] tabular-coord">
                 {m.lat.toFixed(4)}° N, {m.lon.toFixed(4)}° E
               </div>
             </Popup>
           </Marker>
         ))}
-        <IngestedOverlays layers={ingestedLayers} />
-        {digitizedFeatures.map((df) => {
+        {!politicalClean && <IngestedOverlays layers={ingestedLayers} />}
+        {!politicalClean &&
+          digitizedFeatures.map((df) => {
           const latlngs = df.points.map((p) => [p.lat, p.lon] as LatLngExpression);
           if (df.type === 'Point' && df.points[0]) {
             return (
@@ -1321,24 +2471,25 @@ export const ApLeafletMap = forwardRef<ApLeafletMapHandle, ApLeafletMapProps>(fu
           }
           return null;
         })}
-        {draftType === 'Polygon' && draftLatLngs.length >= 3 && (
+        {!politicalClean && draftType === 'Polygon' && draftLatLngs.length >= 3 && (
           <Polygon
             positions={draftLatLngs}
             pathOptions={{ color: '#006a61', weight: 2, fillColor: '#006a61', fillOpacity: 0.2 }}
           />
         )}
-        {draftType === 'LineString' && draftLatLngs.length >= 2 && (
+        {!politicalClean && draftType === 'LineString' && draftLatLngs.length >= 2 && (
           <Polyline positions={draftLatLngs} pathOptions={{ color: '#006a61', weight: 2, dashArray: '4 3' }} />
         )}
-        {draftPoints.map((p, i) => (
-          <Circle
-            key={`draft-${i}`}
-            center={[p.lat, p.lon]}
-            radius={40}
-            pathOptions={{ color: '#ba1a1a', fillColor: '#ba1a1a', fillOpacity: 1 }}
-          />
-        ))}
-        {measureMode && measureLatLngs.length >= 2 && (
+        {!politicalClean &&
+          draftPoints.map((p, i) => (
+            <Circle
+              key={`draft-${i}`}
+              center={[p.lat, p.lon]}
+              radius={40}
+              pathOptions={{ color: '#ba1a1a', fillColor: '#ba1a1a', fillOpacity: 1 }}
+            />
+          ))}
+        {!politicalClean && measureMode && measureLatLngs.length >= 2 && (
           measureMode === 'area' && measureLatLngs.length >= 3 ? (
             <Polygon
               positions={measureLatLngs}
@@ -1351,7 +2502,8 @@ export const ApLeafletMap = forwardRef<ApLeafletMapHandle, ApLeafletMapProps>(fu
             />
           )
         )}
-        {bufferRings.map((ring) => (
+        {!politicalClean &&
+          bufferRings.map((ring) => (
           <Polygon
             key={ring.id}
             positions={geodesicBufferCoordinates(ring.lat, ring.lon, ring.radiusKm).map(
@@ -1368,7 +2520,7 @@ export const ApLeafletMap = forwardRef<ApLeafletMapHandle, ApLeafletMapProps>(fu
             <Tooltip sticky>{ring.label}</Tooltip>
           </Polygon>
         ))}
-        {droppedPin && (
+        {!politicalClean && droppedPin && (
           <Marker position={[droppedPin.lat, droppedPin.lon]} icon={markerIcon('city', true)}>
             <Popup>
               <div className="font-mono text-[11px] tabular-coord">
@@ -1378,21 +2530,26 @@ export const ApLeafletMap = forwardRef<ApLeafletMapHandle, ApLeafletMapProps>(fu
             </Popup>
           </Marker>
         )}
-        <ScaleControl position="bottomleft" metric imperial={false} />
+        {!politicalClean && showScale && (
+          <ScaleControl position="bottomleft" metric imperial={false} />
+        )}
         <MapController
           ref={controllerRef}
           onViewChange={onViewChange}
           layoutRevision={layoutRevision}
           fitToState={fitToState}
           clipFeature={clipFeature}
-          clipKey={`${viewActive ? 'on' : 'off'}:${adminDrill?.level ?? 'state'}:${adminDrill?.districtName ?? ''}:${adminDrill?.mandalName ?? ''}:${adminDrill?.villageName ?? ''}`}
+          clipKey={`${viewActive ? 'on' : 'off'}:${adminDrill?.level ?? 'state'}:${adminDrill?.apFocused ? 'ap' : 'in'}:${adminDrill?.districtName ?? ''}:${adminDrill?.mandalName ?? ''}:${adminDrill?.villageName ?? ''}`}
+          apFocused={apFocused}
           viewTarget={viewTarget}
+          boundsView={boundsView}
           viewActive={viewActive}
         />
         <ClickSink
           mode={clickMode}
           interactive={interactive}
           drillLevel={drillLevel}
+          apFocused={apFocused}
           districts={districts}
           onDistrictClick={onDistrictClick}
           onMapClick={onMapClick}

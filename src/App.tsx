@@ -5,10 +5,8 @@ import {
   BasemapId,
   CrsId,
   DigitizedFeature,
-  GisJob,
   GisLayer,
   TacticalAlert,
-  TopologyAuditRule,
   WorkspaceId,
 } from './types/gis';
 import {
@@ -16,15 +14,16 @@ import {
   INITIAL_GIS_JOBS,
   INITIAL_GIS_LAYERS,
   INITIAL_TACTICAL_ALERTS,
-  INITIAL_TOPOLOGY_RULES,
   INSPECTABLE_FEATURES,
 } from './data/apGisData';
 import { TopCommandHeader } from './components/TopCommandHeader';
 import { LeftNavigationRail } from './components/LeftNavigationRail';
 import { MapViewerWorkspace } from './components/MapViewerWorkspace';
 import { CoreOpsWorkspaces } from './components/workspaces/CoreOpsWorkspaces';
+import { NdpsAnalyticsWorkspace } from './components/workspaces/NdpsAnalyticsWorkspace';
 import { DataLayerWorkspaces } from './components/workspaces/DataLayerWorkspaces';
 import { OutputsGovernanceWorkspaces } from './components/workspaces/OutputsGovernanceWorkspaces';
+import { WorkspaceErrorBoundary } from './components/WorkspaceErrorBoundary';
 import { MapLayoutProvider } from './components/gis/ApLeafletMap';
 import { AuthProvider, useAuth } from './auth/AuthContext';
 import { LoginScreen } from './components/LoginScreen';
@@ -33,19 +32,45 @@ import { policeStationsToRows, usePoliceStations } from './gis/usePoliceStations
 import { buildSearchTargets, resolveFlyTarget } from './gis/searchTargets';
 import {
   applyLayerConfig,
-  countEnabledLayers,
   defaultDashboardLayerConfig,
-  layerConfigFromGisLayers,
+  destinationConfigFromSelection,
   loadDashboardLayerConfig,
   persistDashboardLayerConfig,
   type DashboardLayerConfig,
 } from './gis/dashboardLayers';
+import {
+  countRoutingLayers,
+  loadRoadsRoutingLayerConfig,
+  persistRoadsRoutingLayerConfig,
+  type RoadsRoutingLayerConfig,
+} from './gis/roadsRoutingLayers';
+import {
+  countRoutingNewLayers,
+  isRoadsRoutingNewCatalogLayer,
+  loadRoadsRoutingNewLayerConfig,
+  persistRoadsRoutingNewLayerConfig,
+  type RoadsRoutingNewLayerConfig,
+} from './gis/roadsRoutingNewLayers';
+import {
+  canSaveToRoadsModules,
+  isCatalogWorkspace,
+} from './gis/catalogWorkspaces';
+import {
+  EMPTY_CATALOG_HOVER_EXCLUSIONS,
+  clearLayerHoverExclusions,
+  excludeLayersFromHover,
+  type CatalogHoverDestination,
+  type CatalogHoverExclusions,
+} from './gis/catalogHoverSelection';
 import type { IngestedLayer } from './gis/ingest';
+import { RoadsRoutingWorkspace } from './components/workspaces/RoadsRoutingWorkspace';
+import { RoadsRoutingNewWorkspace } from './components/workspaces/RoadsRoutingNewWorkspace';
 
 function AppShell() {
   const { user, canOpen, can, logout } = useAuth();
-  const [activeWorkspace, setActiveWorkspace] = useState<WorkspaceId>('gis-dashboard');
+  const [activeWorkspace, setActiveWorkspace] = useState<WorkspaceId>('ndps-spatial-dashboard');
   const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(true);
+  const [dashboardMapExpanded, setDashboardMapExpanded] = useState(false);
   const kmzStations = usePoliceStations(true);
   const kmzRows = useMemo(() => policeStationsToRows(kmzStations), [kmzStations]);
   const searchTargets = useMemo(
@@ -66,12 +91,28 @@ function AppShell() {
       'lyr-pss': { enabled: false, opacity: loaded['lyr-pss']?.opacity ?? 100 },
     };
   });
+  const [roadsRoutingConfig, setRoadsRoutingConfig] = useState<RoadsRoutingLayerConfig>(
+    () => loadRoadsRoutingLayerConfig() ?? {}
+  );
+  const [roadsRoutingNewConfig, setRoadsRoutingNewConfig] = useState<RoadsRoutingNewLayerConfig>(
+    () => loadRoadsRoutingNewLayerConfig() ?? {}
+  );
+  /** Independent sticky labels after each Save click (not cleared by hover remove / new ticks). */
+  const [catalogSaveAck, setCatalogSaveAck] = useState({
+    dashboard: false,
+    roadsRouting: false,
+    roadsRoutingNew: false,
+  });
+  /** Per-Save-button hover opt-outs; Visible clears only when opted out of all three. */
+  const [catalogHoverExclusions, setCatalogHoverExclusions] = useState<CatalogHoverExclusions>(
+    EMPTY_CATALOG_HOVER_EXCLUSIONS
+  );
   const dashboardLayers = useMemo(
     () => applyLayerConfig(INITIAL_GIS_LAYERS, dashboardLayerConfig),
     [dashboardLayerConfig]
   );
   const [basemap, setBasemap] = useState<BasemapId>('maplibre');
-  const [crs, setCrs] = useState<CrsId>('EPSG:4326');
+  const crs: CrsId = 'EPSG:4326';
   const [centerCoords, setCenterCoords] = useState<{ lat: number; lon: number }>({
     lat: 16.5062,
     lon: 80.648,
@@ -90,11 +131,10 @@ function AppShell() {
   const [bottomMode, setBottomMode] = useState<'expanded' | 'minimized' | 'closed'>('expanded');
 
   // Dynamic Platform State
-  const [jobs, setJobs] = useState<GisJob[]>(INITIAL_GIS_JOBS);
+  const jobs = INITIAL_GIS_JOBS;
   const [alerts, setAlerts] = useState<TacticalAlert[]>(INITIAL_TACTICAL_ALERTS);
   const [digitizedFeatures, setDigitizedFeatures] = useState<DigitizedFeature[]>([]);
   const [ingestedLayers, setIngestedLayers] = useState<IngestedLayer[]>([]);
-  const [topologyRules, setTopologyRules] = useState<TopologyAuditRule[]>(INITIAL_TOPOLOGY_RULES);
   const [auditLogs, setAuditLogs] = useState<AuditLogEntry[]>(INITIAL_AUDIT_LOGS);
 
   // Toast Notification
@@ -115,7 +155,6 @@ function AppShell() {
     const ts = `2026-10-28 ${String(now.getHours()).padStart(2, '0')}:${String(
       now.getMinutes()
     ).padStart(2, '0')}:${String(now.getSeconds()).padStart(2, '0')} IST`;
-    const hashSuffix = Math.floor(1000 + Math.random() * 8999).toString(16);
     setAuditLogs((prev) => [
       {
         id: `AUD-${9042 + prev.length}`,
@@ -125,7 +164,6 @@ function AppShell() {
         ipNode: 'local session',
         action,
         resource,
-        signatureHash: `local:${hashSuffix}`,
       },
       ...prev,
     ]);
@@ -136,7 +174,7 @@ function AppShell() {
     const onKeyDown = (e: KeyboardEvent) => {
       const tag = (e.target as HTMLElement)?.tagName;
       if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
-      if (activeWorkspace !== 'interactive-map-viewer') return;
+      if (activeWorkspace !== 'interactive-map') return;
 
       if (e.key.toLowerCase() === 'l') {
         setLeftOpen((v) => !v);
@@ -158,9 +196,28 @@ function AppShell() {
     setLayers((prev) =>
       prev.map((l) => (l.id === layerId ? { ...l, enabled: !l.enabled } : l))
     );
+    // Catalog Visible changes reset hover opt-outs so a fresh tick shows on all three buttons.
+    setCatalogHoverExclusions((prev) => clearLayerHoverExclusions(prev, layerId));
     if (target) {
       appendAudit(target.enabled ? 'DISABLE_LAYER' : 'ENABLE_LAYER', target.sourceTable);
     }
+  };
+
+  const handleExcludeFromCatalogHover = (
+    destination: CatalogHoverDestination,
+    layerIds: string[]
+  ) => {
+    if (layerIds.length === 0) return;
+    setCatalogHoverExclusions((prev) => {
+      const { next, turnOffLayerIds } = excludeLayersFromHover(prev, destination, layerIds);
+      if (turnOffLayerIds.length > 0) {
+        const off = new Set(turnOffLayerIds);
+        setLayers((layersPrev) =>
+          layersPrev.map((l) => (off.has(l.id) && l.enabled ? { ...l, enabled: false } : l))
+        );
+      }
+      return next;
+    });
   };
 
   const handleChangeLayerOpacity = (layerId: string, opacity: number) => {
@@ -169,16 +226,86 @@ function AppShell() {
     );
   };
 
+  const selectedIdsFor = (destination: CatalogHoverDestination) =>
+    new Set(
+      layers
+        .filter((layer) => layer.enabled && !catalogHoverExclusions[destination][layer.id])
+        .map((layer) => layer.id)
+    );
+
   const handleSaveDashboardLayers = () => {
-    const config = layerConfigFromGisLayers(layers);
+    const selected = selectedIdsFor('dashboard');
+    const before = new Set(
+      Object.entries(dashboardLayerConfig)
+        .filter(([, entry]) => entry?.enabled)
+        .map(([id]) => id)
+    );
+    const config = destinationConfigFromSelection(layers, selected, 'snapshot');
     setDashboardLayerConfig(config);
     const persisted = persistDashboardLayerConfig(config);
-    const enabled = countEnabledLayers(layers);
-    appendAudit('SAVE_DASHBOARD_LAYERS', `catalog → dashboard (${enabled} on)`);
+    const enabled = selected.size;
+    const removed = [...before].filter((id) => !selected.has(id)).length;
+    setCatalogSaveAck((prev) => ({ ...prev, dashboard: true }));
+    appendAudit('SAVE_DASHBOARD_LAYERS', `catalog → dashboard (${enabled} on, ${removed} removed)`);
     triggerToast(
       persisted
-        ? `Saved ${enabled} catalog layers to the Dashboard map`
-        : `Applied ${enabled} catalog layers to the Dashboard map (this browser blocked persistence)`
+        ? `Saved ${enabled} layer${enabled === 1 ? '' : 's'} to the Dashboard${removed ? ` (removed ${removed})` : ''}`
+        : `Applied ${enabled} layer${enabled === 1 ? '' : 's'} to the Dashboard (this browser blocked persistence)`
+    );
+  };
+
+  const handleSaveRoadsRoutingLayers = () => {
+    if (!canSaveToRoadsModules(activeWorkspace) || !isCatalogWorkspace(activeWorkspace)) {
+      triggerToast(
+        'Save to Roads Routing is only available from Admin, OPS, or Road Network catalogs'
+      );
+      return;
+    }
+    const selected = selectedIdsFor('roadsRouting');
+    const beforeIds = new Set(Object.keys(roadsRoutingConfig));
+    const next = destinationConfigFromSelection(layers, selected, 'assigned', undefined, roadsRoutingConfig);
+    setRoadsRoutingConfig(next);
+    const persisted = persistRoadsRoutingLayerConfig(next);
+    const n = countRoutingLayers(next);
+    const removed = [...beforeIds].filter((id) => !next[id]).length;
+    setCatalogSaveAck((prev) => ({ ...prev, roadsRouting: true }));
+    appendAudit('SAVE_ROADS_ROUTING_LAYERS', `${activeWorkspace} → roads-routing (${n} total, ${removed} removed)`);
+    triggerToast(
+      persisted
+        ? `Saved to Roads Routing (${n} layer${n === 1 ? '' : 's'}${removed ? `; removed ${removed}` : ''})`
+        : `Saved to Roads Routing (${n} total; persistence blocked in this browser)`
+    );
+  };
+
+  const handleSaveRoadsRoutingNewLayers = () => {
+    if (!canSaveToRoadsModules(activeWorkspace) || !isCatalogWorkspace(activeWorkspace)) {
+      triggerToast(
+        'Save to Roads Routing New is only available from Admin, OPS, or Road Network catalogs'
+      );
+      return;
+    }
+    const selected = selectedIdsFor('roadsRoutingNew');
+    const beforeIds = new Set(Object.keys(roadsRoutingNewConfig));
+    const next = destinationConfigFromSelection(
+      layers,
+      selected,
+      'assigned',
+      (layer) => isRoadsRoutingNewCatalogLayer(layer),
+      roadsRoutingNewConfig
+    );
+    setRoadsRoutingNewConfig(next);
+    const persisted = persistRoadsRoutingNewLayerConfig(next);
+    const n = countRoutingNewLayers(next);
+    const removed = [...beforeIds].filter((id) => !next[id]).length;
+    setCatalogSaveAck((prev) => ({ ...prev, roadsRoutingNew: true }));
+    appendAudit(
+      'SAVE_ROADS_ROUTING_NEW_LAYERS',
+      `${activeWorkspace} → roads-routing-new (${n} total, ${removed} removed)`
+    );
+    triggerToast(
+      persisted
+        ? `Saved to Roads Routing New (${n} layer${n === 1 ? '' : 's'}${removed ? `; removed ${removed}` : ''})`
+        : `Saved to Roads Routing New (${n} total; persistence blocked in this browser)`
     );
   };
 
@@ -193,7 +320,7 @@ function AppShell() {
     setExternalFocus({ lat: feature.lat, lon: feature.lon, zoom: 13 });
     setCenterCoords({ lat: feature.lat, lon: feature.lon });
     setRightOpen(true);
-    setActiveWorkspace('interactive-map-viewer');
+    setActiveWorkspace('interactive-map');
     triggerToast(`Focused spatial target: ${feature.name}`);
   };
 
@@ -201,7 +328,7 @@ function AppShell() {
     setSelectedPsId(null);
     setExternalFocus({ lat, lon, zoom: 10 });
     setCenterCoords({ lat, lon });
-    setActiveWorkspace('interactive-map-viewer');
+    setActiveWorkspace('interactive-map');
     triggerToast(`Focused spatial target: ${label}`);
   };
 
@@ -211,15 +338,6 @@ function AppShell() {
     );
     appendAudit('ACKNOWLEDGE_ALERT', alertId);
     triggerToast(`Alert ${alertId} acknowledged and logged to NOC dispatch`);
-  };
-
-  const handleAddJob = (job: GisJob) => {
-    if (!can('geoprocess')) {
-      triggerToast('Geoprocessing denied for your RBAC clearance');
-      return;
-    }
-    setJobs((prev) => [job, ...prev]);
-    appendAudit('RUN_GEOPROCESSING', `${job.algorithm} -> ${job.targetLayer}`);
   };
 
   const handleAddDigitizedFeature = (df: DigitizedFeature) => {
@@ -251,7 +369,7 @@ function AppShell() {
     triggerToast(
       `Mounted ${incoming.length} ingested layer${incoming.length === 1 ? '' : 's'} without replacing catalog data`
     );
-    setActiveWorkspace('interactive-map-viewer');
+    setActiveWorkspace('interactive-map');
   };
 
   const handleToggleIngested = (id: string) => {
@@ -275,27 +393,6 @@ function AppShell() {
     triggerToast('Removed custom digitized geometry from map');
   };
 
-  const handleFixTopologyRule = (ruleId: string) => {
-    if (!can('fixTopology')) {
-      triggerToast('Topology repair denied for your RBAC clearance');
-      return;
-    }
-    setTopologyRules((prev) =>
-      prev.map((r) =>
-        r.id === ruleId
-          ? {
-              ...r,
-              violations: 0,
-              severity: 'Pass',
-              description: `${r.description} [Auto-snapped & validated via PostGIS ST_Snap]`,
-            }
-          : r
-      )
-    );
-    appendAudit('RESOLVE_TOPOLOGY_SLIVER', ruleId);
-    triggerToast(`Topology rule ${ruleId} resolved with zero remaining violations`);
-  };
-
   useEffect(() => {
     if (!user) return;
     setActiveWorkspace(defaultWorkspace(user.role));
@@ -307,6 +404,12 @@ function AppShell() {
     }
   }, [user, activeWorkspace, canOpen]);
 
+  useEffect(() => {
+    if (activeWorkspace !== 'ndps-spatial-dashboard' && dashboardMapExpanded) {
+      setDashboardMapExpanded(false);
+    }
+  }, [activeWorkspace, dashboardMapExpanded]);
+
   if (!user) return <LoginScreen />;
 
   const handleSelectWorkspace = (ws: WorkspaceId) => {
@@ -314,51 +417,65 @@ function AppShell() {
       triggerToast('Access denied for your RBAC clearance');
       return;
     }
+    setDashboardMapExpanded(false);
     setActiveWorkspace(ws);
   };
 
-  return (
-    <div className="h-full min-h-0 bg-background text-on-surface flex flex-col overflow-hidden">
-      {/* Global Command Header */}
-      <TopCommandHeader
-        centerLat={centerCoords.lat}
-        centerLon={centerCoords.lon}
-        crs={crs}
-        onChangeCrs={(nextCrs) => {
-          setCrs(nextCrs);
-          appendAudit('SWITCH_CRS', nextCrs);
-        }}
-        jobs={jobs}
-        alerts={alerts}
-        onAcknowledgeAlert={handleAcknowledgeAlert}
-        onSelectFeatureAndFly={handleSelectFeatureAndFly}
-        allFeatures={searchTargets}
-        sidebarCollapsed={sidebarCollapsed}
-        onToggleSidebar={() => setSidebarCollapsed((c) => !c)}
-        onSwitchWorkspace={handleSelectWorkspace}
-        onTriggerToast={triggerToast}
-        userName={user.displayName}
-        userRole={user.role}
-        userUnit={user.unit}
-        onLogout={logout}
-      />
+  const fillViewportWorkspace =
+    activeWorkspace === 'ndps-spatial-dashboard' ||
+    activeWorkspace === 'ndps-analytics' ||
+    activeWorkspace === 'interactive-map' ||
+    activeWorkspace === 'roads-routing' ||
+    activeWorkspace === 'roads-routing-new';
 
-      {/* Left Workspace Navigation Rail */}
-      <LeftNavigationRail
-        activeWorkspace={activeWorkspace}
-        onSelectWorkspace={handleSelectWorkspace}
-        collapsed={sidebarCollapsed}
-        allowedWorkspaces={allowedWorkspaces(user.role)}
-      />
+  return (
+    <div className="h-dvh max-h-dvh min-h-0 bg-background text-on-surface flex flex-col overflow-hidden">
+      {!dashboardMapExpanded && (
+        <TopCommandHeader
+          jobs={jobs}
+          alerts={alerts}
+          onAcknowledgeAlert={handleAcknowledgeAlert}
+          onSelectFeatureAndFly={handleSelectFeatureAndFly}
+          allFeatures={searchTargets}
+          sidebarCollapsed={sidebarCollapsed}
+          onToggleSidebar={() => setSidebarCollapsed((c) => !c)}
+          onSwitchWorkspace={handleSelectWorkspace}
+          userName={user.displayName}
+          userRole={user.role}
+          userUnit={user.unit}
+          onLogout={logout}
+        />
+      )}
+
+      {!dashboardMapExpanded && (
+        <LeftNavigationRail
+          activeWorkspace={activeWorkspace}
+          onSelectWorkspace={handleSelectWorkspace}
+          collapsed={sidebarCollapsed}
+          allowedWorkspaces={allowedWorkspaces(user.role)}
+        />
+      )}
 
       {/* Main Content Shell */}
       <main
-        className={`pt-14 flex-1 min-h-0 min-w-0 overflow-hidden transition-[padding] duration-200 ${
-          sidebarCollapsed ? 'pl-14' : 'pl-64'
-        }`}
+        className={
+          dashboardMapExpanded
+            ? 'flex-1 min-h-0 min-w-0 overflow-hidden p-0'
+            : fillViewportWorkspace
+              ? `pt-14 flex-1 min-h-0 min-w-0 overflow-hidden transition-[padding] duration-200 ${
+                  sidebarCollapsed ? 'pl-14' : 'pl-64'
+                }`
+              : `pt-14 flex-1 min-h-0 min-w-0 overflow-x-hidden overflow-y-auto transition-[padding] duration-200 ${
+                  sidebarCollapsed ? 'pl-14' : 'pl-64'
+                }`
+        }
       >
-        <MapLayoutProvider token={`${sidebarCollapsed ? 'rail-sm' : 'rail-lg'}:${activeWorkspace}`}>
-        {activeWorkspace === 'interactive-map-viewer' && (
+        <MapLayoutProvider
+          token={`${sidebarCollapsed ? 'rail-sm' : 'rail-lg'}:${activeWorkspace}:${dashboardMapExpanded ? 'full' : 'shell'}`}
+        >
+        <div className={fillViewportWorkspace || dashboardMapExpanded ? 'h-full min-h-0' : undefined}>
+        <WorkspaceErrorBoundary workspaceLabel={activeWorkspace}>
+        {activeWorkspace === 'interactive-map' && (
           <MapViewerWorkspace
             layers={layers}
             onToggleLayer={handleToggleLayer}
@@ -391,32 +508,176 @@ function AppShell() {
           />
         )}
 
-        {(activeWorkspace === 'gis-dashboard' ||
-          activeWorkspace === 'spatial-analysis-and-geoprocessing' ||
-          activeWorkspace === 'map-designer-and-layout-composer') && (
+        {activeWorkspace === 'ndps-spatial-dashboard' && (
           <CoreOpsWorkspaces
             workspace={activeWorkspace}
-            jobs={jobs}
             dashboardLayers={dashboardLayers}
-            onAddJob={handleAddJob}
             onSelectFeatureAndFly={handleSelectFeatureAndFly}
             onFlyToLocation={handleFlyToLocation}
+            onSwitchWorkspace={handleSelectWorkspace}
+            onTriggerToast={triggerToast}
+            dashboardMapExpanded={dashboardMapExpanded}
+            onDashboardMapExpandedChange={setDashboardMapExpanded}
+          />
+        )}
+
+        {activeWorkspace === 'ndps-analytics' && <NdpsAnalyticsWorkspace />}
+
+        {activeWorkspace === 'roads-routing' && (
+          <RoadsRoutingWorkspace
+            allLayers={INITIAL_GIS_LAYERS}
+            routingConfig={roadsRoutingConfig}
+            onChangeRoutingLayerVisibility={(layerId, enabled) => {
+              setRoadsRoutingConfig((prev) => {
+                const cur = prev[layerId];
+                if (!cur) return prev;
+                const next = { ...prev, [layerId]: { ...cur, enabled } };
+                persistRoadsRoutingLayerConfig(next);
+                return next;
+              });
+            }}
+            onRemoveRoutingLayer={(layerId) => {
+              setRoadsRoutingConfig((prev) => {
+                const next = { ...prev };
+                delete next[layerId];
+                persistRoadsRoutingLayerConfig(next);
+                return next;
+              });
+            }}
+            onClearSavedLayers={() => {
+              setRoadsRoutingConfig({});
+              persistRoadsRoutingLayerConfig({});
+            }}
             onSwitchWorkspace={handleSelectWorkspace}
             onTriggerToast={triggerToast}
           />
         )}
 
-        {(activeWorkspace === 'administrative-and-operational-layers' ||
-          activeWorkspace === 'vector-and-raster-data-import' ||
-          activeWorkspace === 'feature-editor-and-digitizer' ||
-          activeWorkspace === 'raster-management-and-toposheets') && (
+        {activeWorkspace === 'roads-routing-new' && (
+          <RoadsRoutingNewWorkspace
+            allLayers={layers}
+            routingNewConfig={roadsRoutingNewConfig}
+            onChangeLayerVisibility={(layerId, enabled) => {
+              setRoadsRoutingNewConfig((prev) => {
+                const cur = prev[layerId];
+                if (!cur) return prev;
+                const next = { ...prev, [layerId]: { ...cur, enabled } };
+                persistRoadsRoutingNewLayerConfig(next);
+                return next;
+              });
+            }}
+            onRemoveLayer={(layerId) => {
+              setRoadsRoutingNewConfig((prev) => {
+                const next = { ...prev };
+                delete next[layerId];
+                persistRoadsRoutingNewLayerConfig(next);
+                return next;
+              });
+            }}
+            onClearSavedLayers={(layerIds) => {
+              setRoadsRoutingNewConfig({});
+              persistRoadsRoutingNewLayerConfig({});
+              handleExcludeFromCatalogHover('roadsRoutingNew', layerIds);
+            }}
+            onSwitchWorkspace={handleSelectWorkspace}
+            onTriggerToast={triggerToast}
+          />
+        )}
+
+        {(activeWorkspace === 'administrative-layers' ||
+          activeWorkspace === 'operational-layers' ||
+          activeWorkspace === 'road-network-layers' ||
+          activeWorkspace === 'import-export' ||
+          activeWorkspace === 'feature-editor' ||
+          activeWorkspace === 'raster-imagery') && (
           <DataLayerWorkspaces
             workspace={activeWorkspace}
             layers={layers}
-            dashboardLayerConfig={dashboardLayerConfig}
             onToggleLayer={handleToggleLayer}
             onChangeLayerOpacity={handleChangeLayerOpacity}
             onSaveDashboardLayers={handleSaveDashboardLayers}
+            onSaveRoadsRoutingLayers={handleSaveRoadsRoutingLayers}
+            onSaveRoadsRoutingNewLayers={handleSaveRoadsRoutingNewLayers}
+            dashboardSaveAck={catalogSaveAck.dashboard}
+            roadsRoutingSaveAck={catalogSaveAck.roadsRouting}
+            roadsRoutingNewSaveAck={catalogSaveAck.roadsRoutingNew}
+            catalogHoverExclusions={catalogHoverExclusions}
+            onRemoveDashboardLayer={(layerId) => {
+              handleExcludeFromCatalogHover('dashboard', [layerId]);
+              setDashboardLayerConfig((prev) => {
+                const cur = prev[layerId];
+                if (!cur?.enabled) return prev;
+                const next = {
+                  ...prev,
+                  [layerId]: { ...cur, enabled: false, opacity: cur.opacity },
+                };
+                persistDashboardLayerConfig(next);
+                return next;
+              });
+              triggerToast(
+                `Removed from Dashboard: ${INITIAL_GIS_LAYERS.find((l) => l.id === layerId)?.name ?? layerId}`
+              );
+            }}
+            onUnselectAllDashboardLayers={(layerIds) => {
+              handleExcludeFromCatalogHover('dashboard', layerIds);
+              setDashboardLayerConfig((prev) => {
+                const next = { ...prev };
+                for (const id of layerIds) {
+                  const opacity =
+                    next[id]?.opacity ?? layers.find((l) => l.id === id)?.opacity ?? 100;
+                  next[id] = { enabled: false, opacity };
+                }
+                persistDashboardLayerConfig(next);
+                return next;
+              });
+              triggerToast(`Unselected ${layerIds.length} layer(s) from Dashboard`);
+            }}
+            onRemoveRoadsRoutingLayer={(layerId) => {
+              handleExcludeFromCatalogHover('roadsRouting', [layerId]);
+              setRoadsRoutingConfig((prev) => {
+                if (!prev[layerId]) return prev;
+                const next = { ...prev };
+                delete next[layerId];
+                persistRoadsRoutingLayerConfig(next);
+                return next;
+              });
+              triggerToast(
+                `Removed from Roads Routing: ${INITIAL_GIS_LAYERS.find((l) => l.id === layerId)?.name ?? layerId}`
+              );
+            }}
+            onUnselectAllRoadsRoutingLayers={(layerIds) => {
+              handleExcludeFromCatalogHover('roadsRouting', layerIds);
+              setRoadsRoutingConfig((prev) => {
+                const next = { ...prev };
+                for (const id of layerIds) delete next[id];
+                persistRoadsRoutingLayerConfig(next);
+                return next;
+              });
+              triggerToast(`Unselected ${layerIds.length} layer(s) from Roads Routing`);
+            }}
+            onRemoveRoadsRoutingNewLayer={(layerId) => {
+              handleExcludeFromCatalogHover('roadsRoutingNew', [layerId]);
+              setRoadsRoutingNewConfig((prev) => {
+                if (!prev[layerId]) return prev;
+                const next = { ...prev };
+                delete next[layerId];
+                persistRoadsRoutingNewLayerConfig(next);
+                return next;
+              });
+              triggerToast(
+                `Removed from Roads Routing New: ${INITIAL_GIS_LAYERS.find((l) => l.id === layerId)?.name ?? layerId}`
+              );
+            }}
+            onUnselectAllRoadsRoutingNewLayers={(layerIds) => {
+              handleExcludeFromCatalogHover('roadsRoutingNew', layerIds);
+              setRoadsRoutingNewConfig((prev) => {
+                const next = { ...prev };
+                for (const id of layerIds) delete next[id];
+                persistRoadsRoutingNewLayerConfig(next);
+                return next;
+              });
+              triggerToast(`Unselected ${layerIds.length} layer(s) from Roads Routing New`);
+            }}
             digitizedFeatures={digitizedFeatures}
             ingestedLayers={ingestedLayers}
             onAddDigitizedFeature={handleAddDigitizedFeature}
@@ -428,22 +689,20 @@ function AppShell() {
           />
         )}
 
-        {(activeWorkspace === 'mobile-gis-export' ||
-          activeWorkspace === 'atlas-map-book-generator' ||
-          activeWorkspace === 'reports-and-seizure-analytics' ||
-          activeWorkspace === 'data-quality-and-topology-audits' ||
-          activeWorkspace === 'conditional-capabilities-and-dependency-register' ||
-          activeWorkspace === 'user-roles-and-audit-trail') && (
+        {(activeWorkspace === 'mobile-locus-export' ||
+          activeWorkspace === 'atlas-map-books' ||
+          activeWorkspace === 'reports-seizure-analytics' ||
+          activeWorkspace === 'users-audit-trail') && (
           <OutputsGovernanceWorkspaces
             workspace={activeWorkspace}
             layers={layers}
-            topologyRules={topologyRules}
-            onFixTopologyRule={handleFixTopologyRule}
             auditLogs={auditLogs}
             onSwitchWorkspace={handleSelectWorkspace}
             onTriggerToast={triggerToast}
           />
         )}
+        </WorkspaceErrorBoundary>
+        </div>
         </MapLayoutProvider>
       </main>
 

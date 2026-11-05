@@ -1,4 +1,5 @@
 import { WorkspaceId } from '../types/gis';
+import { ALL_APP_WORKSPACES } from '../nav/appModules';
 
 export type RoleId =
   | 'STATE_SPATIAL_ADMIN'
@@ -11,7 +12,6 @@ export type Permission =
   | 'import'
   | 'export'
   | 'geoprocess'
-  | 'fixTopology'
   | 'manageUsers'
   | 'viewAudit';
 
@@ -54,42 +54,34 @@ export const GIS_USERS: GisUser[] = [
   },
 ];
 
-const ALL_WORKSPACES: WorkspaceId[] = [
-  'gis-dashboard',
-  'interactive-map-viewer',
-  'spatial-analysis-and-geoprocessing',
-  'map-designer-and-layout-composer',
-  'administrative-and-operational-layers',
-  'vector-and-raster-data-import',
-  'feature-editor-and-digitizer',
-  'raster-management-and-toposheets',
-  'mobile-gis-export',
-  'atlas-map-book-generator',
-  'reports-and-seizure-analytics',
-  'data-quality-and-topology-audits',
-  'conditional-capabilities-and-dependency-register',
-  'user-roles-and-audit-trail',
-];
+const ALL_WORKSPACES: WorkspaceId[] = [...ALL_APP_WORKSPACES];
 
 const ROLE_WORKSPACES: Record<RoleId, WorkspaceId[]> = {
   STATE_SPATIAL_ADMIN: ALL_WORKSPACES,
   FIELD_COMMANDER_EAGLE: [
-    'gis-dashboard',
-    'interactive-map-viewer',
-    'spatial-analysis-and-geoprocessing',
-    'feature-editor-and-digitizer',
-    'mobile-gis-export',
-    'reports-and-seizure-analytics',
-    'raster-management-and-toposheets',
+    'ndps-spatial-dashboard',
+    'interactive-map',
+    'feature-editor',
+    'mobile-locus-export',
+    'reports-seizure-analytics',
+    'raster-imagery',
+    'operational-layers',
+    'road-network-layers',
+    'roads-routing',
+    'roads-routing-new',
   ],
   DISTRICT_NODAL_ASR: [
-    'gis-dashboard',
-    'interactive-map-viewer',
-    'administrative-and-operational-layers',
-    'reports-and-seizure-analytics',
-    'mobile-gis-export',
+    'ndps-spatial-dashboard',
+    'interactive-map',
+    'administrative-layers',
+    'operational-layers',
+    'road-network-layers',
+    'roads-routing',
+    'roads-routing-new',
+    'reports-seizure-analytics',
+    'mobile-locus-export',
   ],
-  ANALYST_VIEWER: ['gis-dashboard', 'interactive-map-viewer', 'reports-and-seizure-analytics'],
+  ANALYST_VIEWER: ['ndps-spatial-dashboard', 'interactive-map', 'reports-seizure-analytics'],
 };
 
 const ROLE_PERMISSIONS: Record<RoleId, Permission[]> = {
@@ -98,7 +90,6 @@ const ROLE_PERMISSIONS: Record<RoleId, Permission[]> = {
     'import',
     'export',
     'geoprocess',
-    'fixTopology',
     'manageUsers',
     'viewAudit',
   ],
@@ -127,5 +118,5 @@ export function hasPermission(role: RoleId, permission: Permission): boolean {
 }
 
 export function defaultWorkspace(role: RoleId): WorkspaceId {
-  return ROLE_WORKSPACES[role][0] ?? 'gis-dashboard';
+  return ROLE_WORKSPACES[role][0] ?? 'ndps-spatial-dashboard';
 }

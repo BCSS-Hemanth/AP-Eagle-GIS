@@ -179,7 +179,7 @@ export const MAP_DETAIL_SOURCES = {
   osmRaster: 'OpenStreetMap raster tiles (roads, water, landcover, building footprints at z≥16).',
   maplibreLiberty: 'OpenFreeMap Liberty vector style (no API key). Sparse at high zoom — OSM raster is stacked from z11.',
   esriImagery:
-    'Esri World Imagery (Maxar / Earthstar Geographics). Public tiles. Not ISRO Cartosat-3 — no local Cartosat raster was supplied.',
+    'Esri World Imagery is the statewide gap-fill underlay. GIS-Source google_sat + AOB + NT_CG GroundOverlays paint on top only inside their AOIs (not full AP).',
   esriRoads: 'Esri World Transportation reference overlay.',
   esriPlaces: 'Esri World Boundaries and Places labels.',
   buildings2d: 'Building outlines come from OSM raster at z≥16. They are not extruded.',
@@ -189,16 +189,17 @@ export const MAP_DETAIL_SOURCES = {
   adminVillages: '18,100 NWIC/SOI village polygons, loaded by view bbox from z9.',
   osmRivers: 'OSM Overpass centerlines for Godavari, Krishna, Penna, Nagavali, Vamsadhara, Tungabhadra.',
   osmWater: 'OSM Overpass named lakes and reservoirs in the AP envelope (ODbL).',
-  esriHillshade: 'Esri World Hillshade XYZ overlay (QGIS catalog staple). Attribution required. No API key.',
+  esriHillshade:
+    'Replaced by GIS-Source google_terrain GroundOverlay. Esri World Hillshade is no longer used.',
   geodesicBuffer: 'Client-side geodesic multi-ring buffer (QGIS native:multiringconstantbuffer analog) on WGS84.',
-  unavailable: 'Google Photorealistic 3D, ISRO Cartosat-3, and SOI 1:50K GeoTIFF sheets are not in this repo.',
+  unavailable: 'ISRO Cartosat-3 native GeoTIFF and DEM float grids were not in GIS-Source Raster.',
 } as const;
 
 export const MAP_COMPONENT_ACCEPTANCE = {
   dashboard: [
     'Hover at z≥8 names the mandal under the pointer, not only the district.',
     'Hover at z≥10 names the village when that village polygon is loaded for the view.',
-    'Zoom z≥11 shows OSM roads; z≥14 overlays Esri World Imagery (labeled as Esri, not Cartosat).',
+    'Zoom z≥11 shows OSM roads; z≥14 shows Esri imagery statewide with GIS-Source sat overlays in AOI.',
     'District→mandal→village isolation still hides other admin units.',
   ],
   mapViewer: [
@@ -207,8 +208,8 @@ export const MAP_COMPONENT_ACCEPTANCE = {
     'Village isolation shows imagery + roads inside the hole; 2D stays mounted when switching 3D.',
   ],
   digitizer: [
-    'ASR Eastern Ghats canvas uses Esri World Imagery (hybrid) plus road/place overlays.',
-    'Zooming to z14–23 reveals imagery detail the tiles actually contain (rooftops where Maxar captured them). Camera stops at 23, Esri’s last LOD.',
+    'ASR Eastern Ghats canvas uses GIS-Source satellite / SOI mosaics plus road/place overlays.',
+    'Zooming into AOB / NT_CG / SOI coverage reveals KMZ GroundOverlay LODs from GIS-Source Raster.',
     'Hover reports district, mandal, and village from real polygons at the matching zoom band.',
     'Draw clicks still place vertices; identify tooltip is not a draw target.',
   ],
@@ -222,12 +223,14 @@ export function mapDetailCaption(
 ): string {
   const band = mapZoomBand(zoom);
   const tiles: string[] = [];
-  if (rasterId === 'satellite' || rasterId === 'hybrid' || imageryOn) {
-    tiles.push('Esri World Imagery');
+  if (rasterId === 'satellite' || rasterId === 'hybrid') {
+    tiles.push('Esri imagery');
+  } else if (imageryOn) {
+    tiles.push('Esri imagery + GIS-Source sat AOI');
   }
   if (useMapLibre) tiles.push(zoom >= MAP_ZOOM.osmRasterBoost ? 'OSM raster' : 'OpenFreeMap Liberty');
-  else if (rasterId === 'topo') tiles.push('OpenTopoMap');
-  else if (rasterId === 'vector') tiles.push('OSM raster');
+  else if (rasterId === 'topo') tiles.push('GIS-Source SOI topo');
+  else if (rasterId === 'vector' && !imageryOn) tiles.push('OSM raster');
   tiles.push('Esri roads/places');
-  return `z${zoom.toFixed(0)} · ${band} · ${tiles.join(' + ')} · not Cartosat-3`;
+  return `z${zoom.toFixed(0)} · ${band} · ${tiles.join(' + ')}`;
 }

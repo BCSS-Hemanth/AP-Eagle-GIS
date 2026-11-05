@@ -1,6 +1,15 @@
 import React from 'react';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
-import { type AdminDrill, type AdminDrillLevel, adminDrillTo, adminDrillUp } from '../../gis/adminHierarchy';
+import {
+  AP_STATE_FOCUS_DRILL,
+  STATE_ADMIN_DRILL,
+  type AdminDrill,
+  type AdminDrillLevel,
+  adminDrillTo,
+  adminDrillUp,
+  isApStateFocus,
+  isIndiaOverview,
+} from '../../gis/adminHierarchy';
 
 export const ADMIN_DRILL_SOURCE_NOTE =
   'Districts: 26 polygons (2022). Mandals: 654 dissolved from NWIC/SOI revenue villages (not official 679 cadastral; pre-2022 13-district names). Villages: 18,100 NWIC revenue polygons. Children are parented by centroid-in-polygon, not by the vintage district_name field.';
@@ -14,71 +23,89 @@ function backLabel(drill: AdminDrill): string {
   if (drill.level === 'village') return `Back to ${drill.mandalName ?? 'mandal'}`;
   if (drill.level === 'mandal') return `Back to ${drill.districtName ?? 'district'}`;
   if (drill.level === 'district') return 'Back to Andhra Pradesh';
+  if (isApStateFocus(drill)) return 'Back to India';
   return 'Back';
 }
 
 export const AdminDrillBar: React.FC<AdminDrillBarProps> = ({ drill, onChange }) => {
-  const go = (level: AdminDrillLevel) => onChange(adminDrillTo(drill, level));
-  const crumbs: Array<{ level: AdminDrillLevel; label: string }> = [
-    { level: 'state', label: 'Andhra Pradesh' },
-  ];
-  if (drill.districtName) crumbs.push({ level: 'district', label: drill.districtName });
-  if (drill.mandalName) crumbs.push({ level: 'mandal', label: drill.mandalName });
-  if (drill.villageName) crumbs.push({ level: 'village', label: drill.villageName });
   const parent = adminDrillUp(drill);
+  const onIndia = isIndiaOverview(drill);
+  const onAp = isApStateFocus(drill);
+
+  type Crumb =
+    | { kind: 'india'; label: string }
+    | { kind: 'ap'; label: string }
+    | { kind: 'level'; level: AdminDrillLevel; label: string };
+
+  const crumbs: Crumb[] = [{ kind: 'india', label: 'India' }];
+  if (!onIndia) {
+    crumbs.push({ kind: 'ap', label: 'Andhra Pradesh' });
+  }
+  if (drill.districtName && (drill.level === 'district' || drill.level === 'mandal' || drill.level === 'village')) {
+    crumbs.push({ kind: 'level', level: 'district', label: drill.districtName });
+  }
+  if (drill.mandalName && (drill.level === 'mandal' || drill.level === 'village')) {
+    crumbs.push({ kind: 'level', level: 'mandal', label: drill.mandalName });
+  }
+  if (drill.villageName && drill.level === 'village') {
+    crumbs.push({ kind: 'level', level: 'village', label: drill.villageName });
+  }
+
+  const goCrumb = (crumb: Crumb) => {
+    if (crumb.kind === 'india') onChange(STATE_ADMIN_DRILL);
+    else if (crumb.kind === 'ap') onChange(AP_STATE_FOCUS_DRILL);
+    else onChange(adminDrillTo(drill, crumb.level));
+  };
+
+  const isCurrent = (crumb: Crumb) => {
+    if (crumb.kind === 'india') return onIndia;
+    if (crumb.kind === 'ap') return onAp;
+    return crumb.level === drill.level;
+  };
 
   return (
     <div
       data-testid="admin-drill-bar"
-      className="pointer-events-auto max-w-[min(760px,calc(100%-6.5rem))] rounded shadow-md border border-outline-variant/45 bg-surface-container-lowest/95 backdrop-blur-xs px-2 py-1.5"
+      className="pointer-events-auto inline-flex items-center gap-0.5 min-w-0 max-w-full bg-white/90 rounded px-1 py-px shadow-sm"
       title={ADMIN_DRILL_SOURCE_NOTE}
     >
-      <div className="flex items-center gap-1 min-w-0">
-        {drill.level !== 'state' && (
-          <button
-            type="button"
-            data-testid="admin-drill-back"
-            onClick={() => onChange(parent)}
-            className="shrink-0 h-7 px-2 rounded flex items-center gap-0.5 text-on-surface hover:bg-surface-container cursor-pointer text-[11px] font-bold"
-            title={backLabel(drill)}
-          >
-            <ChevronLeft className="w-4 h-4" />
-            {backLabel(drill)}
-          </button>
-        )}
-        <nav className="flex items-center gap-0.5 min-w-0 overflow-x-auto text-[11px] font-semibold">
-          {crumbs.map((crumb, index) => {
-            const current = crumb.level === drill.level;
-            return (
-              <React.Fragment key={crumb.level}>
-                {index > 0 && <ChevronRight className="w-3 h-3 text-outline shrink-0" />}
-                <button
-                  type="button"
-                  data-testid={`admin-drill-${crumb.level}`}
-                  disabled={current}
-                  onClick={() => go(crumb.level)}
-                  className={`shrink-0 px-1.5 py-0.5 rounded cursor-pointer ${
-                    current
-                      ? 'bg-secondary-container/50 text-secondary'
-                      : 'text-on-surface hover:bg-surface-container'
-                  }`}
-                >
-                  {crumb.label}
-                </button>
-              </React.Fragment>
-            );
-          })}
-        </nav>
-      </div>
-      <p className="px-1 pt-0.5 text-[9px] leading-snug text-on-surface-variant">
-        {drill.level === 'state'
-          ? 'District borders only. Click a district to isolate it — mandals then appear inside.'
-          : drill.level === 'district'
-            ? 'Only this district is on the map. Click a mandal, or go back to all districts.'
-            : drill.level === 'mandal'
-              ? 'Only this mandal is on the map. Click a village, or go back to the district.'
-              : 'Only this village boundary is on the map. Go back to the mandal when needed.'}
-      </p>
+      {!onIndia && (
+        <button
+          type="button"
+          data-testid="admin-drill-back"
+          onClick={() => onChange(parent)}
+          className="shrink-0 h-6 px-1 flex items-center gap-0.5 text-on-surface hover:bg-black/5 cursor-pointer text-[11px] font-bold rounded"
+          title={backLabel(drill)}
+        >
+          <ChevronLeft className="w-3.5 h-3.5" />
+          {backLabel(drill)}
+        </button>
+      )}
+      <nav className="flex items-center gap-px min-w-0 overflow-x-auto text-[11px] font-semibold">
+        {crumbs.map((crumb, index) => {
+          const current = isCurrent(crumb);
+          const key =
+            crumb.kind === 'level' ? crumb.level : crumb.kind === 'ap' ? 'ap' : 'india';
+          return (
+            <React.Fragment key={key}>
+              {index > 0 && <ChevronRight className="w-3 h-3 text-outline shrink-0" />}
+              <button
+                type="button"
+                data-testid={`admin-drill-${key}`}
+                disabled={current}
+                onClick={() => goCrumb(crumb)}
+                className={`shrink-0 px-1 py-px rounded cursor-pointer ${
+                  current
+                    ? 'bg-secondary-container/50 text-secondary'
+                    : 'text-on-surface hover:bg-black/5'
+                }`}
+              >
+                {crumb.label}
+              </button>
+            </React.Fragment>
+          );
+        })}
+      </nav>
     </div>
   );
 };

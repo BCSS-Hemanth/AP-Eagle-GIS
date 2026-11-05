@@ -6,6 +6,15 @@ export const AP_BOUNDS: [[number, number], [number, number]] = [
   [19.22, 84.78],
 ];
 
+/** WGS84 envelope of India (GIS-Source IND_adm1 outline + padding). Leaflet [[south,west],[north,east]]. */
+export const INDIA_BOUNDS: [[number, number], [number, number]] = [
+  [6.4, 67.8],
+  [37.2, 97.6],
+];
+
+export const INDIA_CENTER: [number, number] = [22.0, 82.0];
+export const INDIA_DEFAULT_ZOOM = 5;
+
 export const AP_CENTER: [number, number] = [15.9129, 79.74];
 export const AP_DEFAULT_ZOOM = 7;
 
@@ -19,6 +28,14 @@ export const MAPLIBRE_TERRAIN_TILES = 'https://s3.amazonaws.com/elevation-tiles-
 export const MAPLIBRE_3D_ATTRIBUTION =
   'Terrain &copy; Mapzen / AWS elevation tiles. 3D buildings from OpenStreetMap where heights exist. Not Google.';
 
+/** Quiet India overview underlay — no city/state names (avoids clash with our state tooltips). */
+export const INDIA_OVERVIEW_UNDERLAY_TILES = {
+  url: 'https://{s}.basemaps.cartocdn.com/light_nolabels/{z}/{x}/{y}{r}.png',
+  attribution:
+    '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/">CARTO</a>',
+  maxZoom: 19,
+};
+
 export const BASEMAP_TILES: Record<
   RasterBasemapId,
   { url: string; attribution: string; maxZoom: number; labelsUrl?: string }
@@ -28,23 +45,34 @@ export const BASEMAP_TILES: Record<
     attribution: '&copy; OpenStreetMap contributors',
     maxZoom: 19,
   },
+  /** Topo basemap: OSM underlay only; GIS-Source soi_topo GroundOverlays provide SOI content. */
   topo: {
-    url: 'https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png',
-    attribution: '&copy; OpenStreetMap, SRTM | &copy; OpenTopoMap (CC-BY-SA)',
-    maxZoom: 17,
+    url: 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
+    attribution: '&copy; OpenStreetMap · GIS-Source SOI mosaic overlay',
+    maxZoom: 19,
   },
+  /**
+   * Satellite basemap: Esri World Imagery statewide (no GIS-Source AOI stack).
+   */
   satellite: {
     url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
-    attribution: 'Tiles &copy; Esri, Maxar, Earthstar Geographics',
-    maxZoom: 23,
+    attribution: 'Imagery &copy; Esri',
+    maxZoom: 19,
   },
   hybrid: {
     url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
-    attribution: 'Tiles &copy; Esri | Labels &copy; CARTO',
-    maxZoom: 23,
+    attribution: 'Imagery &copy; Esri | Labels &copy; CARTO',
+    maxZoom: 19,
     labelsUrl:
       'https://{s}.basemaps.cartocdn.com/rastertiles/voyager_only_labels/{z}/{x}/{y}{r}.png',
   },
+};
+
+/** Statewide imagery gap-fill under GIS-Source sat AOIs (drill / auto overlay on vector/topo). */
+export const ESRI_WORLD_IMAGERY_TILES = {
+  url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+  attribution: 'Imagery &copy; Esri',
+  maxZoom: 19,
 };
 
 export const OPENRAILWAY_TILES = {
@@ -68,13 +96,13 @@ export const ESRI_PLACES_TILES = {
 };
 
 /**
- * Esri World Hillshade — the usual QGIS XYZ relief overlay (multiply blend).
- * Public ArcGIS Online tiles; attribution required; no API key.
+ * @deprecated Removed from map rendering — GIS-Source google_terrain replaces this.
+ * Kept only so older imports fail loudly at call sites that still reference tiles.
  */
 export const ESRI_HILLSHADE_TILES = {
-  url: 'https://server.arcgisonline.com/ArcGIS/rest/services/Elevation/World_Hillshade/MapServer/tile/{z}/{y}/{x}',
-  attribution: 'Hillshade &copy; Esri',
-  maxZoom: 16,
+  url: '',
+  attribution: 'Replaced by GIS-Source google_terrain',
+  maxZoom: 0,
 };
 
 /** OSM hiking / forest tracks (Waymarked Trails). */

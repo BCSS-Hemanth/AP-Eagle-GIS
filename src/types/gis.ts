@@ -1,18 +1,25 @@
+/** Application workspaces — M1 Situation · M2 Layers · M3 Products · M4 System */
 export type WorkspaceId =
-  | 'gis-dashboard'
-  | 'interactive-map-viewer'
-  | 'spatial-analysis-and-geoprocessing'
-  | 'map-designer-and-layout-composer'
-  | 'administrative-and-operational-layers'
-  | 'vector-and-raster-data-import'
-  | 'feature-editor-and-digitizer'
-  | 'raster-management-and-toposheets'
-  | 'mobile-gis-export'
-  | 'atlas-map-book-generator'
-  | 'reports-and-seizure-analytics'
-  | 'data-quality-and-topology-audits'
-  | 'conditional-capabilities-and-dependency-register'
-  | 'user-roles-and-audit-trail';
+  // M1 Situation Awareness
+  | 'ndps-spatial-dashboard'
+  | 'ndps-analytics'
+  | 'interactive-map'
+  // M2 Layers & Data
+  | 'administrative-layers'
+  | 'operational-layers'
+  | 'road-network-layers'
+  | 'roads-routing'
+  | 'roads-routing-new'
+  | 'raster-imagery'
+  | 'import-export'
+  | 'feature-editor'
+  // M3 Products & Field
+  | 'atlas-map-books'
+  | 'reports-seizure-analytics'
+  | 'mobile-locus-export'
+  // M4 System & Governance
+  | 'users-audit-trail'
+;
 
 export type RasterBasemapId = 'vector' | 'topo' | 'satellite' | 'hybrid';
 export type BasemapId = RasterBasemapId | 'maplibre';
@@ -171,17 +178,6 @@ export interface DigitizedFeature {
   notes: string;
 }
 
-export interface TopologyAuditRule {
-  id: string;
-  ruleName: string;
-  layerName: string;
-  checkedFeatures: number;
-  violations: number;
-  severity: 'Pass' | 'Warning' | 'Critical';
-  description: string;
-  fixed?: boolean;
-}
-
 export interface AuditLogEntry {
   id: string;
   timestamp: string;
@@ -190,5 +186,4 @@ export interface AuditLogEntry {
   ipNode: string;
   action: string;
   resource: string;
-  signatureHash: string;
 }

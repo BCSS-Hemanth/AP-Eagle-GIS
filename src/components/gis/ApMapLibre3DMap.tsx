@@ -15,6 +15,7 @@ import type { MandalProperties, VillageProperties } from '../../gis/useApAdmin';
 import { usePoliceStations } from '../../gis/usePoliceStations';
 import type { PoliceStationProperties } from '../../gis/usePoliceStations';
 import { useApNetwork } from '../../gis/useApNetwork';
+import { useGisSourceAdmin } from '../../gis/useGisSourceAdmin';
 import {
   type AdminDrill,
   adminNamesEqual,
@@ -32,15 +33,25 @@ import {
   AP_BOUNDS,
   AP_CENTER,
   AP_DEFAULT_ZOOM,
-  BASEMAP_TILES,
-  ESRI_HILLSHADE_TILES,
   ESRI_PLACES_TILES,
   ESRI_TRANSPORT_TILES,
+  ESRI_WORLD_IMAGERY_TILES,
   HIKING_TRAIL_TILES,
   MAPLIBRE_3D_ATTRIBUTION,
   MAPLIBRE_TERRAIN_TILES,
   OPENRAILWAY_TILES,
 } from '../../data/apGeo';
+import {
+  formatFeatureTooltip,
+  type LayerNameFallback,
+} from '../../gis/featureLabel';
+import {
+  formatRailTooltip,
+  RAIL_CASING_COLOR,
+  RAIL_DASH_MAPLIBRE,
+  RAIL_LINE_COLOR,
+  type RailFeatureProps,
+} from '../../gis/railStyle';
 import type { GeodesicBufferRing } from '../../gis/geodesicBuffer';
 import { ringsToFeatureCollection } from '../../gis/geodesicBuffer';
 import {
@@ -268,6 +279,7 @@ export const ApMapLibre3DMap = forwardRef<ApLeafletMapHandle, ApMapLibre3DMapPro
       rivers: EMPTY_FC as GeoJSON.GeoJSON,
       water: EMPTY_FC as GeoJSON.GeoJSON,
       agency: EMPTY_FC as GeoJSON.GeoJSON,
+      rail: EMPTY_FC as GeoJSON.FeatureCollection,
       buffers: EMPTY_FC as GeoJSON.GeoJSON,
       measure: EMPTY_FC as GeoJSON.FeatureCollection,
       route: EMPTY_FC as GeoJSON.FeatureCollection,
@@ -275,6 +287,7 @@ export const ApMapLibre3DMap = forwardRef<ApLeafletMapHandle, ApMapLibre3DMapPro
       showHighways: false,
       showTrails: false,
       showRailways: false,
+      hasRailVector: false,
       showHillshade: false,
       showImageryOverlay: false,
       showPlaces: false,
@@ -305,6 +318,7 @@ export const ApMapLibre3DMap = forwardRef<ApLeafletMapHandle, ApMapLibre3DMapPro
 
     const { districts, state, ready: boundsReady } = useApBoundaries();
     const { highways, rivers, agency, water } = useApNetwork();
+    const { rail: railVector } = useGisSourceAdmin({ showRailVector: showRailways });
     const mandals = useApMandals(true);
     const stations = usePoliceStations(showPoliceStations);
     const parentBbox =
@@ -412,6 +426,9 @@ export const ApMapLibre3DMap = forwardRef<ApLeafletMapHandle, ApMapLibre3DMapPro
     const riverData = showRivers && rivers ? rivers : EMPTY_FC;
     const waterData = showWaterbodies && water ? water : EMPTY_FC;
     const agencyData = showAgencyRoutes && agency ? agency : EMPTY_FC;
+    const railData =
+      showRailways && railVector && railVector.features.length > 0 ? railVector : EMPTY_FC;
+    const hasRailVector = Boolean(railData.features.length);
     const bufferData = bufferRings.length ? ringsToFeatureCollection(bufferRings) : EMPTY_FC;
     const measureData =
       measureMode && measurePoints.length ? pointsToFc(measurePoints, true) : EMPTY_FC;
@@ -438,6 +455,7 @@ export const ApMapLibre3DMap = forwardRef<ApLeafletMapHandle, ApMapLibre3DMapPro
       rivers: riverData,
       water: waterData,
       agency: agencyData,
+      rail: railData,
       buffers: bufferData,
       measure: measureData,
       route: routeData,
@@ -445,6 +463,7 @@ export const ApMapLibre3DMap = forwardRef<ApLeafletMapHandle, ApMapLibre3DMapPro
       showHighways: overlayRoads,
       showTrails,
       showRailways,
+      hasRailVector,
       showHillshade,
       showImageryOverlay: overlayImagery,
       showPlaces: overlayPlaces,
@@ -472,6 +491,7 @@ export const ApMapLibre3DMap = forwardRef<ApLeafletMapHandle, ApMapLibre3DMapPro
       setGeojson(map, 'gis-rivers', gis.rivers);
       setGeojson(map, 'gis-water', gis.water);
       setGeojson(map, 'gis-agency', gis.agency);
+      setGeojson(map, 'gis-rail', gis.rail);
       setGeojson(map, 'gis-buffers', gis.buffers);
       setGeojson(map, 'gis-measure', gis.measure);
       setGeojson(map, 'gis-route', gis.route);
@@ -515,10 +535,14 @@ export const ApMapLibre3DMap = forwardRef<ApLeafletMapHandle, ApMapLibre3DMapPro
       };
       vis('overlay-roads-layer', gis.showHighways);
       vis('overlay-places-layer', gis.showPlaces);
-      vis('overlay-trails-layer', gis.showTrails);
-      vis('overlay-rail-layer', gis.showRailways);
-      vis('overlay-hillshade-layer', gis.showHillshade);
-      vis('overlay-imagery-layer', gis.showImageryOverlay);
+      // Foot tracks / rasters: GIS-Source wins on 2D Leaflet. Do not show conflicting Esri/OSM raster tiles in 3D.
+      vis('overlay-trails-layer', false);
+      // Prefer GIS-Source vector rail; OpenRailwayMap raster only as fallback.
+      vis('overlay-rail-layer', gis.showRailways && !gis.hasRailVector);
+      vis('gis-rail-casing', gis.showRailways && gis.hasRailVector);
+      vis('gis-rail-line', gis.showRailways && gis.hasRailVector);
+      vis('overlay-hillshade-layer', false);
+      vis('overlay-imagery-layer', Boolean(gis.showImageryOverlay));
     };
 
     useImperativeHandle(ref, () => ({
@@ -724,12 +748,12 @@ export const ApMapLibre3DMap = forwardRef<ApLeafletMapHandle, ApMapLibre3DMapPro
               });
             }
           };
-          addRaster('overlay-imagery', BASEMAP_TILES.satellite.url, false, 23);
+          // Esri imagery gap-fill when drill/zoom requests sat; GIS-Source AOI overlays remain on 2D Leaflet.
           addRaster(
-            'overlay-hillshade',
-            ESRI_HILLSHADE_TILES.url,
+            'overlay-imagery',
+            ESRI_WORLD_IMAGERY_TILES.url,
             false,
-            ESRI_HILLSHADE_TILES.maxZoom
+            ESRI_WORLD_IMAGERY_TILES.maxZoom
           );
           addRaster('overlay-roads', ESRI_TRANSPORT_TILES.url, false, ESRI_TRANSPORT_TILES.maxZoom);
           addRaster('overlay-places', ESRI_PLACES_TILES.url, false, ESRI_PLACES_TILES.maxZoom);
@@ -751,6 +775,7 @@ export const ApMapLibre3DMap = forwardRef<ApLeafletMapHandle, ApMapLibre3DMapPro
           'gis-rivers',
           'gis-water',
           'gis-agency',
+          'gis-rail',
           'gis-buffers',
           'gis-measure',
           'gis-route',
@@ -832,6 +857,65 @@ export const ApMapLibre3DMap = forwardRef<ApLeafletMapHandle, ApMapLibre3DMapPro
         addLine('gis-water-line', 'gis-water', '#0e7490', 0.8);
         addLine('gis-rivers-line', 'gis-rivers', '#1565c0', 1.8);
         addLine('gis-agency-line', 'gis-agency', '#ba1a1a', 2.4, [2, 1]);
+        if (!map.getLayer('gis-rail-casing')) {
+          map.addLayer({
+            id: 'gis-rail-casing',
+            type: 'line',
+            source: 'gis-rail',
+            layout: {
+              visibility: 'none',
+              'line-cap': 'round',
+              'line-join': 'round',
+            },
+            paint: {
+              'line-color': RAIL_CASING_COLOR,
+              'line-opacity': 0.95,
+              'line-width': [
+                'interpolate',
+                ['linear'],
+                ['zoom'],
+                5,
+                3.2,
+                7,
+                4.2,
+                9,
+                5.5,
+                11,
+                7,
+              ],
+            },
+          });
+        }
+        if (!map.getLayer('gis-rail-line')) {
+          map.addLayer({
+            id: 'gis-rail-line',
+            type: 'line',
+            source: 'gis-rail',
+            layout: {
+              visibility: 'none',
+              'line-cap': 'butt',
+              'line-join': 'round',
+            },
+            paint: {
+              'line-color': RAIL_LINE_COLOR,
+              'line-opacity': 1,
+              'line-dasharray': [...RAIL_DASH_MAPLIBRE],
+              'line-width': [
+                'interpolate',
+                ['linear'],
+                ['zoom'],
+                5,
+                1.6,
+                7,
+                2.2,
+                9,
+                2.8,
+                11,
+                3.4,
+              ],
+            },
+          });
+        }
         addFill('gis-buffers-fill', 'gis-buffers', '#14b8a6', 0.08);
         addLine('gis-buffers-line', 'gis-buffers', '#0f766e', 1.2, [2, 1]);
         addLine('gis-measure-line', 'gis-measure', '#006a61', 2.4, [2, 1]);
@@ -878,33 +962,25 @@ export const ApMapLibre3DMap = forwardRef<ApLeafletMapHandle, ApMapLibre3DMapPro
             type: 'circle',
             source: 'gis-stations',
             paint: {
-              'circle-radius': 6,
+              'circle-radius': [
+                'interpolate',
+                ['linear'],
+                ['zoom'],
+                6,
+                5,
+                10,
+                6.5,
+                14,
+                8,
+              ],
               'circle-color': '#0d9488',
               'circle-stroke-color': '#001428',
               'circle-stroke-width': 1.2,
+              'circle-opacity': 0.95,
             },
           });
         }
-        if (!map.getLayer('gis-stations-label')) {
-          map.addLayer({
-            id: 'gis-stations-label',
-            type: 'symbol',
-            source: 'gis-stations',
-            minzoom: 9,
-            layout: {
-              'text-field': ['get', 'name'],
-              'text-size': 11,
-              'text-font': ['Noto Sans Regular'],
-              'text-offset': [0, 1.1],
-              'text-anchor': 'top',
-            },
-            paint: {
-              'text-color': '#0f2942',
-              'text-halo-color': '#fff',
-              'text-halo-width': 1.2,
-            },
-          });
-        }
+        // PS names are click-only (popup); no permanent labels on the 3D map.
         if (!map.getLayer('gis-markers-circle')) {
           map.addLayer({
             id: 'gis-markers-circle',
@@ -962,6 +1038,90 @@ export const ApMapLibre3DMap = forwardRef<ApLeafletMapHandle, ApMapLibre3DMapPro
       map.on('moveend', reportView);
       map.on('zoomend', reportView);
       map.on('mousemove', onMove);
+
+      const HOVER_FALLBACKS: Record<string, LayerNameFallback | 'Indian Railway'> = {
+        'gis-rail-line': 'Indian Railway',
+        'gis-highways-line': 'Highway',
+        'gis-rivers-line': 'River',
+        'gis-water-fill': 'Water body',
+        'gis-water-line': 'Water body',
+        'gis-agency-line': 'Drug Route',
+        'gis-stations-circle': 'Police Station',
+        'gis-markers-circle': 'Feature',
+        'admin-districts-fill': 'District',
+        'admin-districts-line': 'District',
+        'admin-mandals-fill': 'Mandal',
+        'admin-mandals-line': 'Mandal',
+        'admin-villages-fill': 'Village',
+        'admin-villages-line': 'Village',
+        'admin-state-line': 'State',
+      };
+      let featureHoverPopup: maplibregl.Popup | null = null;
+      const clearFeatureHover = () => {
+        featureHoverPopup?.remove();
+        featureHoverPopup = null;
+      };
+      const labelForHoverFeature = (
+        layerId: string,
+        props: Record<string, unknown>
+      ): string => {
+        if (layerId === 'gis-rail-line') return formatRailTooltip(props as RailFeatureProps);
+        if (layerId === 'gis-stations-circle') {
+          return formatFeatureTooltip(
+            { ...props, name: props.name ?? props.label },
+            'Police Station'
+          );
+        }
+        if (layerId === 'gis-markers-circle') {
+          return formatFeatureTooltip({ ...props, name: props.label ?? props.name }, 'Feature');
+        }
+        if (layerId.startsWith('ingest-')) {
+          return formatFeatureTooltip(props, 'Feature');
+        }
+        const fallback = (HOVER_FALLBACKS[layerId] ?? 'Feature') as LayerNameFallback;
+        return formatFeatureTooltip(props, fallback);
+      };
+      map.on('mousemove', (e: MapMouseEvent) => {
+        const styleLayers = map.getStyle()?.layers ?? [];
+        const hoverLayerIds = styleLayers
+          .map((l) => l.id)
+          .filter(
+            (id) =>
+              Boolean(HOVER_FALLBACKS[id]) ||
+              (id.startsWith('ingest-') &&
+                (id.endsWith('-fill') || id.endsWith('-line') || id.endsWith('-circle')))
+          )
+          .filter((id) => Boolean(map.getLayer(id)));
+        if (!hoverLayerIds.length) {
+          clearFeatureHover();
+          return;
+        }
+        const hit = map.queryRenderedFeatures(e.point, { layers: hoverLayerIds })[0];
+        if (!hit?.layer?.id) {
+          clearFeatureHover();
+          map.getCanvas().style.cursor = '';
+          return;
+        }
+        const label = labelForHoverFeature(
+          hit.layer.id,
+          (hit.properties ?? {}) as Record<string, unknown>
+        );
+        map.getCanvas().style.cursor = 'pointer';
+        if (!featureHoverPopup) {
+          featureHoverPopup = new maplibregl.Popup({
+            closeButton: false,
+            closeOnClick: false,
+            offset: 8,
+            className: 'ap-feature-tooltip',
+          });
+        }
+        featureHoverPopup.setLngLat(e.lngLat).setText(label).addTo(map);
+      });
+      map.on('mouseout', () => {
+        clearFeatureHover();
+        map.getCanvas().style.cursor = '';
+      });
+
       map.on('click', (e: MapMouseEvent) => {
         const cb = callbacksRef.current;
         const adminLayers = [
@@ -975,7 +1135,19 @@ export const ApMapLibre3DMap = forwardRef<ApLeafletMapHandle, ApMapLibre3DMapPro
         if (hit?.layer?.id === 'gis-stations-circle') {
           const props = (hit.properties ?? {}) as Partial<PoliceStationProperties>;
           const geom = hit.geometry.type === 'Point' ? hit.geometry.coordinates : [e.lngLat.lng, e.lngLat.lat];
-          cb.onPoliceStationClick?.(String(props.id ?? ''), String(props.name ?? 'PS'), geom[1], geom[0]);
+          const name = String(props.name ?? 'PS');
+          const detail = [props.district, props.state].filter(Boolean).join(' · ');
+          const esc = (s: string) =>
+            s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+          new maplibregl.Popup({ closeOnClick: true, offset: 10 })
+            .setLngLat([geom[0], geom[1]])
+            .setHTML(
+              `<div class="ap-ps-label"><div class="ap-ps-label__name">${esc(name)}</div>${
+                detail ? `<div class="ap-ps-label__meta">${esc(detail)}</div>` : ''
+              }</div>`
+            )
+            .addTo(map);
+          cb.onPoliceStationClick?.(String(props.id ?? ''), name, geom[1], geom[0]);
           return;
         }
         if (hit?.layer?.id === 'gis-markers-circle') {
@@ -1162,6 +1334,7 @@ export const ApMapLibre3DMap = forwardRef<ApLeafletMapHandle, ApMapLibre3DMapPro
       riverData,
       waterData,
       agencyData,
+      railData,
       bufferData,
       measureData,
       routeData,
@@ -1174,6 +1347,7 @@ export const ApMapLibre3DMap = forwardRef<ApLeafletMapHandle, ApMapLibre3DMapPro
       overlayImagery,
       showTrails,
       showRailways,
+      hasRailVector,
       showHillshade,
       showImageryOverlay,
       zoom,

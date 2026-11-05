@@ -1,25 +1,17 @@
 import React, { useState, useRef, useEffect } from 'react';
 import {
   Bell,
-  ChevronDown,
-  Crosshair,
   Menu,
   RefreshCw,
   Search,
   UserCheck,
-  CheckCircle2,
   AlertTriangle,
   MapPin,
 } from 'lucide-react';
-import { CrsId, GisJob, InspectableFeature, TacticalAlert, WorkspaceId } from '../types/gis';
-import { formatCoordinates } from '../utils/geoMath';
+import { GisJob, InspectableFeature, TacticalAlert, WorkspaceId } from '../types/gis';
 import { EagleCrest } from './EagleCrest';
 
 interface TopCommandHeaderProps {
-  centerLat: number;
-  centerLon: number;
-  crs: CrsId;
-  onChangeCrs: (crs: CrsId) => void;
   jobs: GisJob[];
   alerts: TacticalAlert[];
   onAcknowledgeAlert: (id: string) => void;
@@ -28,25 +20,13 @@ interface TopCommandHeaderProps {
   sidebarCollapsed: boolean;
   onToggleSidebar: () => void;
   onSwitchWorkspace: (ws: WorkspaceId) => void;
-  onTriggerToast: (msg: string) => void;
   userName?: string;
   userRole?: string;
   userUnit?: string;
   onLogout?: () => void;
 }
 
-const CRS_OPTIONS: Array<{ id: CrsId; label: string; desc: string }> = [
-  { id: 'EPSG:4326', label: 'EPSG:4326', desc: 'WGS 84 Geographic (Deg)' },
-  { id: 'EPSG:32644', label: 'EPSG:32644', desc: 'WGS 84 / UTM Zone 44N (m)' },
-  { id: 'EPSG:7755', label: 'EPSG:7755', desc: 'India NSF LCC Survey Grid' },
-  { id: 'EPSG:3857', label: 'EPSG:3857', desc: 'Web Mercator Auxiliary' },
-];
-
 export const TopCommandHeader: React.FC<TopCommandHeaderProps> = ({
-  centerLat,
-  centerLon,
-  crs,
-  onChangeCrs,
   jobs,
   alerts,
   onAcknowledgeAlert,
@@ -55,7 +35,6 @@ export const TopCommandHeader: React.FC<TopCommandHeaderProps> = ({
   sidebarCollapsed,
   onToggleSidebar,
   onSwitchWorkspace,
-  onTriggerToast,
   userName = 'GIS Lead Analyst',
   userRole,
   userUnit = 'Amaravati HQ (Full Jurisdiction)',
@@ -63,7 +42,6 @@ export const TopCommandHeader: React.FC<TopCommandHeaderProps> = ({
 }) => {
   const [globalQuery, setGlobalQuery] = useState('');
   const [searchOpen, setSearchOpen] = useState(false);
-  const [crsMenuOpen, setCrsMenuOpen] = useState(false);
   const [jobsMenuOpen, setJobsMenuOpen] = useState(false);
   const [alertsMenuOpen, setAlertsMenuOpen] = useState(false);
 
@@ -73,7 +51,6 @@ export const TopCommandHeader: React.FC<TopCommandHeaderProps> = ({
     const handleOutside = (e: MouseEvent) => {
       if (headerRef.current && !headerRef.current.contains(e.target as Node)) {
         setSearchOpen(false);
-        setCrsMenuOpen(false);
         setJobsMenuOpen(false);
         setAlertsMenuOpen(false);
       }
@@ -115,7 +92,7 @@ export const TopCommandHeader: React.FC<TopCommandHeaderProps> = ({
 
         <button
           type="button"
-          onClick={() => onSwitchWorkspace('interactive-map-viewer')}
+          onClick={() => onSwitchWorkspace('interactive-map')}
           className="flex items-center gap-2.5 text-left cursor-pointer group"
         >
           <EagleCrest className="w-8 h-8 shrink-0" />
@@ -130,64 +107,8 @@ export const TopCommandHeader: React.FC<TopCommandHeaderProps> = ({
         </button>
       </div>
 
-      {/* Zone 2: Coordinate Readout, CRS Switcher & Global Search */}
+      {/* Zone 2: Global Search */}
       <div className="hidden lg:flex items-center gap-2 flex-1 max-w-2xl mx-2">
-        {/* Live Center Coordinate Readout */}
-        <div className="flex items-center gap-1.5 px-2.5 py-1 bg-surface-container-low rounded border border-outline-variant/40 text-on-surface shrink-0">
-          <Crosshair className="w-3.5 h-3.5 text-secondary shrink-0" />
-          <span className="font-mono text-[11.5px] font-medium tracking-tight tabular-coord whitespace-nowrap">
-            {formatCoordinates(centerLat, centerLon, crs)}
-          </span>
-          <span className="text-outline-variant text-xs">|</span>
-          <span className="text-[10px] font-bold text-on-surface-variant whitespace-nowrap">
-            {crs === 'EPSG:4326' ? 'EPSG:4326 WGS84' : crs}
-          </span>
-        </div>
-
-        {/* CRS Dropdown Selector */}
-        <div className="relative shrink-0">
-          <button
-            type="button"
-            onClick={() => {
-              setCrsMenuOpen((v) => !v);
-              setJobsMenuOpen(false);
-              setAlertsMenuOpen(false);
-            }}
-            className="flex items-center gap-1 px-2 py-1 bg-surface-container hover:bg-surface-container-high rounded border border-outline-variant/50 text-on-surface-variant hover:text-primary transition-colors cursor-pointer"
-          >
-            <span className="text-[10px] font-bold uppercase whitespace-nowrap">CRS: {crs}</span>
-            <ChevronDown className="w-3.5 h-3.5" />
-          </button>
-
-          {crsMenuOpen && (
-            <div className="absolute left-0 mt-1.5 w-64 bg-surface-container-lowest rounded-md shadow-lg border border-outline-variant/50 py-1 z-50">
-              <div className="px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider text-outline border-b border-outline-variant/25">
-                Spatial Reference System
-              </div>
-              {CRS_OPTIONS.map((opt) => (
-                <button
-                  key={opt.id}
-                  type="button"
-                  onClick={() => {
-                    onChangeCrs(opt.id);
-                    setCrsMenuOpen(false);
-                    onTriggerToast(`Coordinate readout switched to ${opt.id} (${opt.desc})`);
-                  }}
-                  className={`w-full px-2.5 py-1.5 text-left flex items-center justify-between text-xs hover:bg-surface-container-low cursor-pointer ${
-                    crs === opt.id ? 'bg-secondary-container/25 text-primary font-semibold' : 'text-on-surface'
-                  }`}
-                >
-                  <div>
-                    <div className="font-mono text-[11px] font-semibold">{opt.label}</div>
-                    <div className="text-[10px] text-on-surface-variant">{opt.desc}</div>
-                  </div>
-                  {crs === opt.id && <CheckCircle2 className="w-3.5 h-3.5 text-secondary shrink-0" />}
-                </button>
-              ))}
-            </div>
-          )}
-        </div>
-
         {/* Global Spatial Quick-Jump Search */}
         <div className="relative flex-1 min-w-[180px]">
           <Search className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-on-surface-variant pointer-events-none" />
@@ -256,7 +177,6 @@ export const TopCommandHeader: React.FC<TopCommandHeaderProps> = ({
             onClick={() => {
               setJobsMenuOpen((v) => !v);
               setAlertsMenuOpen(false);
-              setCrsMenuOpen(false);
             }}
             className="flex items-center gap-1.5 px-2.5 py-1 bg-secondary-container/45 hover:bg-secondary-container/70 rounded border border-secondary/35 text-on-secondary-container transition-colors cursor-pointer"
           >
@@ -272,16 +192,6 @@ export const TopCommandHeader: React.FC<TopCommandHeaderProps> = ({
                 <span className="text-[11px] font-bold uppercase tracking-wider text-primary">
                   PostGIS &amp; Raster Job Queue
                 </span>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setJobsMenuOpen(false);
-                    onSwitchWorkspace('spatial-analysis-and-geoprocessing');
-                  }}
-                  className="text-[10px] font-semibold text-secondary hover:underline cursor-pointer"
-                >
-                  Open Workbench →
-                </button>
               </div>
               <div className="divide-y divide-outline-variant/20 max-h-64 overflow-y-auto">
                 {jobs.map((job) => (
@@ -321,7 +231,6 @@ export const TopCommandHeader: React.FC<TopCommandHeaderProps> = ({
             onClick={() => {
               setAlertsMenuOpen((v) => !v);
               setJobsMenuOpen(false);
-              setCrsMenuOpen(false);
             }}
             title="Tactical Interception Alerts"
             className="relative w-8 h-8 flex items-center justify-center rounded hover:bg-surface-container text-on-surface-variant hover:text-primary transition-colors cursor-pointer"

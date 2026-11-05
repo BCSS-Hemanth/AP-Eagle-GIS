@@ -79,10 +79,14 @@
     margin: 0;
     padding: 0;
     height: 100%;
+    max-height: 100%;
+    height: 100dvh;
+    max-height: 100dvh;
     font-family: var(--font-sans);
     background-color: var(--color-background);
     color: var(--color-on-surface);
     overscroll-behavior: none;
+    overflow: hidden;
   }
 }
 
@@ -224,9 +228,191 @@
   border: none;
 }
 
+/* Police station name — shown only in click popup */
+.leaflet-popup.ap-ps-popup .leaflet-popup-content-wrapper {
+  border-radius: 4px;
+  box-shadow: 0 2px 8px rgba(0, 20, 40, 0.2);
+}
+
+.leaflet-popup.ap-ps-popup .leaflet-popup-content {
+  margin: 8px 10px;
+  min-width: 0;
+}
+
+.ap-ps-label__name {
+  font-weight: 700;
+  font-size: 12px;
+  color: #0b1c30;
+  line-height: 1.25;
+}
+
+.ap-ps-label__meta {
+  margin-top: 2px;
+  font-weight: 500;
+  font-size: 11px;
+  color: #43474d;
+  line-height: 1.2;
+}
+
 .leaflet-tooltip {
   font-size: 11px;
   font-family: var(--font-sans);
+}
+
+.leaflet-tooltip.ap-rail-tooltip,
+.maplibregl-popup.ap-rail-tooltip .maplibregl-popup-content,
+.maplibregl-popup.ap-feature-tooltip .maplibregl-popup-content {
+  font-size: 11px;
+  font-family: var(--font-sans);
+  font-weight: 600;
+  color: #0f172a;
+  border: 1px solid #cbd5e1;
+  box-shadow: 0 1px 4px rgba(15, 23, 42, 0.14);
+}
+
+.maplibregl-popup.ap-rail-tooltip .maplibregl-popup-content {
+  color: #4c1d95;
+  border-color: #c4b5fd;
+  box-shadow: 0 1px 4px rgba(109, 40, 217, 0.18);
+}
+
+.maplibregl-popup.ap-rail-tooltip .maplibregl-popup-content,
+.maplibregl-popup.ap-feature-tooltip .maplibregl-popup-content {
+  padding: 4px 8px;
+  border-radius: 4px;
+}
+
+.maplibregl-popup.ap-rail-tooltip .maplibregl-popup-tip {
+  border-top-color: #c4b5fd;
+}
+
+.maplibregl-popup.ap-feature-tooltip .maplibregl-popup-tip {
+  border-top-color: #cbd5e1;
+}
+
+.leaflet-interactive.india-state-pick-hit {
+  cursor: pointer;
+  pointer-events: visible;
+}
+
+.leaflet-tooltip.india-state-label {
+  background: rgba(255, 255, 255, 0.9);
+  border: 0;
+  border-radius: 2px;
+  box-shadow: 0 0 0 1px rgba(15, 41, 66, 0.14);
+  color: #334155;
+  font-family: var(--font-sans);
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  line-height: 1.15;
+  margin: 0 !important;
+  padding: 1px 4px !important;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+.leaflet-tooltip.india-state-label::before {
+  display: none !important;
+}
+
+.leaflet-tooltip.india-state-label--ap {
+  background: rgba(219, 234, 254, 0.96);
+  box-shadow: 0 0 0 1px rgba(37, 99, 235, 0.5);
+  color: #1e3a8a;
+  font-size: 10px;
+  font-weight: 700;
+  padding: 1px 4px !important;
+}
+
+/* Hover popup for India states (political-clean + sparse overview). */
+.leaflet-tooltip.india-state-label--hover {
+  background: rgba(255, 255, 255, 0.96) !important;
+  box-shadow: 0 1px 4px rgba(28, 25, 23, 0.18) !important;
+  border: 1px solid rgba(120, 113, 108, 0.35) !important;
+  border-radius: 3px;
+  color: #1c1917;
+  font-size: 11px;
+  font-weight: 650;
+  padding: 3px 7px !important;
+  white-space: nowrap;
+  max-width: none;
+  text-shadow: none;
+}
+
+.leaflet-tooltip.india-state-label--hover.india-state-label--ap {
+  background: rgba(254, 243, 226, 0.98) !important;
+  border-color: rgba(154, 52, 18, 0.45) !important;
+  color: #7c2d12;
+}
+
+/* Dashboard overview: curated label-point names (reference-style alignment). */
+.india-state-name-marker {
+  background: transparent !important;
+  border: 0 !important;
+}
+
+.india-state-name-marker__text {
+  display: inline-block;
+  transform: translate(-50%, -50%);
+  color: #1c1917;
+  font-family: var(--font-sans);
+  font-weight: 650;
+  line-height: 1.1;
+  text-align: center;
+  white-space: normal;
+  pointer-events: none;
+  text-shadow:
+    0 0 2px #efe6d0,
+    1px 0 0 #efe6d0,
+    -1px 0 0 #efe6d0,
+    0 1px 0 #efe6d0,
+    0 -1px 0 #efe6d0;
+}
+
+.india-state-name-marker--xs .india-state-name-marker__text {
+  font-size: 5px;
+  max-width: 40px;
+  font-weight: 550;
+}
+
+.india-state-name-marker--sm .india-state-name-marker__text {
+  font-size: 5.5px;
+  max-width: 48px;
+  font-weight: 550;
+}
+
+.india-state-name-marker--md .india-state-name-marker__text {
+  font-size: 6.5px;
+  max-width: 58px;
+}
+
+.india-state-name-marker--lg .india-state-name-marker__text {
+  font-size: 7.5px;
+  max-width: 72px;
+}
+
+.india-state-name-marker--xl .india-state-name-marker__text {
+  font-size: 8.5px;
+  max-width: 84px;
+  font-weight: 650;
+}
+
+.india-state-name-marker--ap .india-state-name-marker__text {
+  color: #7c2d12;
+  font-weight: 700;
+}
+
+.ap-leaflet-root.is-political-clean .leaflet-container {
+  background: #ffffff !important;
+}
+
+/* No black focus rectangle when a state polygon is clicked. */
+.ap-leaflet-root.is-political-clean .leaflet-interactive:focus,
+.ap-leaflet-root.is-political-clean path.leaflet-interactive:focus,
+.ap-leaflet-root.is-political-clean .leaflet-overlay-pane svg:focus,
+.ap-leaflet-root.is-political-clean .leaflet-overlay-pane path:focus {
+  outline: none !important;
 }
 
 .ap-admin-identify-tip {
@@ -265,14 +451,105 @@
   color: #d7e3ef;
 }
 
-.ap-map-detail-caption {
-  margin: 0 8px 22px 0;
-  max-width: 280px;
-  padding: 4px 7px;
-  background: rgba(15, 41, 66, 0.82);
-  color: #e8eef4;
-  font-size: 10px;
-  line-height: 1.3;
-  border-radius: 3px;
+/* OPS hotspot hover card — above markers (pane z-index 750) */
+.leaflet-tooltip.ap-hotspot-tooltip {
+  background: transparent;
+  border: 0;
+  box-shadow: none;
+  padding: 0;
+  margin: 0;
+  white-space: normal;
+  pointer-events: none;
+  z-index: 750 !important;
+}
+
+.leaflet-tooltip.ap-hotspot-tooltip::before {
+  display: none;
+}
+
+.leaflet-hotspot-tooltips-pane {
+  z-index: 750;
   pointer-events: none;
 }
+
+.ap-hotspot-card {
+  width: 196px;
+  background: #ffffff;
+  border: 1px solid #c8c8c8;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.22);
+  font-family: Arial, Helvetica, sans-serif;
+  color: #222;
+  overflow: hidden;
+}
+
+.ap-hotspot-card__title {
+  padding: 5px 7px 2px;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1.2;
+  color: #111;
+}
+
+.ap-hotspot-card__table {
+  width: calc(100% - 10px);
+  margin: 0 5px 5px;
+  border-collapse: collapse;
+  table-layout: fixed;
+  background: #fff;
+  box-shadow: 0 0 4px rgba(0, 0, 0, 0.08);
+}
+
+.ap-hotspot-card__table th,
+.ap-hotspot-card__table td {
+  border: 1px solid #d0d0d0;
+  padding: 1px 4px;
+  font-size: 9.5px;
+  line-height: 1.25;
+  text-align: left;
+  vertical-align: top;
+  word-break: break-word;
+}
+
+.ap-hotspot-card__table th {
+  background: #e6f2ff;
+  color: #333;
+  font-weight: 700;
+  text-align: center;
+  font-size: 9.5px;
+  padding: 2px 4px;
+}
+
+.ap-hotspot-card__table tbody tr:nth-child(even) {
+  background: #f2f8fc;
+}
+
+.ap-hotspot-card__table tbody tr:nth-child(odd) {
+  background: #ffffff;
+}
+
+.ap-hotspot-card__table td:first-child {
+  width: 46%;
+}
+
+.ap-hotspot-card__u {
+  text-decoration: underline;
+  color: #1155cc;
+  cursor: default;
+}
+
+.ap-hotspot-card__photo {
+  display: flex;
+  justify-content: center;
+  padding: 0 5px 5px;
+}
+
+.ap-hotspot-card__photo img {
+  width: 168px;
+  height: 105px;
+  object-fit: cover;
+  object-position: center;
+  border: 1px solid #d0d0d0;
+  border-radius: 4px;
+  display: block;
+}
+

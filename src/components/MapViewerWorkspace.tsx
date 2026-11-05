@@ -61,6 +61,7 @@ import { MAP_VIEW_3D_LAYER_LIMITS, MAP_VIEW_3D_NOTE, webglIsAvailable } from '..
 import { AdminDrillBar } from './gis/AdminDrillBar';
 import {
   type AdminDrill,
+  AP_STATE_FOCUS_DRILL,
   STATE_ADMIN_DRILL,
   adminNamesEqual,
   featureCentroid,
@@ -248,6 +249,7 @@ export const MapViewerWorkspace: React.FC<MapViewerWorkspaceProps> = ({
         districtByName(prev.districtName ?? district);
       return {
         level: 'mandal',
+        apFocused: true,
         districtName:
           prev.districtName ??
           String(
@@ -278,6 +280,7 @@ export const MapViewerWorkspace: React.FC<MapViewerWorkspaceProps> = ({
         districtByName(prev.districtName ?? district);
       return {
         level: 'village',
+        apFocused: true,
         districtName:
           prev.districtName ??
           String(
@@ -485,7 +488,7 @@ export const MapViewerWorkspace: React.FC<MapViewerWorkspaceProps> = ({
     setAdminDrill(STATE_ADMIN_DRILL);
     activeMap()?.fitState();
     onUpdateCenterCoords(15.9129, 79.74);
-    onTriggerToast('Reset map canvas to Andhra Pradesh State Full Extent (EPSG:4326)');
+    onTriggerToast('Reset map canvas to India full extent (EPSG:4326)');
   };
 
   const canDrillAdmin =
@@ -957,8 +960,8 @@ export const MapViewerWorkspace: React.FC<MapViewerWorkspaceProps> = ({
             >
               <option value="maplibre">OSM Vector (MapLibre GL)</option>
               <option value="vector">OSM Raster (Leaflet)</option>
-              <option value="topo">Survey of India Toposheet (1:50K)</option>
-              <option value="satellite">High-Res Satellite (Esri imagery)</option>
+              <option value="topo">SOI Toposheet mosaic (GIS-Source)</option>
+              <option value="satellite">GIS-Source Satellite (sat + AOB + NT_CG)</option>
               <option value="hybrid">Hybrid imagery + labels</option>
             </select>
           </div>
@@ -1179,7 +1182,11 @@ export const MapViewerWorkspace: React.FC<MapViewerWorkspaceProps> = ({
                                   <span className="w-3 h-0 border-t border-dotted border-secondary shrink-0" />
                                 )}
                                 {lyr.swatchType === 'line-rail' && (
-                                  <span className="w-3 h-0.5 bg-outline shrink-0" />
+                                  <span
+                                    className="w-3 h-0.5 shrink-0 border-t-2 border-dashed"
+                                    style={{ borderColor: '#6d28d9' }}
+                                    title="Indian Railway"
+                                  />
                                 )}
                                 {lyr.swatchType === 'grid-topo' && (
                                   <Grid className="w-3 h-3 text-on-surface-variant shrink-0" />
@@ -1250,7 +1257,7 @@ export const MapViewerWorkspace: React.FC<MapViewerWorkspaceProps> = ({
                     ) : (
                       <ChevronRight className="w-3.5 h-3.5 shrink-0" />
                     )}
-                    <span>User ingested (QGIS providers)</span>
+                    <span>Imported layers</span>
                   </div>
                   <span className="text-[10px] font-mono text-on-surface-variant tabular-coord">
                     {ingestedLayers.filter((l) => l.enabled).length}/{ingestedLayers.length}
@@ -1260,7 +1267,7 @@ export const MapViewerWorkspace: React.FC<MapViewerWorkspaceProps> = ({
                   <div className="p-1.5 space-y-1">
                     {ingestedLayers.length === 0 ? (
                       <p className="text-[10.5px] text-on-surface-variant px-1 py-1">
-                        Add Layer to ingest GeoJSON, Shapefile, KMZ, CSV, GPKG, GeoTIFF, WMS/WFS, or ArcGIS REST. Catalog layers stay untouched.
+                        Add Layer to import GeoJSON, Shapefile, KMZ, CSV, GPKG, or GeoTIFF. Catalog layers stay untouched.
                       </p>
                     ) : (
                       ingestedLayers.map((lyr) => (
@@ -1337,7 +1344,30 @@ export const MapViewerWorkspace: React.FC<MapViewerWorkspaceProps> = ({
         )}
 
         {/* 2. CENTRAL CARTOGRAPHIC VIEWPORT + COORDINATE STRIP + ATTRIBUTE TABLE */}
-        <div className="flex-1 min-w-0 min-h-0 relative overflow-hidden flex flex-col bg-[#E6EFF8]">
+        <div className="flex-1 min-w-0 min-h-0 relative overflow-hidden flex flex-col bg-white">
+          <div className="shrink-0 flex justify-center items-center py-0.5 px-1 bg-white">
+            <AdminDrillBar
+              drill={adminDrill}
+              onChange={(next) => {
+                setAdminDrill(next);
+                if (next.level === 'state') {
+                  onTriggerToast(
+                    next.apFocused
+                      ? 'Andhra Pradesh state view'
+                      : 'Returned to India overview'
+                  );
+                  return;
+                }
+                const label =
+                  next.level === 'village'
+                    ? next.villageName
+                    : next.level === 'mandal'
+                      ? next.mandalName
+                      : next.districtName;
+                onTriggerToast(`Showing ${next.level}: ${label ?? ''}`);
+              }}
+            />
+          </div>
           {/* MAP CANVAS — real OSM / Esri tiles + AP district GeoJSON */}
           <div ref={viewportRef} className="gis-map-host flex-1 min-h-0 min-w-0 select-none">
             {threeDMounted ? (
@@ -1386,6 +1416,7 @@ export const MapViewerWorkspace: React.FC<MapViewerWorkspaceProps> = ({
                 if (canDrillAdmin) {
                   setAdminDrill({
                     level: 'district',
+                    apFocused: true,
                     districtName: name,
                     districtFeature: feature,
                   });
@@ -1485,9 +1516,15 @@ export const MapViewerWorkspace: React.FC<MapViewerWorkspaceProps> = ({
               districtOpacity={getLayerOpacity('lyr-districts')}
               stateOpacity={getLayerOpacity('lyr-state-border')}
               showHighways={isLayerOn('lyr-highways')}
+              showApRoadsFull={isLayerOn('lyr-ap-roads-full')}
+              showOpsVspRoads={isLayerOn('lyr-ops-vsp-roads')}
+              showApRoadsMajor={isLayerOn('lyr-ap-roads-major')}
               showAgencyRoutes={isLayerOn('lyr-drug-routes')}
               showRailways={isLayerOn('lyr-railways')}
               showGraticule={isLayerOn('lyr-soi-grid')}
+              showBorderPs={isLayerOn('lyr-border-ps')}
+              showTalukGis={isLayerOn('lyr-taluk-gis')}
+              showVspVillagePts={isLayerOn('lyr-vsp-village-pts')}
               showRivers={isLayerOn('lyr-rivers')}
               showWaterbodies={isLayerOn('lyr-waterbodies')}
               showHillshade={isLayerOn('lyr-hillshade')}
@@ -1501,7 +1538,21 @@ export const MapViewerWorkspace: React.FC<MapViewerWorkspaceProps> = ({
               policeStationOpacity={getLayerOpacity('lyr-pss')}
               selectedPoliceStationId={selectedPsId ?? undefined}
               showImageryOverlay={isLayerOn('lyr-cartosat')}
-              highlightAgency={isLayerOn('lyr-asr-agency')}
+              showGoogleRoadmap={isLayerOn('lyr-google-roadmap')}
+              showSoiTopo={isLayerOn('lyr-soi-topo')}
+              showDistrictsGisHist={isLayerOn('lyr-districts-gis-hist')}
+              showStateGisHist={isLayerOn('lyr-state-gis-hist')}
+              showAsrBoundary={isLayerOn('lyr-asr-agency')}
+              showHotspots={isLayerOn('lyr-hotspots')}
+              showCheckPosts={isLayerOn('lyr-checkposts')}
+              showTollPlazas={isLayerOn('lyr-toll-plazas')}
+              showGanjaSeized={isLayerOn('lyr-seizure-polys')}
+              showPharmaHubs={isLayerOn('lyr-pharma-hubs')}
+              showDdacs={isLayerOn('lyr-ddacs')}
+              showEntryExit={isLayerOn('lyr-entry-exit')}
+              showStockPoints={isLayerOn('lyr-stock-points')}
+              showOpsMainRoads={isLayerOn('lyr-ops-main-roads')}
+              showOpsInternalRoads={isLayerOn('lyr-ops-internal-roads')}
               markers={mapMarkers}
               digitizedFeatures={digitizedFeatures}
               ingestedLayers={ingestedLayers}
@@ -1520,10 +1571,16 @@ export const MapViewerWorkspace: React.FC<MapViewerWorkspaceProps> = ({
                 handleSelectTargetOnMap(fid);
               }}
               adminDrill={adminDrill}
+              onApStateFocus={() => {
+                if (!canDrillAdmin) return;
+                setAdminDrill(AP_STATE_FOCUS_DRILL);
+                onTriggerToast('Andhra Pradesh state view — surrounding states remain visible');
+              }}
               onDistrictClick={(name, lat, lon, feature) => {
                 if (canDrillAdmin) {
                   setAdminDrill({
                     level: 'district',
+                    apFocused: true,
                     districtName: name,
                     districtFeature: feature,
                   });
@@ -1604,26 +1661,6 @@ export const MapViewerWorkspace: React.FC<MapViewerWorkspaceProps> = ({
             />
             </div>
 
-            <div className="absolute top-3 left-14 right-14 z-20 flex justify-center pointer-events-none">
-              <AdminDrillBar
-                drill={adminDrill}
-                onChange={(next) => {
-                  setAdminDrill(next);
-                  if (next.level === 'state') {
-                    onTriggerToast('Returned to Andhra Pradesh district view');
-                    return;
-                  }
-                  const label =
-                    next.level === 'village'
-                      ? next.villageName
-                      : next.level === 'mandal'
-                        ? next.mandalName
-                        : next.districtName;
-                  onTriggerToast(`Showing ${next.level}: ${label ?? ''}`);
-                }}
-              />
-            </div>
-
             {nearestRouteVisible && routeMeta && (
               <div className="absolute top-16 left-14 bg-secondary text-on-secondary px-3 py-1.5 rounded shadow-md border border-secondary/50 text-xs flex items-center gap-3 z-20 tabular-coord">
                 <span className="font-semibold uppercase text-[10px]">OSM driving (OSRM)</span>
@@ -1687,7 +1724,7 @@ export const MapViewerWorkspace: React.FC<MapViewerWorkspaceProps> = ({
                 type="button"
                 onClick={() => {
                   onToggleLayer('lyr-soi-grid');
-                  onTriggerToast('Toggled SOI 50K Topographic Graticule Grid');
+                  onTriggerToast('Toggled SOI 1:50K Index Grid (GIS-Source)');
                 }}
                 title="Toggle SOI 50K Topo Grid"
                 className={`w-8 h-8 flex items-center justify-center transition-colors cursor-pointer ${
@@ -2340,9 +2377,9 @@ export const MapViewerWorkspace: React.FC<MapViewerWorkspaceProps> = ({
             <div className="flex items-center justify-between">
               <div>
                 <div className="text-[10.5px] font-bold uppercase tracking-wider text-secondary">
-                  QGIS-style data providers
+                  File import
                 </div>
-                <h2 className="text-base font-bold text-primary">Add vector, raster, or web layer</h2>
+                <h2 className="text-base font-bold text-primary">Import GIS layer or raster</h2>
               </div>
               <button
                 type="button"

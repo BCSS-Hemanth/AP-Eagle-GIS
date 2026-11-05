@@ -23,7 +23,15 @@
     />
   </head>
   <body class="bg-background text-on-surface antialiased selection:bg-secondary/20 selection:text-primary">
-    <div id="root"></div>
+    <div id="root">
+      <div
+        id="boot-fallback"
+        style="min-height:100vh;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:8px;font-family:Inter,system-ui,sans-serif;color:#0b1c30;background:#f8f9ff;padding:24px;text-align:center"
+      >
+        <strong style="font-size:16px">Loading EAGLE Force AP…</strong>
+        <span style="font-size:12px;color:#43474d">If this stays blank, open DevTools (F12) → Console and hard-refresh (Ctrl+Shift+R).</span>
+      </div>
+    </div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

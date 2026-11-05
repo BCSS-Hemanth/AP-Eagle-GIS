@@ -47,9 +47,20 @@ export async function osrmDrivingRoute(
   from: { lat: number; lon: number },
   to: { lat: number; lon: number }
 ): Promise<DrivingRoute | null> {
-  const url = `https://router.project-osrm.org/route/v1/driving/${from.lon},${from.lat};${to.lon},${to.lat}?overview=full&geometries=geojson`;
+  const routes = await osrmDrivingRouteAlternatives(from, to, 1);
+  return routes[0] ?? null;
+}
+
+/** Continuous OSM driving alternatives (not GIS-Source topology). */
+export async function osrmDrivingRouteAlternatives(
+  from: { lat: number; lon: number },
+  to: { lat: number; lon: number },
+  maxAlternatives = 3
+): Promise<DrivingRoute[]> {
+  const altFlag = maxAlternatives > 1 ? '&alternatives=true' : '';
+  const url = `https://router.project-osrm.org/route/v1/driving/${from.lon},${from.lat};${to.lon},${to.lat}?overview=full&geometries=geojson${altFlag}`;
   const res = await fetch(url);
-  if (!res.ok) return null;
+  if (!res.ok) return [];
   const json = (await res.json()) as {
     code?: string;
     routes?: Array<{
@@ -58,11 +69,10 @@ export async function osrmDrivingRoute(
       geometry: { coordinates: number[][] };
     }>;
   };
-  if (json.code !== 'Ok' || !json.routes?.[0]) return null;
-  const route = json.routes[0];
-  return {
+  if (json.code !== 'Ok' || !json.routes?.length) return [];
+  return json.routes.slice(0, maxAlternatives).map((route) => ({
     points: route.geometry.coordinates.map(([lon, lat]) => ({ lat, lon })),
     distanceKm: Number((route.distance / 1000).toFixed(2)),
     durationMin: Math.round(route.duration / 60),
-  };
+  }));
 }

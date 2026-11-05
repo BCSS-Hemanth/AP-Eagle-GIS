@@ -12,6 +12,8 @@ let loadPromise: Promise<void> | null = null;
 
 async function loadBoundaries() {
   if (cachedDistricts && cachedState) return;
+  // SAFETY: do not load gis-source/admin undivided districts/state for primary drill.
+  // See ADMIN_GIS_SOURCE_SAFETY.primaryDistrictDrill / primaryStateBorder.
   const [districts, state] = await Promise.all([
     fetch('/geo/ap-districts-2022.geojson').then((r) => {
       if (!r.ok) throw new Error('Failed to load AP district boundaries');

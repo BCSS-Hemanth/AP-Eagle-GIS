@@ -1,9 +1,11 @@
 import { useEffect, useState } from 'react';
+import { fetchNationalHighwaysPreferPostgis } from './gisPostgisRoads';
 
 let cachedHighways: GeoJSON.FeatureCollection | null = null;
 let cachedRivers: GeoJSON.FeatureCollection | null = null;
 let cachedAgency: GeoJSON.FeatureCollection | null = null;
 let cachedWater: GeoJSON.FeatureCollection | null = null;
+let cachedHighwaySource: 'postgis' | 'osrm-fallback' | null = null;
 let loadPromise: Promise<void> | null = null;
 
 const EMPTY_FC: GeoJSON.FeatureCollection = { type: 'FeatureCollection', features: [] };
@@ -35,13 +37,15 @@ function asCollection(json: GeoJSON.FeatureCollection | GeoJSON.Feature | null):
 
 async function loadNetwork() {
   if (cachedHighways && cachedRivers && cachedAgency && cachedWater) return;
-  const [highways, rivers, agency, water] = await Promise.all([
-    loadJson('/geo/ap-highways.geojson'),
+  const [highwaysHit, rivers, agency, water] = await Promise.all([
+    fetchNationalHighwaysPreferPostgis(),
     loadJson('/geo/ap-rivers.geojson'),
-    loadJson('/geo/ap-agency-route.geojson'),
+    // Conflict policy: GIS-Source ops d_routes replaces OSRM agency corridor stub.
+    loadJson('/geo/gis-source/ops/d_routes.geojson'),
     loadJsonOptional('/geo/ap-waterbodies.geojson'),
   ]);
-  cachedHighways = highways;
+  cachedHighways = highwaysHit.fc;
+  cachedHighwaySource = highwaysHit.source;
   cachedRivers = rivers;
   cachedAgency = asCollection(agency);
   cachedWater = water;
@@ -74,5 +78,12 @@ export function useApNetwork() {
     };
   }, []);
 
-  return { highways, rivers, agency, water, ready };
+  return {
+    highways,
+    rivers,
+    agency,
+    water,
+    ready,
+    highwaySource: cachedHighwaySource,
+  };
 }
