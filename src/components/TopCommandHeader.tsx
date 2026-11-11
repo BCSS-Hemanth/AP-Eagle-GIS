@@ -2,17 +2,15 @@ import React, { useState, useRef, useEffect } from 'react';
 import {
   Bell,
   Menu,
-  RefreshCw,
   Search,
   UserCheck,
   AlertTriangle,
   MapPin,
 } from 'lucide-react';
-import { GisJob, InspectableFeature, TacticalAlert, WorkspaceId } from '../types/gis';
+import { InspectableFeature, TacticalAlert, WorkspaceId } from '../types/gis';
 import { EagleCrest } from './EagleCrest';
 
 interface TopCommandHeaderProps {
-  jobs: GisJob[];
   alerts: TacticalAlert[];
   onAcknowledgeAlert: (id: string) => void;
   onSelectFeatureAndFly: (featureId: string) => void;
@@ -27,7 +25,6 @@ interface TopCommandHeaderProps {
 }
 
 export const TopCommandHeader: React.FC<TopCommandHeaderProps> = ({
-  jobs,
   alerts,
   onAcknowledgeAlert,
   onSelectFeatureAndFly,
@@ -42,7 +39,6 @@ export const TopCommandHeader: React.FC<TopCommandHeaderProps> = ({
 }) => {
   const [globalQuery, setGlobalQuery] = useState('');
   const [searchOpen, setSearchOpen] = useState(false);
-  const [jobsMenuOpen, setJobsMenuOpen] = useState(false);
   const [alertsMenuOpen, setAlertsMenuOpen] = useState(false);
 
   const headerRef = useRef<HTMLDivElement>(null);
@@ -51,7 +47,6 @@ export const TopCommandHeader: React.FC<TopCommandHeaderProps> = ({
     const handleOutside = (e: MouseEvent) => {
       if (headerRef.current && !headerRef.current.contains(e.target as Node)) {
         setSearchOpen(false);
-        setJobsMenuOpen(false);
         setAlertsMenuOpen(false);
       }
     };
@@ -71,7 +66,6 @@ export const TopCommandHeader: React.FC<TopCommandHeaderProps> = ({
       })
     : allFeatures.slice(0, 5);
 
-  const runningJobsCount = jobs.filter((j) => j.status === 'Running').length;
   const unreadAlertsCount = alerts.filter((a) => !a.acknowledged).length;
 
   return (
@@ -92,10 +86,10 @@ export const TopCommandHeader: React.FC<TopCommandHeaderProps> = ({
 
         <button
           type="button"
-          onClick={() => onSwitchWorkspace('interactive-map')}
+          onClick={() => onSwitchWorkspace('ndps-spatial-dashboard')}
           className="flex items-center gap-2.5 text-left cursor-pointer group"
         >
-          <EagleCrest className="w-8 h-8 shrink-0" />
+          <EagleCrest className="w-9 h-9 shrink-0" />
           <div className="flex flex-col justify-center leading-tight">
             <span className="text-[12.5px] font-bold text-primary uppercase tracking-tight whitespace-nowrap">
               EAGLE Force AP | GIS Monitoring &amp; Spatial Intelligence
@@ -124,12 +118,8 @@ export const TopCommandHeader: React.FC<TopCommandHeaderProps> = ({
             placeholder="Search district, mandal, PS, route, coordinate..."
             className="w-full h-8 pl-8 pr-3 bg-surface-container-low border border-outline-variant/45 rounded text-[12px] text-on-surface placeholder:text-on-surface-variant focus:outline-none focus:border-primary focus:bg-surface-container-lowest transition-colors"
           />
-          {searchOpen && (
+          {searchOpen && (filteredTargets.length > 0 || globalQuery.trim()) && (
             <div className="absolute left-0 right-0 mt-1 bg-surface-container-lowest rounded-md shadow-xl border border-outline-variant/50 overflow-hidden z-50">
-              <div className="px-2.5 py-1 bg-surface-container-low text-[10px] font-bold uppercase tracking-wider text-outline flex justify-between">
-                <span>Spatial Index Targets</span>
-                <span>Click to Fly</span>
-              </div>
               <div className="max-h-60 overflow-y-auto divide-y divide-outline-variant/20">
                 {filteredTargets.length === 0 ? (
                   <div className="px-3 py-3 text-xs text-on-surface-variant">
@@ -168,69 +158,14 @@ export const TopCommandHeader: React.FC<TopCommandHeaderProps> = ({
         </div>
       </div>
 
-      {/* Zone 3: Active GIS Jobs, Notifications & Analyst Badge */}
+      {/* Zone 3: Notifications & Analyst Badge */}
       <div className="flex items-center gap-2.5 shrink-0">
-        {/* Active GIS Jobs Pill */}
-        <div className="relative">
-          <button
-            type="button"
-            onClick={() => {
-              setJobsMenuOpen((v) => !v);
-              setAlertsMenuOpen(false);
-            }}
-            className="flex items-center gap-1.5 px-2.5 py-1 bg-secondary-container/45 hover:bg-secondary-container/70 rounded border border-secondary/35 text-on-secondary-container transition-colors cursor-pointer"
-          >
-            <RefreshCw className={`w-3.5 h-3.5 text-secondary ${runningJobsCount > 0 ? 'animate-spin' : ''}`} />
-            <span className="text-[11px] font-bold whitespace-nowrap tabular-coord">
-              {jobs.length} Active GIS Jobs
-            </span>
-          </button>
-
-          {jobsMenuOpen && (
-            <div className="absolute right-0 mt-1.5 w-80 bg-surface-container-lowest rounded-md shadow-xl border border-outline-variant/50 overflow-hidden z-50">
-              <div className="px-3 py-2 bg-surface-container-low border-b border-outline-variant/30 flex items-center justify-between">
-                <span className="text-[11px] font-bold uppercase tracking-wider text-primary">
-                  PostGIS &amp; Raster Job Queue
-                </span>
-              </div>
-              <div className="divide-y divide-outline-variant/20 max-h-64 overflow-y-auto">
-                {jobs.map((job) => (
-                  <div key={job.id} className="p-2.5 text-xs space-y-1">
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="font-semibold text-primary truncate">{job.title}</span>
-                      <span
-                        className={`text-[9.5px] font-bold px-1.5 py-0.5 rounded shrink-0 ${
-                          job.status === 'Completed'
-                            ? 'bg-secondary-container/50 text-on-secondary-container'
-                            : 'bg-surface-container-high text-primary'
-                        }`}
-                      >
-                        {job.status}
-                      </span>
-                    </div>
-                    <div className="text-[10px] text-on-surface-variant font-mono truncate">
-                      {job.algorithm} • {job.startedAt}
-                    </div>
-                    <div className="w-full h-1.5 bg-surface-container rounded-full overflow-hidden">
-                      <div
-                        className="h-full bg-secondary transition-all duration-300"
-                        style={{ width: `${job.progress}%` }}
-                      />
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-        </div>
-
         {/* Tactical Alerts Bell */}
         <div className="relative">
           <button
             type="button"
             onClick={() => {
               setAlertsMenuOpen((v) => !v);
-              setJobsMenuOpen(false);
             }}
             title="Tactical Interception Alerts"
             className="relative w-8 h-8 flex items-center justify-center rounded hover:bg-surface-container text-on-surface-variant hover:text-primary transition-colors cursor-pointer"

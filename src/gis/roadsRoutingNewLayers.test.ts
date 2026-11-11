@@ -9,11 +9,14 @@ import {
   colorForRoutingNewLayer,
   dedupeRoadFeatures,
   displayRoadsForLayer,
+  filterCollectionToPoiAoi,
   isRoadsRoutingNewCatalogLayer,
   isRoadsRoutingNewVisualLayer,
   usesRoutingNewRadiusMatch,
   mergeEnabledLayersIntoRoutingNewConfig,
   midViewForAoiPoints,
+  poiCorridorClipFeature,
+  pointInPoiCorridor,
   routeStrokeForProperties,
   routingNewLayersFromConfig,
 } from './roadsRoutingNewLayers';
@@ -26,8 +29,8 @@ describe('roadsRoutingNewLayers', () => {
         : { ...l, enabled: false }
     );
     const next = mergeEnabledLayersIntoRoutingNewConfig({}, layers, ['grp-transport', 'grp-ops']);
-    expect(next['lyr-highways']?.enabled).toBe(true);
-    expect(next['lyr-ap-roads-major']?.enabled).toBe(true);
+    expect(next['lyr-highways']?.enabled).toBe(false);
+    expect(next['lyr-ap-roads-major']?.enabled).toBe(false);
     expect(next['lyr-checkposts']).toBeUndefined();
   });
 
@@ -41,7 +44,7 @@ describe('roadsRoutingNewLayers', () => {
       (l) => l.groupId === 'grp-admin' || l.id === 'lyr-ap-roads-full' || l.id === 'lyr-highways'
     );
     const next = mergeEnabledLayersIntoRoutingNewConfig({}, adminScoped, null);
-    expect(next['lyr-ap-roads-full']?.enabled).toBe(true);
+    expect(next['lyr-ap-roads-full']?.enabled).toBe(false);
     expect(next['lyr-ops-main-roads']).toBeUndefined();
   });
 
@@ -51,7 +54,8 @@ describe('roadsRoutingNewLayers', () => {
     expect(usesRoutingNewRadiusMatch('lyr-highways')).toBe(false);
     expect(usesRoutingNewRadiusMatch('lyr-forest-trails')).toBe(false);
     expect(usesRoutingNewRadiusMatch('lyr-ops-main-roads')).toBe(false);
-    expect(usesRoutingNewRadiusMatch('lyr-ap-roads-full')).toBe(true);
+    expect(usesRoutingNewRadiusMatch('lyr-ap-roads-full')).toBe(false);
+    expect(usesRoutingNewRadiusMatch('lyr-ops-vsp-roads')).toBe(false);
     const districts = INITIAL_GIS_LAYERS.find((layer) => layer.id === 'lyr-districts')!;
     const checkposts = INITIAL_GIS_LAYERS.find((layer) => layer.id === 'lyr-checkposts')!;
     expect(isRoadsRoutingNewCatalogLayer(districts)).toBe(true);
@@ -191,9 +195,7 @@ describe('roadsRoutingNewLayers', () => {
             : [];
       for (const line of lines) {
         for (const [lon, lat] of line) {
-          const dA = Math.hypot((lon - 81.8832) * 105, (lat - 17.7484) * 110.6);
-          const dB = Math.hypot((lon - 82.3541) * 105, (lat - 17.8649) * 110.6);
-          expect(Math.min(dA, dB)).toBeLessThanOrEqual(26);
+          expect(pointInPoiCorridor(lon, lat, pois, 26.5)).toBe(true);
         }
       }
     }
@@ -251,8 +253,8 @@ describe('roadsRoutingNewLayers', () => {
       ],
     };
     expect(routeStrokeForProperties(fc.features[0].properties)).toBeNull();
-    expect(routeStrokeForProperties(fc.features[1].properties)?.color).toBe('#dc2626');
-    expect(routeStrokeForProperties(fc.features[2].properties)?.color).toBe('#16a34a');
+    expect(routeStrokeForProperties(fc.features[1].properties)?.color).toBe('#ef4444');
+    expect(routeStrokeForProperties(fc.features[2].properties)?.color).toBe('#4ade80');
     const display = displayRoadsForLayer('lyr-ap-roads-full', fc);
     expect(display.clip).toBe(false);
     expect(display.fc.features).toHaveLength(2);
@@ -264,12 +266,43 @@ describe('roadsRoutingNewLayers', () => {
     );
     expect(result.count).toBe(2);
     const highway = result.features.find(
-      (feature) => routeStrokeForProperties(feature.properties)?.color === '#dc2626'
+      (feature) => routeStrokeForProperties(feature.properties)?.color === '#ef4444'
     );
     expect(highway?.geometry.type).toBe('LineString');
     if (highway?.geometry.type === 'LineString') {
       expect(highway.geometry.coordinates[0][1]).toBeCloseTo(17.4, 4);
       expect(highway.geometry.coordinates[1][1]).toBeCloseTo(18.8, 4);
     }
+  });
+
+  it('filters to the stadium corridor between pins A and B (no covering circle)', () => {
+    const a = { lon: 83.0, lat: 18.0 };
+    const b = { lon: 83.4, lat: 18.0 };
+    expect(pointInPoiCorridor(a.lon, a.lat, [a, b], 25)).toBe(true);
+    expect(pointInPoiCorridor(b.lon, b.lat, [a, b], 25)).toBe(true);
+    // Midpoint on A–B is inside the corridor.
+    expect(pointInPoiCorridor(83.2, 18.0, [a, b], 25)).toBe(true);
+    // Far north of the corridor stays out.
+    expect(pointInPoiCorridor(83.2, 19.5, [a, b], 25)).toBe(false);
+    const clip = poiCorridorClipFeature([a, b], 25);
+    expect(clip?.geometry.type).toBe('Polygon');
+    const fc: GeoJSON.FeatureCollection = {
+      type: 'FeatureCollection',
+      features: [
+        {
+          type: 'Feature',
+          properties: { name: 'inside' },
+          geometry: { type: 'Point', coordinates: [83.2, 18.0] },
+        },
+        {
+          type: 'Feature',
+          properties: { name: 'outside' },
+          geometry: { type: 'Point', coordinates: [83.2, 19.5] },
+        },
+      ],
+    };
+    const filtered = filterCollectionToPoiAoi(fc, [a, b], 25);
+    expect(filtered.features).toHaveLength(1);
+    expect(filtered.features[0].properties?.name).toBe('inside');
   });
 });

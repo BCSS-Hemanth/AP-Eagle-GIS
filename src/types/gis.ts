@@ -3,7 +3,6 @@ export type WorkspaceId =
   // M1 Situation Awareness
   | 'ndps-spatial-dashboard'
   | 'ndps-analytics'
-  | 'interactive-map'
   // M2 Layers & Data
   | 'administrative-layers'
   | 'operational-layers'
@@ -11,10 +10,8 @@ export type WorkspaceId =
   | 'roads-routing'
   | 'roads-routing-new'
   | 'raster-imagery'
-  | 'import-export'
-  | 'feature-editor'
   // M3 Products & Field
-  | 'atlas-map-books'
+  | 'atlas'
   | 'reports-seizure-analytics'
   | 'mobile-locus-export'
   // M4 System & Governance
@@ -59,6 +56,7 @@ export interface GisLayer {
     | 'icon-factory'
     | 'line-highway'
     | 'line-trail'
+    | 'line-violet'
     | 'line-rail'
     | 'grid-topo'
     | 'satellite-raster'

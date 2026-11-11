@@ -34,19 +34,16 @@ export type CatalogScope = {
   groups: Array<GisLayer['groupId']> | null;
   /**
    * Extra layer ids shown/saved with this catalog even when groupId differs
-   * (e.g. Admin blurb includes AP road network / rail / SOI grid).
+   * (e.g. Admin includes SOI grid; Road Network includes OPS/highway products).
    */
   extraLayerIds?: readonly string[];
 };
 
 /**
  * Layers stored outside grp-admin that still belong on the Administrative catalog.
- * National highways and AP major roads live under Road Network.
+ * Indian Railway (lyr-railways) lives under Road Network (grp-transport) only.
  */
-export const ADMIN_CATALOG_EXTRA_LAYER_IDS = [
-  'lyr-railways',
-  'lyr-soi-grid',
-] as const;
+export const ADMIN_CATALOG_EXTRA_LAYER_IDS = ['lyr-soi-grid'] as const;
 
 /** Road layers whose group is not grp-transport, plus the statewide highway products. */
 export const ROAD_NETWORK_CATALOG_EXTRA_LAYER_IDS = [

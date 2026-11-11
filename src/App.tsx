@@ -18,7 +18,6 @@ import {
 } from './data/apGisData';
 import { TopCommandHeader } from './components/TopCommandHeader';
 import { LeftNavigationRail } from './components/LeftNavigationRail';
-import { MapViewerWorkspace } from './components/MapViewerWorkspace';
 import { CoreOpsWorkspaces } from './components/workspaces/CoreOpsWorkspaces';
 import { NdpsAnalyticsWorkspace } from './components/workspaces/NdpsAnalyticsWorkspace';
 import { DataLayerWorkspaces } from './components/workspaces/DataLayerWorkspaces';
@@ -34,20 +33,17 @@ import {
   applyLayerConfig,
   defaultDashboardLayerConfig,
   destinationConfigFromSelection,
-  loadDashboardLayerConfig,
   persistDashboardLayerConfig,
   type DashboardLayerConfig,
 } from './gis/dashboardLayers';
 import {
   countRoutingLayers,
-  loadRoadsRoutingLayerConfig,
   persistRoadsRoutingLayerConfig,
   type RoadsRoutingLayerConfig,
 } from './gis/roadsRoutingLayers';
 import {
   countRoutingNewLayers,
   isRoadsRoutingNewCatalogLayer,
-  loadRoadsRoutingNewLayerConfig,
   persistRoadsRoutingNewLayerConfig,
   type RoadsRoutingNewLayerConfig,
 } from './gis/roadsRoutingNewLayers';
@@ -65,6 +61,8 @@ import {
 import type { IngestedLayer } from './gis/ingest';
 import { RoadsRoutingWorkspace } from './components/workspaces/RoadsRoutingWorkspace';
 import { RoadsRoutingNewWorkspace } from './components/workspaces/RoadsRoutingNewWorkspace';
+import { AtlasWorkspace } from './components/workspaces/AtlasWorkspace';
+import { LocusWorkspace } from './components/workspaces/LocusWorkspace';
 
 function AppShell() {
   const { user, canOpen, can, logout } = useAuth();
@@ -78,24 +76,21 @@ function AppShell() {
     [kmzRows]
   );
 
-  // Global Spatial State
+  // Global Spatial State — boot clears localStorage layer keys, so these start fresh.
   const [layers, setLayers] = useState<GisLayer[]>(() => {
-    const saved = loadDashboardLayerConfig();
-    const next = saved ? applyLayerConfig(INITIAL_GIS_LAYERS, saved) : INITIAL_GIS_LAYERS;
-    return next.map((layer) => (layer.id === 'lyr-pss' ? { ...layer, enabled: false } : layer));
+    const fresh = applyLayerConfig(INITIAL_GIS_LAYERS, defaultDashboardLayerConfig(INITIAL_GIS_LAYERS));
+    return fresh.map((layer) => (layer.id === 'lyr-pss' ? { ...layer, enabled: false } : layer));
   });
   const [dashboardLayerConfig, setDashboardLayerConfig] = useState<DashboardLayerConfig>(() => {
-    const loaded = loadDashboardLayerConfig() ?? defaultDashboardLayerConfig(INITIAL_GIS_LAYERS);
+    const loaded = defaultDashboardLayerConfig(INITIAL_GIS_LAYERS);
     return {
       ...loaded,
       'lyr-pss': { enabled: false, opacity: loaded['lyr-pss']?.opacity ?? 100 },
     };
   });
-  const [roadsRoutingConfig, setRoadsRoutingConfig] = useState<RoadsRoutingLayerConfig>(
-    () => loadRoadsRoutingLayerConfig() ?? {}
-  );
+  const [roadsRoutingConfig, setRoadsRoutingConfig] = useState<RoadsRoutingLayerConfig>(() => ({}));
   const [roadsRoutingNewConfig, setRoadsRoutingNewConfig] = useState<RoadsRoutingNewLayerConfig>(
-    () => loadRoadsRoutingNewLayerConfig() ?? {}
+    () => ({})
   );
   /** Independent sticky labels after each Save click (not cleared by hover remove / new ticks). */
   const [catalogSaveAck, setCatalogSaveAck] = useState({
@@ -168,25 +163,6 @@ function AppShell() {
       ...prev,
     ]);
   }, [user]);
-
-  // Keyboard shortcuts when on Interactive Map Viewer (ignore when typing in inputs)
-  useEffect(() => {
-    const onKeyDown = (e: KeyboardEvent) => {
-      const tag = (e.target as HTMLElement)?.tagName;
-      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
-      if (activeWorkspace !== 'interactive-map') return;
-
-      if (e.key.toLowerCase() === 'l') {
-        setLeftOpen((v) => !v);
-      } else if (e.key.toLowerCase() === 'r') {
-        setRightOpen((v) => !v);
-      } else if (e.key.toLowerCase() === 't') {
-        setBottomMode((m) => (m === 'expanded' ? 'closed' : 'expanded'));
-      }
-    };
-    window.addEventListener('keydown', onKeyDown);
-    return () => window.removeEventListener('keydown', onKeyDown);
-  }, [activeWorkspace]);
 
   const handleToggleLayer = (layerId: string) => {
     const target = layers.find((l) => l.id === layerId);
@@ -320,7 +296,7 @@ function AppShell() {
     setExternalFocus({ lat: feature.lat, lon: feature.lon, zoom: 13 });
     setCenterCoords({ lat: feature.lat, lon: feature.lon });
     setRightOpen(true);
-    setActiveWorkspace('interactive-map');
+    setActiveWorkspace('ndps-spatial-dashboard');
     triggerToast(`Focused spatial target: ${feature.name}`);
   };
 
@@ -328,7 +304,7 @@ function AppShell() {
     setSelectedPsId(null);
     setExternalFocus({ lat, lon, zoom: 10 });
     setCenterCoords({ lat, lon });
-    setActiveWorkspace('interactive-map');
+    setActiveWorkspace('ndps-spatial-dashboard');
     triggerToast(`Focused spatial target: ${label}`);
   };
 
@@ -369,7 +345,7 @@ function AppShell() {
     triggerToast(
       `Mounted ${incoming.length} ingested layer${incoming.length === 1 ? '' : 's'} without replacing catalog data`
     );
-    setActiveWorkspace('interactive-map');
+    setActiveWorkspace('ndps-spatial-dashboard');
   };
 
   const handleToggleIngested = (id: string) => {
@@ -424,15 +400,15 @@ function AppShell() {
   const fillViewportWorkspace =
     activeWorkspace === 'ndps-spatial-dashboard' ||
     activeWorkspace === 'ndps-analytics' ||
-    activeWorkspace === 'interactive-map' ||
     activeWorkspace === 'roads-routing' ||
-    activeWorkspace === 'roads-routing-new';
+    activeWorkspace === 'roads-routing-new' ||
+    activeWorkspace === 'atlas' ||
+    activeWorkspace === 'mobile-locus-export';
 
   return (
     <div className="h-dvh max-h-dvh min-h-0 bg-background text-on-surface flex flex-col overflow-hidden">
       {!dashboardMapExpanded && (
         <TopCommandHeader
-          jobs={jobs}
           alerts={alerts}
           onAcknowledgeAlert={handleAcknowledgeAlert}
           onSelectFeatureAndFly={handleSelectFeatureAndFly}
@@ -475,39 +451,6 @@ function AppShell() {
         >
         <div className={fillViewportWorkspace || dashboardMapExpanded ? 'h-full min-h-0' : undefined}>
         <WorkspaceErrorBoundary workspaceLabel={activeWorkspace}>
-        {activeWorkspace === 'interactive-map' && (
-          <MapViewerWorkspace
-            layers={layers}
-            onToggleLayer={handleToggleLayer}
-            onChangeLayerOpacity={handleChangeLayerOpacity}
-            basemap={basemap}
-            onChangeBasemap={setBasemap}
-            crs={crs}
-            selectedFeatureId={selectedFeatureId}
-            onSelectFeature={setSelectedFeatureId}
-            selectedPsId={selectedPsId}
-            onSelectPsId={setSelectedPsId}
-            externalFocus={externalFocus}
-            featuresMap={INSPECTABLE_FEATURES}
-            psRows={kmzRows}
-            digitizedFeatures={digitizedFeatures}
-            ingestedLayers={ingestedLayers}
-            onToggleIngested={handleToggleIngested}
-            onChangeIngestedOpacity={handleIngestedOpacity}
-            onRemoveIngested={handleRemoveIngested}
-            onPublishIngested={handlePublishIngested}
-            onUpdateCenterCoords={(lat, lon) => setCenterCoords({ lat, lon })}
-            onSwitchWorkspace={handleSelectWorkspace}
-            onTriggerToast={triggerToast}
-            leftOpen={leftOpen}
-            setLeftOpen={setLeftOpen}
-            rightOpen={rightOpen}
-            setRightOpen={setRightOpen}
-            bottomMode={bottomMode}
-            setBottomMode={setBottomMode}
-          />
-        )}
-
         {activeWorkspace === 'ndps-spatial-dashboard' && (
           <CoreOpsWorkspaces
             workspace={activeWorkspace}
@@ -532,6 +475,21 @@ function AppShell() {
                 const cur = prev[layerId];
                 if (!cur) return prev;
                 const next = { ...prev, [layerId]: { ...cur, enabled } };
+                persistRoadsRoutingLayerConfig(next);
+                return next;
+              });
+            }}
+            onEnableAllSavedRoutingLayers={() => {
+              setRoadsRoutingConfig((prev) => {
+                let changed = false;
+                const next: typeof prev = { ...prev };
+                for (const [id, cur] of Object.entries(next)) {
+                  if (!cur.enabled) {
+                    next[id] = { ...cur, enabled: true };
+                    changed = true;
+                  }
+                }
+                if (!changed) return prev;
                 persistRoadsRoutingLayerConfig(next);
                 return next;
               });
@@ -566,6 +524,21 @@ function AppShell() {
                 return next;
               });
             }}
+            onEnableAllSavedLayers={() => {
+              setRoadsRoutingNewConfig((prev) => {
+                let changed = false;
+                const next: typeof prev = { ...prev };
+                for (const [id, cur] of Object.entries(next)) {
+                  if (!cur.enabled) {
+                    next[id] = { ...cur, enabled: true };
+                    changed = true;
+                  }
+                }
+                if (!changed) return prev;
+                persistRoadsRoutingNewLayerConfig(next);
+                return next;
+              });
+            }}
             onRemoveLayer={(layerId) => {
               setRoadsRoutingNewConfig((prev) => {
                 const next = { ...prev };
@@ -584,11 +557,17 @@ function AppShell() {
           />
         )}
 
+        {activeWorkspace === 'atlas' && (
+          <AtlasWorkspace onTriggerToast={triggerToast} />
+        )}
+
+        {activeWorkspace === 'mobile-locus-export' && (
+          <LocusWorkspace onTriggerToast={triggerToast} />
+        )}
+
         {(activeWorkspace === 'administrative-layers' ||
           activeWorkspace === 'operational-layers' ||
           activeWorkspace === 'road-network-layers' ||
-          activeWorkspace === 'import-export' ||
-          activeWorkspace === 'feature-editor' ||
           activeWorkspace === 'raster-imagery') && (
           <DataLayerWorkspaces
             workspace={activeWorkspace}
@@ -689,9 +668,7 @@ function AppShell() {
           />
         )}
 
-        {(activeWorkspace === 'mobile-locus-export' ||
-          activeWorkspace === 'atlas-map-books' ||
-          activeWorkspace === 'reports-seizure-analytics' ||
+        {(activeWorkspace === 'reports-seizure-analytics' ||
           activeWorkspace === 'users-audit-trail') && (
           <OutputsGovernanceWorkspaces
             workspace={activeWorkspace}

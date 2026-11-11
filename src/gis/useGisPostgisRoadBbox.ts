@@ -13,7 +13,9 @@ export function useGisPostgisRoadBbox(
   layer: GisPostgisRoadLayer,
   enabled: boolean,
   bbox: MapBbox | null,
-  padDeg = 0.05
+  padDeg = 0.05,
+  /** Client-side fetch cap — keeps full/VSP responses drawable. */
+  limit = 8000
 ): GeoJSON.FeatureCollection {
   const [fc, setFc] = useState<GeoJSON.FeatureCollection>(EMPTY_FC);
 
@@ -30,19 +32,21 @@ export function useGisPostgisRoadBbox(
       north: bbox.north + padDeg,
     };
     const t = window.setTimeout(() => {
-      void fetchRoadsGeojson(layer, padded)
+      void fetchRoadsGeojson(layer, padded, limit)
         .then((data) => {
           if (!cancelled) setFc(data);
         })
-        .catch(() => {
+        .catch((err) => {
           if (!cancelled) setFc(EMPTY_FC);
+          // Surface once per failure window so Eye-on empty maps are diagnosable.
+          console.warn(`[gis-roads] ${layer} failed:`, err);
         });
     }, 280);
     return () => {
       cancelled = true;
       window.clearTimeout(t);
     };
-  }, [layer, enabled, bbox?.west, bbox?.south, bbox?.east, bbox?.north, padDeg]);
+  }, [layer, enabled, bbox?.west, bbox?.south, bbox?.east, bbox?.north, padDeg, limit]);
 
   return fc;
 }

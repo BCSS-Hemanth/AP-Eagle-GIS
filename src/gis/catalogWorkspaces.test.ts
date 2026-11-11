@@ -45,6 +45,8 @@ describe('catalogWorkspaces', () => {
     expect(admin.has('lyr-highways')).toBe(false);
     expect(admin.has('lyr-ap-roads-major')).toBe(false);
     expect(admin.has('lyr-ap-roads-full')).toBe(false);
+    expect(admin.has('lyr-railways')).toBe(false);
+    expect(roadNet.has('lyr-railways')).toBe(true);
     expect(ops.has('lyr-ops-main-roads')).toBe(false);
     expect(ops.has('lyr-ops-internal-roads')).toBe(false);
   });
@@ -81,7 +83,7 @@ describe('catalogWorkspaces', () => {
     );
     const scoped = layersInCatalogScope('road-network-layers', layers);
     const next = mergeEnabledLayersIntoRoutingNewConfig({}, scoped, null);
-    expect(next['lyr-ap-roads-major']?.enabled).toBe(true);
+    expect(next['lyr-ap-roads-major']?.enabled).toBe(false);
     expect(next['lyr-districts']).toBeUndefined();
     expect(isRoadsRoutingNewVisualLayer('lyr-ap-roads-major')).toBe(true);
   });
@@ -96,7 +98,7 @@ describe('catalogWorkspaces', () => {
     );
     // Dashboard-style: merge from full catalog, not OPS-only scope.
     const next = mergeEnabledLayersIntoRoutingNewConfig({}, layers, null);
-    expect(next['lyr-ap-roads-major']?.enabled).toBe(true);
+    expect(next['lyr-ap-roads-major']?.enabled).toBe(false);
     expect(next['lyr-checkposts']).toBeUndefined();
     expect(next['lyr-toll-plazas']).toBeUndefined();
   });

@@ -75,6 +75,12 @@ export const GisSourceRasterOverlays: React.FC<{
   rasterId: RasterBasemapId;
   drillLevel: string;
   showImageryOverlay?: boolean;
+  /**
+   * When false, do not auto-stack Esri / GIS-Source satellite AOIs on vector/topo at
+   * high zoom (Atlas View 2 must stay a clean OSM road map). Forced `showImageryOverlay`
+   * still wins.
+   */
+  autoSatelliteOverlay?: boolean;
   showHillshade?: boolean;
   showGoogleRoadmap?: boolean;
   showSoiTopo?: boolean;
@@ -86,6 +92,7 @@ export const GisSourceRasterOverlays: React.FC<{
   rasterId,
   drillLevel,
   showImageryOverlay = false,
+  autoSatelliteOverlay = true,
   showHillshade = false,
   showGoogleRoadmap = false,
   showSoiTopo = false,
@@ -107,7 +114,9 @@ export const GisSourceRasterOverlays: React.FC<{
    */
   const showSatellitePack =
     !gisSatBasemap &&
-    (showImageryOverlay || shouldOverlaySatellite(zoom, rasterId, drillLevel, false));
+    (showImageryOverlay ||
+      (autoSatelliteOverlay &&
+        shouldOverlaySatellite(zoom, rasterId, drillLevel, false)));
   /** Esri gap-fill under GIS-Source AOIs on vector/topo — not needed when basemap is already Esri. */
   const showEsriImageryGapFill = showSatellitePack;
   const showTerrain = showHillshade;

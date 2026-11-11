@@ -211,11 +211,12 @@
   pointer-events: none;
 }
 
-/* Isolated selection: outlines stay, fills stay clickable, basemap shows through. */
+/* Isolated selection: outlines stay, fills stay transparent so basemap shows through.
+   Do not force pointer-events:auto — that overrides Leaflet interactive:false and
+   blocks drag-to-pan when a district polygon covers the viewport. */
 .ap-leaflet-root.is-admin-drill .leaflet-admin-vectors-pane path {
   fill: rgba(0, 0, 0, 0) !important;
   fill-opacity: 0 !important;
-  pointer-events: auto;
 }
 
 .ap-leaflet-root.is-admin-drill .leaflet-overlay-pane .leaflet-tile-container,
@@ -226,6 +227,26 @@
 .ap-gis-marker {
   background: transparent;
   border: none;
+}
+
+.ap-ops-point,
+.ap-ops-checkpost-icon,
+.ap-ops-entry-point-icon,
+.ap-ops-exit-point-icon,
+.ap-ops-ps-icon {
+  background: transparent !important;
+  border: none !important;
+}
+
+.ap-ops-point__svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+  filter: drop-shadow(0 0 1px rgba(255, 255, 255, 0.95)) drop-shadow(0 1px 2px rgba(0, 0, 0, 0.55));
+}
+
+.ap-ops-ps-icon--selected .ap-ops-point__svg {
+  filter: drop-shadow(0 0 3px rgba(186, 26, 26, 0.95)) drop-shadow(0 1px 2px rgba(0, 0, 0, 0.5));
 }
 
 /* Police station name — shown only in click popup */
@@ -257,6 +278,22 @@
 .leaflet-tooltip {
   font-size: 11px;
   font-family: var(--font-sans);
+}
+
+.leaflet-tooltip.ap-entry-exit-tooltip {
+  font-size: 12px;
+  font-weight: 700;
+  color: #0f172a;
+  background: #ffffff;
+  border: 1px solid #94a3b8;
+  border-radius: 4px;
+  padding: 4px 8px;
+  box-shadow: 0 2px 6px rgba(15, 23, 42, 0.18);
+  white-space: nowrap;
+}
+
+.leaflet-tooltip.ap-entry-exit-tooltip::before {
+  border-top-color: #ffffff;
 }
 
 .leaflet-tooltip.ap-rail-tooltip,

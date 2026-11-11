@@ -1,4 +1,5 @@
 import type { GisLayer } from '../types/gis';
+import { filterFeaturesInParent } from './adminHierarchy';
 import { catalogModuleForLayer } from './catalogWorkspaces';
 import type { DashboardLayerConfig, DashboardLayerEntry, JsonStorage } from './dashboardLayers';
 import {
@@ -24,22 +25,25 @@ export const ROADS_ROUTING_NEW_VISUAL_LAYER_IDS = [
   'lyr-forest-trails',
 ] as const;
 
-/** Fallback swatch when a feature has no road class. */
+/** Fallback swatch when a feature has no road class (brighter map strokes). */
 export const ROADS_ROUTING_NEW_LAYER_COLORS: Record<string, string> = {
-  'lyr-highways': '#dc2626',
-  'lyr-ap-roads-full': '#7c3aed',
-  'lyr-ops-vsp-roads': '#7c3aed',
-  'lyr-ap-roads-major': '#16a34a',
-  'lyr-ops-main-roads': '#ea580c',
-  'lyr-ops-internal-roads': '#2563eb',
-  'lyr-forest-trails': '#ca8a04',
+  'lyr-highways': '#ef4444',
+  'lyr-ap-roads-full': '#a78bfa',
+  'lyr-ops-vsp-roads': '#a78bfa',
+  'lyr-ap-roads-major': '#4ade80',
+  'lyr-ops-main-roads': '#fb923c',
+  'lyr-ops-internal-roads': '#c4b5fd',
+  'lyr-forest-trails': '#a3e635',
 };
 
-/** Classified through-routes. Village roads, tracks, and footpaths are not drawn. */
+/**
+ * Classified through-routes. Village roads, tracks, and footpaths are not drawn.
+ * Weight 3 = half of Roads Routing route-alternative stroke (6).
+ */
 export const ROAD_ROUTE_CLASS_STROKES = {
-  national: { label: 'National Highway', color: '#dc2626', weight: 3.6 },
-  state: { label: 'State Highway', color: '#16a34a', weight: 2.8 },
-  district: { label: 'District Road', color: '#7c3aed', weight: 2.2 },
+  national: { label: 'National Highway', color: '#ef4444', weight: 3 },
+  state: { label: 'State Highway', color: '#4ade80', weight: 3 },
+  district: { label: 'District Road', color: '#a78bfa', weight: 3 },
 } as const;
 
 export type RoadRouteStroke = { color: string; weight: number };
@@ -97,7 +101,7 @@ export function routingNewLegendEntries(
   layerName: string
 ): Array<{ label: string; color: string }> {
   if (layerId === 'lyr-highways') {
-    return [{ label: ROAD_ROUTE_CLASS_STROKES.national.label, color: '#c2410c' }];
+    return [{ label: ROAD_ROUTE_CLASS_STROKES.national.label, color: ROAD_ROUTE_CLASS_STROKES.national.color }];
   }
   if (layerId === 'lyr-ap-roads-full' || layerId === 'lyr-ops-vsp-roads' || layerId === 'lyr-ap-roads-major') {
     return [
@@ -123,13 +127,19 @@ export function isRoadsRoutingNewCatalogLayer(layer: GisLayer): boolean {
   );
 }
 
-/** Drawn statewide when the Eye is on (same as Roads Routing map flags). */
+/**
+ * Drawn from the live map when the Eye is on (same path as Roads Routing).
+ * Includes PostGIS bbox layers (full / VSP) so Eye-on shows the network without
+ * waiting on POI radius overlays.
+ */
 const ROUTING_NEW_MAP_FLAG_LAYER_IDS = new Set([
   'lyr-highways',
   'lyr-forest-trails',
   'lyr-ops-main-roads',
   'lyr-ops-internal-roads',
   'lyr-ap-roads-major',
+  'lyr-ap-roads-full',
+  'lyr-ops-vsp-roads',
 ]);
 
 /**
@@ -219,6 +229,12 @@ export type AoiBbox = {
   padDeg: number;
 };
 
+const KM_PER_DEG_LAT = 110.574;
+
+function kmPerDegLon(lat: number): number {
+  return 111.32 * Math.cos((lat * Math.PI) / 180);
+}
+
 export function bufferPadDeg(bufferKm: number): number {
   return Math.max(0.02, bufferKm / 111);
 }
@@ -246,6 +262,254 @@ export function aoiBboxFromPoiPoints(points: LonLat[], bufferKm: number): AoiBbo
     north: north + padDeg,
     padDeg,
   };
+}
+
+/** Fixed half-width (km) of the A→B road corridor. Not user-editable. */
+export const POI_CORRIDOR_HALF_WIDTH_KM = 40;
+
+function distanceKm(a: LonLat, b: LonLat): number {
+  const lat0 = (a.lat + b.lat) / 2;
+  return Math.hypot((a.lon - b.lon) * kmPerDegLon(lat0), (a.lat - b.lat) * KM_PER_DEG_LAT);
+}
+
+function distancePointToSegmentKm(lon: number, lat: number, a: LonLat, b: LonLat): number {
+  const lat0 = (a.lat + b.lat + lat) / 3;
+  const px = lon * kmPerDegLon(lat0);
+  const py = lat * KM_PER_DEG_LAT;
+  const ax = a.lon * kmPerDegLon(lat0);
+  const ay = a.lat * KM_PER_DEG_LAT;
+  const bx = b.lon * kmPerDegLon(lat0);
+  const by = b.lat * KM_PER_DEG_LAT;
+  const abx = bx - ax;
+  const aby = by - ay;
+  const apx = px - ax;
+  const apy = py - ay;
+  const ab2 = abx * abx + aby * aby;
+  if (ab2 < 1e-12) return Math.hypot(apx, apy);
+  const t = Math.max(0, Math.min(1, (apx * abx + apy * aby) / ab2));
+  return Math.hypot(px - (ax + abx * t), py - (ay + aby * t));
+}
+
+/** Sample centres along the pin polyline so circle-union approximates the corridor. */
+export function densifyPoiSpine(points: LonLat[], stepKm: number): LonLat[] {
+  if (!points.length) return [];
+  if (points.length === 1 || stepKm <= 0) return points.map((p) => ({ lon: p.lon, lat: p.lat }));
+  const out: LonLat[] = [{ lon: points[0].lon, lat: points[0].lat }];
+  for (let i = 0; i < points.length - 1; i++) {
+    const a = points[i];
+    const b = points[i + 1];
+    const len = distanceKm(a, b);
+    if (len < 1e-6) {
+      out.push({ lon: b.lon, lat: b.lat });
+      continue;
+    }
+    const n = Math.max(1, Math.ceil(len / stepKm));
+    for (let s = 1; s <= n; s++) {
+      const t = s / n;
+      out.push({
+        lon: a.lon + (b.lon - a.lon) * t,
+        lat: a.lat + (b.lat - a.lat) * t,
+      });
+    }
+  }
+  return out;
+}
+
+/** Distance (km) to the pin corridor spine (circle around one pin; stadium for 2+). */
+export function distanceToPoiCorridorKm(lon: number, lat: number, points: LonLat[]): number {
+  if (!points.length) return Number.POSITIVE_INFINITY;
+  if (points.length === 1) return distanceKm({ lon, lat }, points[0]);
+  let best = Number.POSITIVE_INFINITY;
+  for (let i = 0; i < points.length - 1; i++) {
+    best = Math.min(best, distancePointToSegmentKm(lon, lat, points[i], points[i + 1]));
+  }
+  return best;
+}
+
+export function pointInPoiCorridor(
+  lon: number,
+  lat: number,
+  points: LonLat[],
+  halfWidthKm: number = POI_CORRIDOR_HALF_WIDTH_KM
+): boolean {
+  return (
+    points.length > 0 &&
+    halfWidthKm > 0 &&
+    distanceToPoiCorridorKm(lon, lat, points) <= halfWidthKm + 1e-6
+  );
+}
+
+/** @deprecated Use pointInPoiCorridor — kept for older call sites/tests. */
+export function pointInPoiAoi(
+  lon: number,
+  lat: number,
+  points: LonLat[],
+  halfWidthKm: number = POI_CORRIDOR_HALF_WIDTH_KM
+): boolean {
+  return pointInPoiCorridor(lon, lat, points, halfWidthKm);
+}
+
+function circleRing(center: LonLat, radiusKm: number, segments = 48): number[][] {
+  const ring: number[][] = [];
+  for (let i = 0; i <= segments; i++) {
+    const ang = (i / segments) * Math.PI * 2;
+    const dLat = (Math.sin(ang) * radiusKm) / KM_PER_DEG_LAT;
+    const dLon = (Math.cos(ang) * radiusKm) / kmPerDegLon(center.lat);
+    ring.push([center.lon + dLon, center.lat + dLat]);
+  }
+  return ring;
+}
+
+function convexHullRing(pts: number[][]): number[][] {
+  const uniq = new Map<string, number[]>();
+  for (const p of pts) {
+    if (!Number.isFinite(p[0]) || !Number.isFinite(p[1])) continue;
+    uniq.set(`${p[0].toFixed(7)},${p[1].toFixed(7)}`, p);
+  }
+  const points = [...uniq.values()].sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+  if (points.length < 3) {
+    if (!points.length) return [];
+    const c = points[0];
+    return [c, c, c, c];
+  }
+  const cross = (o: number[], a: number[], b: number[]) =>
+    (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0]);
+  const lower: number[][] = [];
+  for (const p of points) {
+    while (lower.length >= 2 && cross(lower[lower.length - 2], lower[lower.length - 1], p) <= 0) {
+      lower.pop();
+    }
+    lower.push(p);
+  }
+  const upper: number[][] = [];
+  for (let i = points.length - 1; i >= 0; i--) {
+    const p = points[i];
+    while (upper.length >= 2 && cross(upper[upper.length - 2], upper[upper.length - 1], p) <= 0) {
+      upper.pop();
+    }
+    upper.push(p);
+  }
+  lower.pop();
+  upper.pop();
+  const ring = lower.concat(upper);
+  if (
+    ring.length &&
+    (ring[0][0] !== ring[ring.length - 1][0] || ring[0][1] !== ring[ring.length - 1][1])
+  ) {
+    ring.push([ring[0][0], ring[0][1]]);
+  }
+  return ring;
+}
+
+function stadiumRing(a: LonLat, b: LonLat, halfWidthKm: number, segments = 36): number[][] {
+  return convexHullRing([
+    ...circleRing(a, halfWidthKm, segments),
+    ...circleRing(b, halfWidthKm, segments),
+  ]);
+}
+
+/**
+ * Corridor polygon along the pin order (stadium/capsule per segment).
+ * Used for spatial filtering only — not drawn on the map.
+ */
+export function poiCorridorClipFeature(
+  points: LonLat[],
+  halfWidthKm: number = POI_CORRIDOR_HALF_WIDTH_KM
+): GeoJSON.Feature | null {
+  if (!points.length || !(halfWidthKm > 0)) return null;
+  if (points.length === 1) {
+    const ring = circleRing(points[0], halfWidthKm);
+    if (ring.length < 4) return null;
+    return {
+      type: 'Feature',
+      properties: { _rrn_corridor: true, halfWidthKm, pins: 1 },
+      geometry: { type: 'Polygon', coordinates: [ring] },
+    };
+  }
+  const rings: number[][][] = [];
+  for (let i = 0; i < points.length - 1; i++) {
+    const ring = stadiumRing(points[i], points[i + 1], halfWidthKm);
+    if (ring.length >= 4) rings.push(ring);
+  }
+  if (!rings.length) return null;
+  return {
+    type: 'Feature',
+    properties: { _rrn_corridor: true, halfWidthKm, pins: points.length },
+    geometry:
+      rings.length === 1
+        ? { type: 'Polygon', coordinates: [rings[0]] }
+        : { type: 'MultiPolygon', coordinates: rings.map((ring) => [ring]) },
+  };
+}
+
+/** @deprecated Use poiCorridorClipFeature. */
+export function poiAoiClipFeature(
+  points: LonLat[],
+  halfWidthKm: number = POI_CORRIDOR_HALF_WIDTH_KM
+): GeoJSON.Feature | null {
+  return poiCorridorClipFeature(points, halfWidthKm);
+}
+
+/**
+ * Keep only features inside the pin-to-pin road corridor.
+ * Points: must lie in the corridor. Lines: clipped to the corridor. Polygons: clipped.
+ */
+export function filterCollectionToPoiAoi(
+  collection: GeoJSON.FeatureCollection | null | undefined,
+  points: LonLat[],
+  halfWidthKm: number = POI_CORRIDOR_HALF_WIDTH_KM
+): GeoJSON.FeatureCollection {
+  const empty: GeoJSON.FeatureCollection = { type: 'FeatureCollection', features: [] };
+  if (!collection?.features?.length || !points.length || halfWidthKm <= 0) return empty;
+  const clip = poiCorridorClipFeature(points, halfWidthKm);
+  if (!clip) return empty;
+  const spine = densifyPoiSpine(points, Math.max(halfWidthKm / 2, 2));
+  const out: GeoJSON.Feature[] = [];
+  for (const feature of collection.features) {
+    const geom = feature.geometry;
+    if (!geom) continue;
+    if (geom.type === 'Point') {
+      const [lon, lat] = geom.coordinates;
+      if (pointInPoiCorridor(lon, lat, points, halfWidthKm)) out.push(feature);
+      continue;
+    }
+    if (geom.type === 'MultiPoint') {
+      const kept = geom.coordinates.filter(([lon, lat]) =>
+        pointInPoiCorridor(lon, lat, points, halfWidthKm)
+      );
+      if (kept.length) {
+        out.push({
+          ...feature,
+          geometry:
+            kept.length === 1
+              ? { type: 'Point', coordinates: kept[0] }
+              : { type: 'MultiPoint', coordinates: kept },
+        });
+      }
+      continue;
+    }
+    if (geom.type === 'LineString' || geom.type === 'MultiLineString') {
+      const clipped = clipFeatureToPoiRadius(feature, spine, halfWidthKm);
+      if (clipped) out.push(clipped);
+      continue;
+    }
+    if (geom.type === 'Polygon' || geom.type === 'MultiPolygon') {
+      out.push(...filterFeaturesInParent([feature], clip));
+      continue;
+    }
+    if (geom.type === 'GeometryCollection') {
+      const sub: GeoJSON.FeatureCollection = {
+        type: 'FeatureCollection',
+        features: geom.geometries.map((g) => ({
+          type: 'Feature' as const,
+          properties: feature.properties,
+          geometry: g,
+        })),
+      };
+      out.push(...filterCollectionToPoiAoi(sub, points, halfWidthKm).features);
+    }
+  }
+  return { type: 'FeatureCollection', features: out };
 }
 
 /** @deprecated Prefer aoiBboxFromPoiPoints — kept for two-point call sites/tests. */
@@ -349,12 +613,6 @@ export function dedupeRoadFeatures(
 }
 
 export type PoiRef = LonLat & { id: string; label: string };
-
-const KM_PER_DEG_LAT = 110.574;
-
-function kmPerDegLon(lat: number): number {
-  return 111.32 * Math.cos((lat * Math.PI) / 180);
-}
 
 /** Query box that contains a circle of `bufferKm` around one point. */
 export function radiusQueryBbox(
@@ -514,14 +772,15 @@ export function poiBufferBoxes(
 }
 
 /**
- * Tag each road feature with the POI ids whose radius it enters.
- * `clip: true` (default) cuts the line at the radius.
- * `clip: false` keeps the whole segment once any part enters a radius, so a highway reads as a route.
+ * Tag each road feature with the POI ids whose corridor it enters.
+ * `clip: true` (default) cuts the line at the corridor edge.
+ * `clip: false` keeps the whole segment once any part enters the corridor.
+ * `bufferKm` is the corridor half-width (defaults to POI_CORRIDOR_HALF_WIDTH_KM).
  */
 export function associateFeaturesWithPois(
   fc: GeoJSON.FeatureCollection,
   points: PoiRef[],
-  bufferKm: number,
+  bufferKm: number = POI_CORRIDOR_HALF_WIDTH_KM,
   options?: { clip?: boolean }
 ): {
   features: GeoJSON.Feature[];
@@ -531,20 +790,30 @@ export function associateFeaturesWithPois(
 } {
   const clip = options?.clip !== false;
   const tagged: GeoJSON.Feature[] = [];
+  const halfWidthKm = bufferKm > 0 ? bufferKm : POI_CORRIDOR_HALF_WIDTH_KM;
+  const spine = densifyPoiSpine(points, Math.max(halfWidthKm / 2, 2));
+  if (!spine.length) {
+    return {
+      features: [],
+      count: 0,
+      byPoi: Object.fromEntries(points.map((p) => [p.id, 0])),
+      sharedCount: 0,
+    };
+  }
 
   for (const feature of fc.features) {
     const hitIds: string[] = [];
     for (const point of points) {
-      const clipped = clipFeatureToPoiRadius(feature, [point], bufferKm);
-      if (clipped) hitIds.push(point.id);
+      const nearPin = clipFeatureToPoiRadius(feature, [point], halfWidthKm);
+      if (nearPin) hitIds.push(point.id);
     }
-    if (!hitIds.length) continue;
+    const inCorridor = Boolean(clipFeatureToPoiRadius(feature, spine, halfWidthKm));
+    if (!hitIds.length && !inCorridor) continue;
+    if (!hitIds.length && inCorridor) {
+      for (const point of points) hitIds.push(point.id);
+    }
     const clipped = clip
-      ? clipFeatureToPoiRadius(
-          feature,
-          points.filter((p) => hitIds.includes(p.id)),
-          bufferKm
-        )
+      ? clipFeatureToPoiRadius(feature, spine, halfWidthKm)
       : feature;
     if (!clipped) continue;
     tagged.push({

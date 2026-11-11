@@ -60,9 +60,8 @@ const ROLE_WORKSPACES: Record<RoleId, WorkspaceId[]> = {
   STATE_SPATIAL_ADMIN: ALL_WORKSPACES,
   FIELD_COMMANDER_EAGLE: [
     'ndps-spatial-dashboard',
-    'interactive-map',
-    'feature-editor',
     'mobile-locus-export',
+    'atlas',
     'reports-seizure-analytics',
     'raster-imagery',
     'operational-layers',
@@ -72,16 +71,16 @@ const ROLE_WORKSPACES: Record<RoleId, WorkspaceId[]> = {
   ],
   DISTRICT_NODAL_ASR: [
     'ndps-spatial-dashboard',
-    'interactive-map',
     'administrative-layers',
     'operational-layers',
     'road-network-layers',
     'roads-routing',
     'roads-routing-new',
+    'atlas',
     'reports-seizure-analytics',
     'mobile-locus-export',
   ],
-  ANALYST_VIEWER: ['ndps-spatial-dashboard', 'interactive-map', 'reports-seizure-analytics'],
+  ANALYST_VIEWER: ['ndps-spatial-dashboard', 'atlas', 'reports-seizure-analytics'],
 };
 
 const ROLE_PERMISSIONS: Record<RoleId, Permission[]> = {

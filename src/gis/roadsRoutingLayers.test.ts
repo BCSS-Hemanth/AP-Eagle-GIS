@@ -14,15 +14,15 @@ describe('roadsRoutingLayers', () => {
         : { ...l, enabled: false }
     );
     const first = mergeEnabledLayersIntoRoutingConfig({}, layers, ['grp-admin']);
-    expect(first['lyr-pss']?.enabled).toBe(true);
+    expect(first['lyr-pss']?.enabled).toBe(false);
     expect(first['lyr-checkposts']).toBeUndefined();
 
     const withOps = layers.map((l) =>
       l.id === 'lyr-checkposts' ? { ...l, enabled: true } : l
     );
     const second = mergeEnabledLayersIntoRoutingConfig(first, withOps, ['grp-ops']);
-    expect(second['lyr-pss']?.enabled).toBe(true);
-    expect(second['lyr-checkposts']?.enabled).toBe(true);
+    expect(second['lyr-pss']?.enabled).toBe(false);
+    expect(second['lyr-checkposts']?.enabled).toBe(false);
   });
 
   it('keeps saved layers in the list when map visibility is toggled off', () => {

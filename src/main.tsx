@@ -1,9 +1,13 @@
 import React from 'react';
 import { createRoot } from 'react-dom/client';
 import App from './App.tsx';
+import { clearPersistedLayerSelections } from './gis/clearPersistedLayerSelections';
 import 'leaflet/dist/leaflet.css';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import './index.css';
+
+/** Every load / hard refresh starts with no saved layer picks (new-session behaviour). */
+clearPersistedLayerSelections();
 
 class RootErrorBoundary extends React.Component<
   { children: React.ReactNode },

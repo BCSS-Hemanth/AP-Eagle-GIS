@@ -1,23 +1,12 @@
 import React, { useState } from 'react';
-import {
-  BookOpen,
-  Download,
-  FileSpreadsheet,
-  Share2,
-  ShieldCheck,
-} from 'lucide-react';
+import { Download, FileSpreadsheet, ShieldCheck } from 'lucide-react';
 import { AuditLogEntry, GisLayer, WorkspaceId } from '../../types/gis';
 import { INITIAL_SEIZURE_REPORT_ROWS } from '../../data/apGisData';
 import { downloadTextFile } from '../../utils/geoMath';
 import { useAuth } from '../../auth/AuthContext';
-import { MapFormatExportButtons } from '../gis/MapFormatExportButtons';
 
 interface OutputsGovProps {
-  workspace:
-    | 'mobile-locus-export'
-    | 'atlas-map-books'
-    | 'reports-seizure-analytics'
-    | 'users-audit-trail';
+  workspace: 'reports-seizure-analytics' | 'users-audit-trail';
   layers: GisLayer[];
   auditLogs: AuditLogEntry[];
   onSwitchWorkspace: (ws: WorkspaceId) => void;
@@ -26,215 +15,13 @@ interface OutputsGovProps {
 
 export const OutputsGovernanceWorkspaces: React.FC<OutputsGovProps> = ({
   workspace,
-  layers,
+  layers: _layers,
   auditLogs,
   onSwitchWorkspace,
   onTriggerToast,
 }) => {
   const { can } = useAuth();
-  // Mobile GPKG state
-  const [selectedSector, setSelectedSector] = useState('ASR Agency Full Extent (Paderu + Araku + Chintapalle)');
-  const [includeMbTiles, setIncludeMbTiles] = useState(true);
-
-  // Atlas Map Book state
-  const [activeSheetIdx, setActiveSheetIdx] = useState(0);
-
-  // Reports horizon
   const [reportPeriod, setReportPeriod] = useState<'FY25-26' | 'Q3-2026'>('FY25-26');
-
-  if (workspace === 'mobile-locus-export') {
-    const enabledCount = layers.filter((l) => l.enabled).length;
-    const estSizeMb = (enabledCount * 3.4 + (includeMbTiles ? 64.5 : 0)).toFixed(1);
-
-    const handleDownloadGpkgManifest = () => {
-      if (!can('export')) {
-        onTriggerToast('Export denied for your RBAC clearance');
-        return;
-      }
-      const manifest = {
-        packageFormat: 'Locus Map / OGC GeoPackage field package',
-        targetPlatform: 'Locus Map and compatible open-source mobile GIS',
-        sectorExtent: selectedSector,
-        crs: 'EPSG:4326',
-        offlineSatelliteTilesIncluded: includeMbTiles,
-        bundledLayers: layers.filter((l) => l.enabled).map((l) => l.sourceTable),
-        estimatedSizeMB: Number(estSizeMb),
-        generatedAt: new Date().toISOString(),
-      };
-      downloadTextFile('eagle_locus_mobile_export_manifest.json', JSON.stringify(manifest, null, 2));
-      onTriggerToast(`Prepared Locus / mobile GIS export manifest (${estSizeMb} MB est.)`);
-    };
-
-    return (
-      <div className="p-4 pb-10 lg:p-6 lg:pb-12 space-y-5 max-w-5xl mx-auto">
-        <div className="border-b border-outline-variant/35 pb-3">
-          <span className="text-[10.5px] font-bold uppercase tracking-wider text-secondary block">
-            M3.5 Mobile GIS / Locus (DOCX §6)
-          </span>
-          <h1 className="text-xl font-bold text-primary tracking-tight">
-            Prepare &amp; export approved layers for Locus Map
-          </h1>
-        </div>
-
-        <div className="bg-surface-container-lowest rounded border border-outline-variant/40 p-5 space-y-4 text-xs">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div>
-              <label className="block font-semibold text-primary mb-1">
-                Operational Bounding Extent
-              </label>
-              <select
-                value={selectedSector}
-                onChange={(e) => setSelectedSector(e.target.value)}
-                className="w-full h-9 px-2.5 rounded border border-outline-variant/50 bg-surface-container-low"
-              >
-                <option>ASR Agency Full Extent (Paderu + Araku + Chintapalle)</option>
-                <option>NH-16 Coastal Interception Corridor (Srikakulam – Nellore)</option>
-                <option>Odisha–AP Koraput–Malkangiri Border Buffer (25km)</option>
-              </select>
-            </div>
-            <div className="p-3 rounded bg-surface-container-low border border-outline-variant/35 flex items-center justify-between tabular-coord">
-              <div>
-                <div className="text-[10.5px] text-on-surface-variant font-semibold uppercase">
-                  Estimated Tablet Bundle
-                </div>
-                <div className="text-lg font-bold font-mono text-primary">{estSizeMb} MB</div>
-              </div>
-              <span className="px-2 py-1 rounded bg-secondary-container/50 text-on-secondary-container font-bold">
-                {enabledCount} Vector Layers
-              </span>
-            </div>
-          </div>
-
-          <label className="flex items-center gap-2 cursor-pointer pt-1">
-            <input
-              type="checkbox"
-              checked={includeMbTiles}
-              onChange={(e) => setIncludeMbTiles(e.target.checked)}
-              className="accent-primary"
-            />
-            <span className="font-medium">
-              Embed SOI 1:50K + Cartosat-3 Pyramid Raster Tiles (.mbtiles Zoom 10–17) for VHF-only forest zones
-            </span>
-          </label>
-
-          <div className="pt-2 flex justify-end gap-2">
-            <button
-              type="button"
-              data-testid="export-gpkg"
-              disabled={!can('export')}
-              onClick={handleDownloadGpkgManifest}
-              className="px-4 py-2 rounded bg-primary text-on-primary font-bold flex items-center gap-1.5 hover:bg-primary-container cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              <Share2 className="w-3.5 h-3.5" />
-              <span>Generate &amp; Download Field GPKG Bundle</span>
-            </button>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  if (workspace === 'atlas-map-books') {
-    const sheets: Array<{
-      id: string;
-      circle: string;
-      checkposts: number;
-      hotspots: number;
-      grid: string;
-    }> = [];
-    const current = sheets[activeSheetIdx];
-
-    return (
-      <div className="p-4 pb-10 lg:p-6 lg:pb-12 space-y-4 max-w-[1440px] mx-auto">
-        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-outline-variant/35 pb-3">
-          <div>
-            <span className="text-[10.5px] font-bold uppercase tracking-wider text-secondary block">
-              M3.2 Atlas &amp; Map Books
-            </span>
-            <h1 className="text-xl font-bold text-primary tracking-tight">
-              Circle &amp; Jurisdiction Atlas Map Book Generator
-            </h1>
-          </div>
-          <button
-            type="button"
-            onClick={() => onTriggerToast('No atlas sheets were provided')}
-            className="px-3 py-1.5 rounded bg-primary text-on-primary text-xs font-semibold flex items-center gap-1.5 cursor-pointer"
-          >
-            <BookOpen className="w-3.5 h-3.5" />
-            <span>Compile Full Circle Atlas</span>
-          </button>
-        </div>
-
-        <div className="rounded border border-outline-variant/40 bg-surface-container-lowest p-3">
-          <MapFormatExportButtons
-            layers={layers}
-            context="atlas-map-books"
-            canExport={can('export')}
-            onDenied={() => onTriggerToast('Export denied for your RBAC clearance')}
-            onToast={onTriggerToast}
-          />
-        </div>
-
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
-          <div className="lg:col-span-4 space-y-2">
-            {sheets.map((sh, idx) => (
-              <button
-                key={sh.id}
-                type="button"
-                onClick={() => setActiveSheetIdx(idx)}
-                className={`w-full p-3 rounded border text-left transition-colors cursor-pointer ${
-                  activeSheetIdx === idx
-                    ? 'bg-primary text-on-primary border-primary'
-                    : 'bg-surface-container-lowest border-outline-variant/40 hover:bg-surface-container-low'
-                }`}
-              >
-                <div className="text-[10.5px] font-mono opacity-80">
-                  ATLAS PAGE {sh.id} • SOI {sh.grid}
-                </div>
-                <div className="text-xs font-bold mt-0.5">{sh.circle}</div>
-              </button>
-            ))}
-          </div>
-
-          <div className="lg:col-span-8 bg-surface-container-lowest rounded border border-outline-variant/40 p-5 space-y-3 tabular-coord">
-            {!current ? (
-              <p className="text-sm text-on-surface-variant">
-                No circle atlas pages were provided. Nothing is generated until a jurisdiction sheet list exists.
-              </p>
-            ) : (
-              <>
-            <div className="flex items-center justify-between border-b border-outline-variant/30 pb-2">
-              <div>
-                <span className="text-[10px] font-mono font-bold text-secondary">
-                  PREVIEWING PAGE {activeSheetIdx + 1} OF {sheets.length}
-                </span>
-                <h2 className="text-base font-bold text-primary">{current.circle}</h2>
-              </div>
-              <span className="text-xs font-mono bg-surface-container px-2 py-1 rounded">
-                Grid {current.grid}
-              </span>
-            </div>
-            <div className="grid grid-cols-3 gap-3 text-xs">
-              <div className="p-3 rounded bg-surface-container-low">
-                <div className="text-on-surface-variant text-[10.5px]">Active Check Posts</div>
-                <div className="text-lg font-bold font-mono text-primary">{current.checkposts}</div>
-              </div>
-              <div className="p-3 rounded bg-surface-container-low">
-                <div className="text-on-surface-variant text-[10.5px]">Mapped Hotspots</div>
-                <div className="text-lg font-bold font-mono text-error">{current.hotspots}</div>
-              </div>
-              <div className="p-3 rounded bg-surface-container-low">
-                <div className="text-on-surface-variant text-[10.5px]">Scale Standard</div>
-                <div className="text-lg font-bold font-mono text-secondary">1:25,000</div>
-              </div>
-            </div>
-              </>
-            )}
-          </div>
-        </div>
-      </div>
-    );
-  }
 
   if (workspace === 'reports-seizure-analytics') {
     const rows = INITIAL_SEIZURE_REPORT_ROWS;

@@ -86,21 +86,15 @@ export function featureBbox(feature: GeoJSON.Feature): [number, number, number, 
   return [west, south, east, north];
 }
 
-export function featureCentroid(feature: GeoJSON.Feature): LonLat | null {
-  const ring = outerRings(feature.geometry)[0];
-  if (!ring || ring.length < 3) {
-    if (feature.geometry?.type === 'Point') {
-      const [lon, lat] = feature.geometry.coordinates;
-      return [lon, lat];
-    }
-    return null;
-  }
+function ringVertexCentroid(ring: LonLat[]): LonLat | null {
+  if (!ring || ring.length < 3) return null;
   let x = 0;
   let y = 0;
   let n = 0;
-  const limit = ring.length > 1 && ring[0][0] === ring[ring.length - 1][0] && ring[0][1] === ring[ring.length - 1][1]
-    ? ring.length - 1
-    : ring.length;
+  const limit =
+    ring.length > 1 && ring[0][0] === ring[ring.length - 1][0] && ring[0][1] === ring[ring.length - 1][1]
+      ? ring.length - 1
+      : ring.length;
   for (let i = 0; i < limit; i += 1) {
     x += ring[i][0];
     y += ring[i][1];
@@ -108,6 +102,54 @@ export function featureCentroid(feature: GeoJSON.Feature): LonLat | null {
   }
   if (!n) return null;
   return [x / n, y / n];
+}
+
+/** Approximate ring area for picking the dominant MultiPolygon part (not geodesic). */
+function ringSpanArea(ring: LonLat[]): number {
+  let area = 0;
+  const limit =
+    ring.length > 1 && ring[0][0] === ring[ring.length - 1][0] && ring[0][1] === ring[ring.length - 1][1]
+      ? ring.length - 1
+      : ring.length;
+  for (let i = 0; i < limit; i += 1) {
+    const [x0, y0] = ring[i];
+    const [x1, y1] = ring[(i + 1) % limit];
+    area += x0 * y1 - x1 * y0;
+  }
+  return Math.abs(area) * 0.5;
+}
+
+/**
+ * Centroid for parenting. MultiPolygons use the largest-area outer ring so a distant
+ * duplicate part cannot pull membership into the wrong 2022 district.
+ */
+export function featureCentroid(feature: GeoJSON.Feature): LonLat | null {
+  if (feature.geometry?.type === 'Point') {
+    const [lon, lat] = feature.geometry.coordinates;
+    return [lon, lat];
+  }
+  const rings = outerRings(feature.geometry);
+  if (!rings.length) return null;
+  let best = rings[0];
+  let bestArea = -1;
+  for (const ring of rings) {
+    const area = ringSpanArea(ring);
+    if (area > bestArea) {
+      bestArea = area;
+      best = ring;
+    }
+  }
+  return ringVertexCentroid(best);
+}
+
+function withParentDistrictName(feature: GeoJSON.Feature, parent: GeoJSON.Feature): GeoJSON.Feature {
+  const parentName = String(
+    (parent.properties as { district_name?: string } | null)?.district_name ?? ''
+  ).trim();
+  if (!parentName) return feature;
+  const props = (feature.properties ?? {}) as Record<string, unknown>;
+  if (props.district_name === parentName) return feature;
+  return { ...feature, properties: { ...props, district_name: parentName } };
 }
 
 function pointInRing(point: LonLat, ring: LonLat[]): boolean {
@@ -142,12 +184,85 @@ export function filterFeaturesInParent(
   const [west, south, east, north] = pb;
   return children.flatMap((child) => {
     const clipped = clipFeatureToParent(child, parent);
+    if (!clipped) return [];
     const c = featureCentroid(clipped);
     if (!c) return [];
     const [lon, lat] = c;
     if (lon < west || lon > east || lat < south || lat > north) return [];
-    return pointInFeature(c, parent) ? [clipped] : [];
+    return pointInFeature(c, parent) ? [withParentDistrictName(clipped, parent)] : [];
   });
+}
+
+function positionsTouchParent(coords: GeoJSON.Position[], parent: GeoJSON.Feature): boolean {
+  for (const c of coords) {
+    if (pointInFeature([c[0], c[1]], parent)) return true;
+  }
+  // Sparse lines can cross a district with no vertex inside — sample segment midpoints.
+  for (let i = 0; i < coords.length - 1; i += 1) {
+    const a = coords[i];
+    const b = coords[i + 1];
+    const mid: LonLat = [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2];
+    if (pointInFeature(mid, parent)) return true;
+  }
+  return false;
+}
+
+/** True when a feature lies inside or intersects the parent polygon (Atlas district filter). */
+export function featureIntersectsParent(
+  feature: GeoJSON.Feature,
+  parent: GeoJSON.Feature
+): boolean {
+  const geom = feature.geometry;
+  if (!geom) return false;
+  if (geom.type === 'Point') {
+    return pointInFeature([geom.coordinates[0], geom.coordinates[1]], parent);
+  }
+  if (geom.type === 'MultiPoint') {
+    return geom.coordinates.some((c) => pointInFeature([c[0], c[1]], parent));
+  }
+  if (geom.type === 'Polygon' || geom.type === 'MultiPolygon') {
+    if (filterFeaturesInParent([feature], parent).length > 0) return true;
+    // Larger overlays (state border, undivided hist districts) that contain the parent.
+    const parentCentroid = featureCentroid(parent);
+    return Boolean(parentCentroid && pointInFeature(parentCentroid, feature));
+  }
+  if (geom.type === 'LineString') {
+    return positionsTouchParent(geom.coordinates, parent);
+  }
+  if (geom.type === 'MultiLineString') {
+    return geom.coordinates.some((line) => positionsTouchParent(line, parent));
+  }
+  if (geom.type === 'GeometryCollection') {
+    return geom.geometries.some((g) =>
+      featureIntersectsParent({ type: 'Feature', properties: feature.properties, geometry: g }, parent)
+    );
+  }
+  return false;
+}
+
+/**
+ * Restrict a FeatureCollection to the parent district/mandal polygon.
+ * Polygons are clipped to parent parts; points/lines kept when they intersect.
+ */
+export function filterCollectionToParent(
+  collection: GeoJSON.FeatureCollection | null | undefined,
+  parent: GeoJSON.Feature | null | undefined
+): GeoJSON.FeatureCollection | null {
+  if (!collection) return null;
+  if (!parent) return collection;
+  const features = collection.features.flatMap((feature) => {
+    const geom = feature.geometry;
+    if (geom && (geom.type === 'Polygon' || geom.type === 'MultiPolygon')) {
+      const inside = filterFeaturesInParent([feature], parent);
+      if (inside.length) return inside;
+      // Keep containing overlays (e.g. AP state border around a selected district).
+      const parentCentroid = featureCentroid(parent);
+      if (parentCentroid && pointInFeature(parentCentroid, feature)) return [feature];
+      return [];
+    }
+    return featureIntersectsParent(feature, parent) ? [feature] : [];
+  });
+  return asFeatureCollection(features);
 }
 
 export function filterByAdminName(
@@ -191,13 +306,6 @@ function asPolygonFeature(feature: GeoJSON.Feature, coordinates: GeoJSON.Positio
   };
 }
 
-function bboxOverlaps(
-  a: [number, number, number, number],
-  b: [number, number, number, number]
-): boolean {
-  return !(a[2] < b[0] || a[0] > b[2] || a[3] < b[1] || a[1] > b[3]);
-}
-
 /**
  * Same mandal names exist in more than one district in the NWIC vintage, so the
  * dissolved file can be a MultiPolygon of distant parts. Isolation must use the
@@ -238,27 +346,43 @@ export function focusPolygonAtPoint(feature: GeoJSON.Feature, point: LonLat): Ge
   return best ? asPolygonFeature(feature, best) : feature;
 }
 
-/** Drop MultiPolygon parts that do not overlap the parent admin unit. */
-export function clipFeatureToParent(child: GeoJSON.Feature, parent: GeoJSON.Feature): GeoJSON.Feature {
+/** Ignore MultiPolygon shards smaller than this share of the largest part. */
+const SIGNIFICANT_MULTIPOLYGON_PART_RATIO = 0.05;
+
+/**
+ * Keep only significant polygon parts whose centroid lies in the parent.
+ * Tiny digitization shards must not pull a neighboring mandal into a 2022 district,
+ * but real multi-district names (e.g. Rajupalem) still resolve to the local part.
+ * Returns null when the feature does not belong in the parent.
+ */
+export function clipFeatureToParent(
+  child: GeoJSON.Feature,
+  parent: GeoJSON.Feature
+): GeoJSON.Feature | null {
   const geom = child.geometry;
-  if (!geom || geom.type !== 'MultiPolygon') return child;
-  const parentBox = featureBbox(parent);
-  const kept = geom.coordinates.filter((coords) => {
+  if (!geom) return null;
+  if (geom.type === 'Polygon') {
+    const centroid = featureCentroid(child);
+    return centroid && pointInFeature(centroid, parent) ? child : null;
+  }
+  if (geom.type !== 'MultiPolygon') return child;
+  const partAreas = geom.coordinates.map((coords) => ringSpanArea((coords[0] ?? []) as LonLat[]));
+  const maxArea = Math.max(0, ...partAreas);
+  const kept = geom.coordinates.filter((coords, index) => {
+    if (maxArea > 0 && partAreas[index] < maxArea * SIGNIFICANT_MULTIPOLYGON_PART_RATIO) {
+      return false;
+    }
     const part = asPolygonFeature(child, coords);
     const centroid = featureCentroid(part);
-    if (centroid && pointInFeature(centroid, parent)) return true;
-    const partBox = featureBbox(part);
-    return Boolean(parentBox && partBox && bboxOverlaps(partBox, parentBox));
+    return Boolean(centroid && pointInFeature(centroid, parent));
   });
+  if (kept.length === 0) return null;
   if (kept.length === 1) return asPolygonFeature(child, kept[0]);
-  if (kept.length > 1) {
-    return {
-      type: 'Feature',
-      properties: child.properties,
-      geometry: { type: 'MultiPolygon', coordinates: kept },
-    };
-  }
-  return child;
+  return {
+    type: 'Feature',
+    properties: child.properties,
+    geometry: { type: 'MultiPolygon', coordinates: kept },
+  };
 }
 
 /** Clip to parent (when known), then keep only the part at `point`. */
@@ -268,7 +392,7 @@ export function isolateChildFeature(
   parent?: GeoJSON.Feature | null
 ): GeoJSON.Feature {
   const clipped = parent ? clipFeatureToParent(feature, parent) : feature;
-  return focusPolygonAtPoint(clipped, point);
+  return focusPolygonAtPoint(clipped ?? feature, point);
 }
 
 /** Clockwise world ring in Leaflet [lat, lon] order, used as the invert-mask outer. */

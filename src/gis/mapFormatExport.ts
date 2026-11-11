@@ -1,6 +1,7 @@
 import JSZip from 'jszip';
 import type { GisLayer } from '../types/gis';
 import { downloadBlob, downloadTextFile } from '../utils/geoMath';
+import { captureDomToCanvas } from './captureDomCanvas';
 
 /** DOCX §7 map export / download / print formats. */
 export const MAP_EXPORT_FORMATS = [
@@ -34,14 +35,7 @@ export function queueMapFormatExport(options: {
 
 /** Capture a composed map sheet DOM node to a PNG canvas (then encode per format). */
 export async function captureSheetCanvas(sheetEl: HTMLElement): Promise<HTMLCanvasElement> {
-  const html2canvas = (await import('html2canvas')).default;
-  return html2canvas(sheetEl, {
-    backgroundColor: '#ffffff',
-    scale: 2,
-    useCORS: true,
-    allowTaint: true,
-    logging: false,
-  });
+  return captureDomToCanvas(sheetEl, { scale: 2, backgroundColor: '#ffffff' });
 }
 
 function canvasToBlob(canvas: HTMLCanvasElement, type: string, quality?: number): Promise<Blob> {

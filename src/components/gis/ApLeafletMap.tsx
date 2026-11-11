@@ -1,5 +1,6 @@
 import React, {
   createContext,
+  Component,
   forwardRef,
   useContext,
   useEffect,
@@ -7,6 +8,8 @@ import React, {
   useLayoutEffect,
   useMemo,
   useState,
+  type ErrorInfo,
+  type ReactNode,
 } from 'react';
 import {
   Circle,
@@ -53,6 +56,7 @@ import {
   drillFocusFeature,
   featureBbox,
   filterByAdminName,
+  filterCollectionToParent,
   filterFeaturesInParent,
   isApStateFocus,
   isIndiaOverview,
@@ -73,12 +77,27 @@ import {
 } from '../../data/apGeo';
 import type { GeodesicBufferRing } from '../../gis/geodesicBuffer';
 import { geodesicBufferCoordinates } from '../../gis/geodesicBuffer';
+import {
+  HEAVY_ROAD_MAX_FEATURES,
+  mapAllowsHeavyRoadVectors,
+  prepareClassifiedRoadFc,
+  prepareHeavyRoadFc,
+  preparePostgisFullNetworkFc,
+} from '../../gis/mapRoadRenderSafety';
+import { routeStrokeForProperties } from '../../gis/roadsRoutingNewLayers';
 import type { ApDistrictProperties } from '../../gis/useApBoundaries';
 import { GisSourceRasterOverlays } from './GisSourceRasterOverlays';
 import {
   formatFeatureTooltip,
   type LayerNameFallback,
 } from '../../gis/featureLabel';
+import { classifyEntryExit, entryExitHoverLabel } from '../../gis/entryExitPoint';
+import {
+  opsCheckpostIcon,
+  opsEntryPointIcon,
+  opsExitPointIcon,
+  opsPoliceStationIcon,
+} from '../../gis/opsPointIcons';
 import {
   coordsFromFeature,
   hotspotDetailsFromFeature,
@@ -109,6 +128,11 @@ import {
   shouldOverlayRoads,
   shouldOverlaySatellite,
 } from '../../gis/mapDetail';
+import {
+  OPS_INTERNAL_ROADS_COLOR,
+  OPS_INTERNAL_ROADS_OPACITY,
+  OPS_INTERNAL_ROADS_WEIGHT,
+} from '../../gis/opsRoadStyles';
 
 export type { AdminDrill, AdminDrillLevel } from '../../gis/adminHierarchy';
 
@@ -152,6 +176,11 @@ interface MarkerSpec {
   /** Optional second line in the hover tooltip (e.g. case count). */
   detail?: string;
   selected?: boolean;
+  /**
+   * NDPS location pins only: 0–1 heat halo (radial red→orange→yellow glow).
+   * Omitted / 0 keeps the plain red dot.
+   */
+  heatIntensity?: number;
 }
 
 interface ApLeafletMapProps {
@@ -190,6 +219,11 @@ interface ApLeafletMapProps {
   policeStationOpacity?: number;
   selectedPoliceStationId?: string;
   showImageryOverlay?: boolean;
+  /**
+   * Auto-stack Esri / GIS-Source satellite AOIs on vector/topo at high zoom.
+   * Set false for Atlas View 2 (OSM road map) so zoom-in stays sharp street tiles.
+   */
+  autoSatelliteOverlay?: boolean;
   showGoogleRoadmap?: boolean;
   showSoiTopo?: boolean;
   showDistrictsGisHist?: boolean;
@@ -204,9 +238,40 @@ interface ApLeafletMapProps {
   showPharmaHubs?: boolean;
   showDdacs?: boolean;
   showEntryExit?: boolean;
+  /**
+   * When true (Dashboard), hover labels say Entry Point / Exit Point from feature
+   * `name`, with distinct marker colours. Other workspaces keep the generic tip.
+   */
+  entryExitTypeLabels?: boolean;
   showStockPoints?: boolean;
   showOpsMainRoads?: boolean;
   showOpsInternalRoads?: boolean;
+  /**
+   * When true (Roads Routing / Roads Routing New only): viewport-gate and soft-cap
+   * dense road vectors. Default false so Atlas, Locus, Map Viewer, Dashboard keep
+   * their existing road-layer behaviour.
+   */
+  roadVectorSafety?: boolean;
+  /**
+   * Roads Routing only: Road Network layers stay visible at every zoom (no gate),
+   * with brighter colours and stroke weight half of route alternatives (3).
+   */
+  roadNetworkAlwaysOn?: boolean;
+  /**
+   * Opt-in layer filter (Roads Routing New POI AOI). Replaces admin-drill clipping for
+   * vector layers only — does not change camera framing. Default undefined keeps
+   * Atlas / Locus / Dashboard / Map Viewer behaviour unchanged.
+   */
+  filterMapLayers?: (
+    fc: GeoJSON.FeatureCollection
+  ) => GeoJSON.FeatureCollection;
+  /** Opt-in polygon used to filter police-station points (with filterMapLayers). */
+  layerClipFeature?: GeoJSON.Feature | null;
+  /**
+   * When set with filterMapLayers (Roads Routing New corridor), skip unclipped Esri
+   * transport tiles that would otherwise paint roads outside the corridor.
+   */
+  suppressUnclippedRoadTiles?: boolean;
   markers?: MarkerSpec[];
   selectedFeature?: InspectableFeature;
   digitizedFeatures?: DigitizedFeature[];
@@ -231,6 +296,9 @@ interface ApLeafletMapProps {
     color: string;
     weight?: number;
     opacity?: number;
+    /** Polygon fill; default false (road lines). Set true for filled polys. */
+    fill?: boolean;
+    fillOpacity?: number;
     visible?: boolean;
     featureStyle?: (feature: GeoJSON.Feature) => { color: string; weight?: number } | null;
   }>;
@@ -279,8 +347,23 @@ interface ApLeafletMapProps {
    * Neighbor states keep outline + name only for context.
    */
   maskOutsideAp?: boolean;
+  /**
+   * When false, district/mandal drill still spatially filters layers but does not
+   * paint an invert mask outside the focus polygon (Atlas keeps neighbors visible).
+   */
+  maskOutsideDrill?: boolean;
+  /**
+   * When false, mandal/village overlays follow only explicit show* flags
+   * (Atlas Eye toggles) instead of auto-showing on district drill.
+   */
+  autoAdminOverlays?: boolean;
   /** Skip the permanent “Andhra Pradesh” state pill. Neighbor names stay. */
   hideApStateLabel?: boolean;
+  /**
+   * Atlas/Locus overview: keep only Andhra Pradesh permanently labeled;
+   * other state names appear on hover over that state.
+   */
+  apOnlyPermanentStateLabels?: boolean;
   showScale?: boolean;
   showAttribution?: boolean;
   layoutRevision?: string | number;
@@ -316,8 +399,35 @@ interface ApLeafletMapProps {
   viewActive?: boolean;
 }
 
-function markerIcon(kind: MarkerSpec['kind'], selected: boolean, badge?: string): DivIcon {
+function markerIcon(
+  kind: MarkerSpec['kind'],
+  selected: boolean,
+  badge?: string,
+  heatIntensity = 0
+): DivIcon {
   if (kind === 'location') {
+    const heat = Math.max(0, Math.min(1, heatIntensity));
+    if (heat > 0) {
+      // Strong red core + wide orange/yellow falloff (reference NDPS heat styling).
+      const halo = Math.round(56 + heat * 28);
+      const core = selected ? 12 : 10;
+      return L.divIcon({
+        className: 'ap-gis-marker ap-gis-marker-location ap-gis-marker-location--heat',
+        iconSize: [halo, halo],
+        iconAnchor: [halo / 2, halo / 2],
+        html: `<div style="position:relative;width:${halo}px;height:${halo}px;pointer-events:none;">
+  <div style="position:absolute;inset:0;border-radius:999px;background:radial-gradient(circle closest-side,
+    rgba(185,28,28,0.98) 0%,
+    rgba(220,38,38,0.92) 12%,
+    rgba(239,68,68,0.78) 22%,
+    rgba(249,115,22,0.55) 38%,
+    rgba(234,179,8,0.28) 55%,
+    rgba(132,204,22,0.12) 70%,
+    transparent 82%);"></div>
+  <div style="position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);width:${core}px;height:${core}px;border-radius:999px;background:#e11d48;border:1.5px solid #0f172a;box-shadow:0 0 0 1px rgba(255,255,255,0.35);"></div>
+</div>`,
+      });
+    }
     const size = selected ? 16 : 12;
     return L.divIcon({
       className: 'ap-gis-marker ap-gis-marker-location',
@@ -355,15 +465,11 @@ function featureBounds(feature: GeoJSON.Feature): L.LatLngBounds | null {
 }
 
 function bindIsolateClick(layer: L.Layer, onClick: (e: L.LeafletMouseEvent) => void) {
-  layer.on('mouseover', () => {
-    const map = (layer as L.Layer & { _map?: L.Map })._map;
-    map?.dragging.disable();
-  });
-  layer.on('mouseout', () => {
-    const map = (layer as L.Layer & { _map?: L.Map })._map;
-    map?.dragging.enable();
-  });
+  // Never disable map.dragging on hover: admin polygons often fill the viewport after
+  // zoom-in, mouseout never fires, and pan stays dead while wheel-zoom still works.
   layer.on('click', (e: L.LeafletMouseEvent) => {
+    const map = (layer as L.Layer & { _map?: L.Map })._map;
+    if (map && mapIsBusy(map)) return;
     L.DomEvent.stopPropagation(e);
     onClick(e);
   });
@@ -520,8 +626,9 @@ const MapController = forwardRef<
     const lastApFocus = React.useRef<boolean | null>(null);
     useEffect(() => {
       if (!viewActive) return;
-      // Locked boundsView owns maxBounds/minZoom — do not reset to India envelope.
-      if (boundsView?.lock) {
+      // Any active boundsView owns the camera frame (Atlas district fit, Routing New state zoom).
+      // Do not yank the view back to statewide AP / India while it is set.
+      if (boundsView) {
         lastApFocus.current = apFocused;
         return;
       }
@@ -559,7 +666,7 @@ const MapController = forwardRef<
             ? 14
             : 11;
       map.fitBounds(bounds, { padding: [28, 28], maxZoom: Math.min(maxZoom, MAP_CAMERA_MAX_ZOOM), animate: true });
-    }, [map, clipKey, clipFeature, viewActive, apFocused, boundsView?.lock]);
+    }, [map, clipKey, clipFeature, viewActive, apFocused, boundsView]);
     const lastViewToken = React.useRef<number | null>(null);
     useEffect(() => {
       if (!viewTarget || clipFeature) return;
@@ -570,7 +677,8 @@ const MapController = forwardRef<
     }, [map, viewTarget, clipFeature]);
     const lastBoundsToken = React.useRef<string | number | null>(null);
     useEffect(() => {
-      if (!boundsView || clipFeature) return;
+      // boundsView owns framing (Atlas district majority fit) even when layers are clipped.
+      if (!boundsView) return;
       if (lastBoundsToken.current === boundsView.token) return;
       lastBoundsToken.current = boundsView.token;
       const bounds = L.latLngBounds(
@@ -579,7 +687,8 @@ const MapController = forwardRef<
       );
       if (!bounds.isValid()) return;
       map.invalidateSize({ animate: false });
-      const fitPad = boundsView.padRatio ?? 0.5;
+      // Modest pad keeps the focus geometry dominant while leaving neighbors in frame.
+      const fitPad = boundsView.padRatio ?? 0.12;
       const fitTarget = bounds.pad(fitPad);
       if (boundsView.lock) {
         const lockPad = boundsView.lockPadRatio ?? Math.max(fitPad, 0.12);
@@ -596,13 +705,16 @@ const MapController = forwardRef<
             )
           );
         }
+      } else {
+        // Clear any prior isolation so surrounding geography stays pannable.
+        constrainToFeature(map, null);
       }
       map.fitBounds(fitTarget, {
-        padding: [28, 28],
-        maxZoom: boundsView.maxZoom ?? 7,
+        padding: [36, 36],
+        maxZoom: boundsView.maxZoom ?? 10,
         animate: true,
       });
-    }, [map, boundsView, clipFeature]);
+    }, [map, boundsView]);
     useMapEvents({
       moveend: () => {
         if (!viewActive) return;
@@ -840,6 +952,11 @@ const AdminPolygonLayers: React.FC<{
     if ((level === 'mandal' || level === 'village') && adminDrill?.mandalName) {
       return asFeatureCollection(filterByAdminName(villages.features, 'mandal_name', adminDrill.mandalName));
     }
+    if (level === 'district' && adminDrill?.districtFeature) {
+      return asFeatureCollection(
+        filterFeaturesInParent(villages.features, adminDrill.districtFeature)
+      );
+    }
     return villages;
   }, [villages, adminDrill, showVillages]);
 
@@ -866,10 +983,10 @@ const AdminPolygonLayers: React.FC<{
           pane="admin-vectors"
           data={mandalCollection}
           style={{
-            color: '#475569',
-            weight: zoom >= 9 ? 0.85 : 0.55,
-            fillColor: '#94a3b8',
-            fillOpacity: adminDrill && adminDrill.level !== 'state' ? 0 : 0.12 * mandalOpacity,
+            color: '#000000',
+            weight: zoom >= 9 ? 1.6 : 1.2,
+            fillColor: '#000000',
+            fillOpacity: 0,
             opacity: mandalOpacity,
           }}
           onEachFeature={(feature, layer) => {
@@ -893,10 +1010,10 @@ const AdminPolygonLayers: React.FC<{
           pane="admin-vectors"
           data={villageCollection}
           style={{
-            color: '#334155',
-            weight: 0.5,
-            fillColor: '#cbd5e1',
-            fillOpacity: adminDrill && adminDrill.level !== 'state' ? 0 : 0.18 * villageOpacity,
+            color: '#000000',
+            weight: zoom >= 10 ? 1.1 : 0.85,
+            fillColor: '#000000',
+            fillOpacity: 0,
             opacity: villageOpacity,
           }}
           onEachFeature={(feature, layer) => {
@@ -967,15 +1084,9 @@ const PoliceStationLayer: React.FC<{
   onPoliceStationClick?: ApLeafletMapProps['onPoliceStationClick'];
 }> = ({ enabled, opacity, selectedId, clipFeature, onPoliceStationClick }) => {
   const map = useMap();
-  const [zoom, setZoom] = useState(map.getZoom());
   const [paneReady, setPaneReady] = useState(() => Boolean(map.getPane('ps-markers')));
 
-  useMapEvents({
-    zoomend: () => setZoom(map.getZoom()),
-    zoom: () => setZoom(map.getZoom()),
-  });
-
-  // Pane must exist before CircleMarker mounts (missing pane → Leaflet throw → blank page).
+  // Pane must exist before markers mount (missing pane → Leaflet throw → blank page).
   useLayoutEffect(() => {
     ensurePsMarkersPane(map);
     setPaneReady(true);
@@ -992,8 +1103,6 @@ const PoliceStationLayer: React.FC<{
       })
     : stations.features;
 
-  const baseRadius = zoom >= 12 ? 7 : zoom >= 9 ? 6 : 5.5;
-
   return (
     <>
       <div data-testid="ps-layer-ready" data-count={features.length} hidden />
@@ -1007,18 +1116,12 @@ const PoliceStationLayer: React.FC<{
           const name = (props.name || id).trim();
           const detail = [props.district, props.state].filter(Boolean).join(' • ');
           return (
-            <CircleMarker
-              key={id}
-              center={[lat, lon]}
-              radius={selected ? Math.max(baseRadius, 8) : baseRadius}
+            <Marker
+              key={`${id}-${selected ? 'sel' : 'n'}`}
+              position={[lat, lon]}
+              icon={opsPoliceStationIcon(selected)}
               pane="ps-markers"
-              pathOptions={{
-                color: selected ? '#ba1a1a' : '#001428',
-                weight: selected ? 2 : 1.4,
-                fillColor: selected ? '#f97316' : '#0d9488',
-                fillOpacity: 0.95 * opacity,
-                opacity,
-              }}
+              opacity={opacity}
               eventHandlers={{
                 click: (e) => {
                   L.DomEvent.stopPropagation(e);
@@ -1026,13 +1129,19 @@ const PoliceStationLayer: React.FC<{
                 },
               }}
             >
+              <Tooltip sticky direction="top" opacity={0.96} offset={[0, -8]}>
+                <div className="text-[11px] leading-snug">
+                  <div className="font-semibold">{name}</div>
+                  {detail ? <div className="text-slate-600 font-medium">{detail}</div> : null}
+                </div>
+              </Tooltip>
               <Popup className="ap-ps-popup" closeButton autoClose closeOnClick>
                 <div className="ap-ps-label">
                   <div className="ap-ps-label__name">{name}</div>
                   {detail ? <div className="ap-ps-label__meta">{detail}</div> : null}
                 </div>
               </Popup>
-            </CircleMarker>
+            </Marker>
           );
         })}
     </>
@@ -1204,13 +1313,31 @@ const AdminHoverIdentify: React.FC<{
       if (now - lastAt.current < 90) return;
       lastAt.current = now;
       const z = map.getZoom();
-      const hit = identifyAdminAtPoint(
-        [e.latlng.lng, e.latlng.lat],
-        z,
-        districts?.features ?? [],
-        mandals?.features ?? [],
-        villages?.features ?? []
-      );
+      const point: [number, number] = [e.latlng.lng, e.latlng.lat];
+      const clipParent =
+        adminDrill?.mandalFeature ??
+        (adminDrill?.level === 'district' || adminDrill?.level === 'mandal' || adminDrill?.level === 'village'
+          ? adminDrill.districtFeature
+          : null) ??
+        null;
+      // Ignore pointer outside the active district/mandal frame (neighbor districts).
+      if (clipParent && !pointInFeature(point, clipParent)) {
+        tooltipRef.current?.remove();
+        return;
+      }
+      const districtFeats = clipParent
+        ? adminDrill?.districtFeature
+          ? [adminDrill.districtFeature]
+          : districts?.features ?? []
+        : districts?.features ?? [];
+      const mandalFeats = clipParent
+        ? filterFeaturesInParent(mandals?.features ?? [], clipParent)
+        : mandals?.features ?? [];
+      const villageFeats = clipParent
+        ? filterFeaturesInParent(villages?.features ?? [], clipParent)
+        : villages?.features ?? [];
+      const hit = identifyAdminAtPoint(point, z, districtFeats, mandalFeats, villageFeats);
+      if (adminDrill?.districtName) hit.district = adminDrill.districtName;
       const html = formatIdentifyHtml(hit);
       if (!html) {
         tooltipRef.current?.remove();
@@ -1246,15 +1373,15 @@ const AdminHoverIdentify: React.FC<{
 const AdminClipPanes: React.FC = () => {
   const map = useMap();
   useLayoutEffect(() => {
-    if (!map.getPane('admin-clip')) {
-      const clip = map.createPane('admin-clip');
-      clip.style.zIndex = '450';
-      clip.style.pointerEvents = 'none';
-    }
+    // Clip mask sits above admin vectors so vintage mandal/village strokes cannot
+    // spill outside the active 2022 district/mandal frame.
     if (!map.getPane('admin-vectors')) {
       const vectors = map.createPane('admin-vectors');
       vectors.style.zIndex = '460';
     }
+    const clip = map.getPane('admin-clip') ?? map.createPane('admin-clip');
+    clip.style.zIndex = '470';
+    clip.style.pointerEvents = 'none';
     ensurePsMarkersPane(map);
     ensureOpsMarkersPane(map);
     ensureHotspotTooltipPane(map);
@@ -1282,6 +1409,96 @@ function hotspotCollectionBbox(
   return [west - pad, south - pad, east + pad, north + pad];
 }
 
+/** Check posts on `ops-markers` with booth icon + hover name. */
+const CheckPostsLayer: React.FC<{ data: GeoJSON.FeatureCollection }> = ({ data }) => {
+  const map = useMap();
+  const [paneReady, setPaneReady] = useState(() => Boolean(map.getPane('ops-markers')));
+
+  useLayoutEffect(() => {
+    ensureOpsMarkersPane(map);
+    setPaneReady(true);
+  }, [map]);
+
+  if (!paneReady) return null;
+
+  return (
+    <GeoJSON
+      key={`checkposts-${data.features.length}`}
+      data={data}
+      pane="ops-markers"
+      pointToLayer={(_feature, latlng) =>
+        L.marker(latlng, {
+          icon: opsCheckpostIcon(),
+          pane: 'ops-markers',
+          interactive: true,
+          bubblingMouseEvents: false,
+        })
+      }
+      onEachFeature={(feature, layer) => {
+        const props = (feature.properties ?? {}) as Record<string, unknown>;
+        const label = formatFeatureTooltip(props, 'Check Post');
+        layer.bindTooltip(label, {
+          sticky: true,
+          direction: 'top',
+          opacity: 0.96,
+          offset: [0, -8],
+        });
+      }}
+    />
+  );
+};
+
+/**
+ * Entry/Exit points must sit on `ops-markers` (above admin/ASR fills).
+ * Otherwise polygon hit-testing steals hover and tooltips never appear.
+ */
+const EntryExitPointsLayer: React.FC<{
+  data: GeoJSON.FeatureCollection;
+  typeLabels: boolean;
+  onEachGeneric: (feature: GeoJSON.Feature, layer: L.Layer) => void;
+}> = ({ data, typeLabels, onEachGeneric }) => {
+  const map = useMap();
+  const [paneReady, setPaneReady] = useState(() => Boolean(map.getPane('ops-markers')));
+
+  useLayoutEffect(() => {
+    ensureOpsMarkersPane(map);
+    setPaneReady(true);
+  }, [map]);
+
+  if (!paneReady) return null;
+
+  return (
+    <GeoJSON
+      key={`entry-exit-${typeLabels ? 'typed' : 'generic'}-${data.features.length}`}
+      data={data}
+      pane="ops-markers"
+      pointToLayer={(feature, latlng) => {
+        const kind = classifyEntryExit(feature.properties);
+        const icon = kind === 'exit' ? opsExitPointIcon() : opsEntryPointIcon();
+        return L.marker(latlng, {
+          icon,
+          pane: 'ops-markers',
+          interactive: true,
+          bubblingMouseEvents: false,
+        });
+      }}
+      onEachFeature={(feature, layer) => {
+        if (typeLabels) {
+          layer.bindTooltip(entryExitHoverLabel(feature.properties), {
+            className: 'ap-entry-exit-tooltip',
+            sticky: true,
+            direction: 'top',
+            offset: [0, -8],
+            opacity: 1,
+          });
+          return;
+        }
+        onEachGeneric(feature, layer);
+      }}
+    />
+  );
+};
+
 const OpsHotspotsLayer: React.FC<{
   data: GeoJSON.FeatureCollection;
   clipFeature?: GeoJSON.Feature | null;
@@ -1299,12 +1516,14 @@ const OpsHotspotsLayer: React.FC<{
   }, [data, clipFeature]);
   const hotspotBbox = useMemo(() => hotspotCollectionBbox(visible), [visible]);
   const villages = useVillagePolygons(Boolean(hotspotBbox), hotspotBbox, 20, 0);
-  const [paneReady, setPaneReady] = useState(() => Boolean(map.getPane('ops-markers')));
+  const [paneReady, setPaneReady] = useState(
+    () => Boolean(map.getPane('ops-markers') && map.getPane('hotspot-tooltips'))
+  );
 
   useLayoutEffect(() => {
     ensureOpsMarkersPane(map);
     ensureHotspotTooltipPane(map);
-    setPaneReady(true);
+    setPaneReady(Boolean(map.getPane('ops-markers') && map.getPane('hotspot-tooltips')));
   }, [map]);
 
   const tooltipHtmlByIndex = useMemo(() => {
@@ -1448,6 +1667,8 @@ const IndiaStatesLayer: React.FC<{
   simplifyNeighbors?: boolean;
   /** Omit the Andhra Pradesh name pill. */
   hideApStateLabel?: boolean;
+  /** Only AP keeps a permanent label; neighbors are hover-only. */
+  apOnlyPermanentStateLabels?: boolean;
   statePick?: 'pick' | 'pass';
   onStatePick?: (feature: GeoJSON.Feature, name: string) => void;
   selectedStateName?: string | null;
@@ -1460,6 +1681,7 @@ const IndiaStatesLayer: React.FC<{
   highlightApFill = true,
   simplifyNeighbors = false,
   hideApStateLabel = false,
+  apOnlyPermanentStateLabels = false,
   statePick,
   onStatePick,
   selectedStateName = null,
@@ -1477,7 +1699,7 @@ const IndiaStatesLayer: React.FC<{
   return (
     <>
       <GeoJSON
-        key={`india-states-${apFocused ? 'ap' : 'in'}-${highlightApFill ? 'fill' : 'outline'}-${simplifyNeighbors ? 'simple' : 'full'}-${hideApStateLabel ? 'noap' : 'ap'}-${politicalClean ? 'clean' : `z${zoom.toFixed(0)}-${imageryBasemap ? 'sat' : 'vec'}`}-${statePick ?? 'drill'}-${selectedStateName ?? ''}`}
+        key={`india-states-${apFocused ? 'ap' : 'in'}-${highlightApFill ? 'fill' : 'outline'}-${simplifyNeighbors ? 'simple' : 'full'}-${hideApStateLabel ? 'noap' : 'ap'}-${apOnlyPermanentStateLabels ? 'aponly' : 'alllbl'}-${politicalClean ? 'clean' : `z${zoom.toFixed(0)}-${imageryBasemap ? 'sat' : 'vec'}`}-${statePick ?? 'drill'}-${selectedStateName ?? ''}`}
         pane="admin-vectors"
         data={states}
         style={(feature) => {
@@ -1510,9 +1732,16 @@ const IndiaStatesLayer: React.FC<{
               ? {
                   color: selected ? '#fef08a' : ap ? '#0f2942' : '#cbd5e1',
                   weight: selected ? 2.8 : ap ? (apFocused ? 2.8 : 1.8) : 0.6,
-                  fill: picking || (ap && apFocused && highlightApFill),
+                  // Keep a near-invisible fill so hover tooltips work on Esri satellite
+                  // (outline-only paths are almost impossible to hit).
+                  fill: true,
                   fillColor: ap ? '#93c5fd' : '#ffffff',
-                  fillOpacity: ap && apFocused && highlightApFill ? 0.32 : 0,
+                  fillOpacity:
+                    ap && apFocused && highlightApFill
+                      ? 0.32
+                      : picking
+                        ? 0.08
+                        : 0.01,
                   opacity: selected ? 1 : ap ? 0.98 : 0.45,
                 }
               : {
@@ -1566,8 +1795,9 @@ const IndiaStatesLayer: React.FC<{
               else if (el instanceof SVGElement) (el as SVGElement & { blur?: () => void }).blur?.();
             });
           } else {
-            const showPermanent =
-              simplifyNeighbors && !ap
+            const showPermanent = apOnlyPermanentStateLabels
+              ? ap
+              : simplifyNeighbors && !ap
                 ? true
                 : shouldShowPermanentStateLabel(zoom, {
                     ap,
@@ -1588,7 +1818,9 @@ const IndiaStatesLayer: React.FC<{
                 sticky: true,
                 direction: 'top',
                 opacity: 0.96,
-                className: 'india-state-label india-state-label--hover',
+                className: ap
+                  ? 'india-state-label india-state-label--hover india-state-label--ap'
+                  : 'india-state-label india-state-label--hover',
               });
             }
           }
@@ -1645,6 +1877,130 @@ const Graticule: React.FC = () => {
   );
 };
 
+/**
+ * Isolates a single Leaflet overlay crash so the workspace shell stays up
+ * (classic symptom: Cannot read properties of undefined (reading 'appendChild')).
+ */
+class LeafletLayerErrorBoundary extends Component<
+  { children: ReactNode; resetKey?: string | number },
+  { failed: boolean }
+> {
+  state = { failed: false };
+
+  static getDerivedStateFromError(): { failed: boolean } {
+    return { failed: true };
+  }
+
+  componentDidCatch(error: Error, info: ErrorInfo) {
+    console.warn('[LeafletLayerErrorBoundary]', error.message, info.componentStack);
+  }
+
+  componentDidUpdate(prevProps: { resetKey?: string | number }) {
+    if (prevProps.resetKey !== this.props.resetKey && this.state.failed) {
+      this.setState({ failed: false });
+    }
+  }
+
+  render() {
+    if (this.state.failed) return null;
+    return this.props.children;
+  }
+}
+
+type MapCameraSnapshot = {
+  zoom: number;
+  west: number;
+  south: number;
+  east: number;
+  north: number;
+  token: number;
+};
+
+function useMapCameraSnapshot(): MapCameraSnapshot {
+  const map = useMap();
+  const [snap, setSnap] = useState<MapCameraSnapshot>(() => {
+    const b = map.getBounds();
+    return {
+      zoom: map.getZoom(),
+      west: b.getWest(),
+      south: b.getSouth(),
+      east: b.getEast(),
+      north: b.getNorth(),
+      token: 0,
+    };
+  });
+  const refresh = () => {
+    const b = map.getBounds();
+    setSnap((prev) => ({
+      zoom: map.getZoom(),
+      west: b.getWest(),
+      south: b.getSouth(),
+      east: b.getEast(),
+      north: b.getNorth(),
+      token: prev.token + 1,
+    }));
+  };
+  useMapEvents({ zoomend: refresh, moveend: refresh });
+  useEffect(() => {
+    refresh();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [map]);
+  return snap;
+}
+
+/** Viewport-filter + zoom gate + feature cap + local error boundary for dense road GeoJSON. */
+const SafeHeavyRoadGeoJSON: React.FC<{
+  data: GeoJSON.FeatureCollection;
+  style: L.PathOptions | ((feature?: GeoJSON.Feature) => L.PathOptions);
+  onEachFeature?: (feature: GeoJSON.Feature, layer: L.Layer) => void;
+  layerKey: string;
+}> = ({ data, style, onEachFeature, layerKey }) => {
+  const cam = useMapCameraSnapshot();
+  const prepared = useMemo(
+    () =>
+      prepareHeavyRoadFc(data, cam.zoom, {
+        west: cam.west,
+        south: cam.south,
+        east: cam.east,
+        north: cam.north,
+      }),
+    [data, cam.zoom, cam.west, cam.south, cam.east, cam.north]
+  );
+  if (!prepared) return null;
+  const resetKey = `${layerKey}:${prepared.features.length}:${cam.west.toFixed(2)}:${cam.zoom}`;
+  return (
+    <LeafletLayerErrorBoundary resetKey={resetKey}>
+      <GeoJSON
+        key={resetKey}
+        data={prepared}
+        style={style as never}
+        onEachFeature={onEachFeature}
+      />
+    </LeafletLayerErrorBoundary>
+  );
+};
+
+const SafeIndianRailwayLayer: React.FC<{ data: GeoJSON.FeatureCollection }> = ({ data }) => {
+  const cam = useMapCameraSnapshot();
+  const prepared = useMemo(
+    () =>
+      prepareHeavyRoadFc(data, cam.zoom, {
+        west: cam.west,
+        south: cam.south,
+        east: cam.east,
+        north: cam.north,
+      }),
+    [data, cam.zoom, cam.west, cam.south, cam.east, cam.north]
+  );
+  if (!prepared) return null;
+  const resetKey = `rail:${prepared.features.length}:${cam.west.toFixed(2)}:${cam.zoom}`;
+  return (
+    <LeafletLayerErrorBoundary resetKey={resetKey}>
+      <IndianRailwayLayer data={prepared} />
+    </LeafletLayerErrorBoundary>
+  );
+};
+
 /** Bbox-clipped PostGIS roads (full network / VSP) — never load statewide GeoJSON. */
 const PostgisBboxRoadLayer: React.FC<{
   layer: GisPostgisRoadLayer;
@@ -1652,7 +2008,24 @@ const PostgisBboxRoadLayer: React.FC<{
   color: string;
   weight: number;
   label: string;
-}> = ({ layer, enabled, color, weight, label }) => {
+  clipFeature?: GeoJSON.Feature | null;
+  /** Routing-only: classify NH/SH/district + soft-cap. Other modules draw bbox result as-is. */
+  roadVectorSafety?: boolean;
+  /** Roads Routing: fetch/draw at every zoom (user accepts clutter). */
+  alwaysOn?: boolean;
+  /** Opt-in (Roads Routing New): replace admin clip with corridor filter. */
+  filterLayers?: (fc: GeoJSON.FeatureCollection) => GeoJSON.FeatureCollection;
+}> = ({
+  layer,
+  enabled,
+  color,
+  weight,
+  label,
+  clipFeature = null,
+  roadVectorSafety = false,
+  alwaysOn = false,
+  filterLayers,
+}) => {
   const map = useMap();
   const [bbox, setBbox] = useState<{
     west: number;
@@ -1662,29 +2035,105 @@ const PostgisBboxRoadLayer: React.FC<{
   } | null>(null);
 
   const refresh = () => {
+    if (!enabled) {
+      setBbox(null);
+      return;
+    }
     const b = map.getBounds();
-    setBbox({
+    let bounds = {
       west: b.getWest(),
       south: b.getSouth(),
       east: b.getEast(),
       north: b.getNorth(),
-    });
+    };
+    // Corridor filter: fetch the pin AOI, not India-wide LIMIT samples that miss the spine.
+    if (filterLayers && clipFeature) {
+      const env = featureBbox(clipFeature);
+      if (env) {
+        const [west, south, east, north] = env;
+        const hit = {
+          west: Math.max(west, bounds.west),
+          south: Math.max(south, bounds.south),
+          east: Math.min(east, bounds.east),
+          north: Math.min(north, bounds.north),
+        };
+        bounds =
+          hit.west < hit.east && hit.south < hit.north
+            ? hit
+            : { west, south, east, north };
+      }
+    }
+    // Default modules: skip India-wide cameras. Roads Routing alwaysOn bypasses this.
+    if (!alwaysOn && !mapAllowsHeavyRoadVectors(map.getZoom(), bounds)) {
+      setBbox(null);
+      return;
+    }
+    setBbox(bounds);
   };
   useMapEvents({ moveend: refresh, zoomend: refresh });
   useEffect(() => {
     refresh();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [map]);
+  }, [map, enabled, alwaysOn, filterLayers, clipFeature]);
 
-  const fc = useGisPostgisRoadBbox(layer, enabled, bbox);
-  if (!enabled || fc.features.length === 0) return null;
+  const fc = useGisPostgisRoadBbox(
+    layer,
+    enabled,
+    bbox,
+    0.05,
+    alwaysOn || filterLayers ? 25000 : roadVectorSafety ? HEAVY_ROAD_MAX_FEATURES : 12000
+  );
+  const clipped = useMemo(() => {
+    if (!fc) return fc;
+    if (filterLayers) return filterLayers(fc);
+    return filterCollectionToParent(fc, clipFeature) ?? fc;
+  }, [fc, clipFeature, filterLayers]);
+  const zoom = map.getZoom();
+  const prepared = useMemo(() => {
+    if (!enabled || !bbox || !clipped?.features.length) return null;
+    // Full / VSP: always classify + soft-cap. alwaysOn used to return raw extracts
+    // (~10k+ village tracks) and crash Leaflet SVG (appendChild).
+    if (layer === 'full' || layer === 'vsp') {
+      if (alwaysOn || filterLayers) {
+        return prepareClassifiedRoadFc(clipped, HEAVY_ROAD_MAX_FEATURES);
+      }
+      if (!roadVectorSafety) return clipped;
+      return preparePostgisFullNetworkFc(clipped, zoom, bbox);
+    }
+    if (alwaysOn || !roadVectorSafety) return clipped;
+    return prepareHeavyRoadFc(clipped, zoom, bbox);
+  }, [enabled, bbox, clipped, layer, zoom, roadVectorSafety, alwaysOn, filterLayers]);
+  if (!prepared) return null;
+  const resetKey = `${layer}-${prepared.features.length}-${bbox!.west.toFixed(3)}-${alwaysOn ? 'a' : roadVectorSafety ? 's' : 'n'}-${filterLayers ? 'f' : 'n'}`;
   return (
-    <GeoJSON
-      key={`${layer}-${fc.features.length}-${bbox?.west?.toFixed(3)}`}
-      data={fc}
-      style={() => ({ color, weight, opacity: 0.82 })}
-      onEachFeature={(feature, lyr) => bindNamedTooltip(feature, lyr, label)}
-    />
+    <LeafletLayerErrorBoundary resetKey={resetKey}>
+      <GeoJSON
+        key={resetKey}
+        data={prepared}
+        style={(feature) => {
+          if (layer === 'full' || layer === 'vsp') {
+            const stroke = routeStrokeForProperties(feature?.properties ?? null);
+            return {
+              color: stroke?.color ?? color,
+              weight: alwaysOn ? Math.max(weight, stroke?.weight ?? weight) : stroke?.weight ?? weight,
+              opacity: alwaysOn ? 1 : 0.88,
+              fill: false,
+            };
+          }
+          if (alwaysOn || !roadVectorSafety) {
+            return { color, weight, opacity: alwaysOn ? 1 : 0.82, fill: false };
+          }
+          const stroke = routeStrokeForProperties(feature?.properties ?? null);
+          return {
+            color: stroke?.color ?? color,
+            weight: stroke?.weight ?? weight,
+            opacity: 0.88,
+            fill: false,
+          };
+        }}
+        onEachFeature={(feature, lyr) => bindNamedTooltip(feature, lyr, label)}
+      />
+    </LeafletLayerErrorBoundary>
   );
 };
 
@@ -1701,6 +2150,11 @@ export const ApLeafletMap = forwardRef<ApLeafletMapHandle, ApLeafletMapProps>(fu
     showApRoadsFull = false,
     showOpsVspRoads = false,
     showApRoadsMajor = false,
+    roadVectorSafety = false,
+    roadNetworkAlwaysOn = false,
+    filterMapLayers,
+    layerClipFeature = null,
+    suppressUnclippedRoadTiles = false,
     showAgencyRoutes = false,
     showRailways = false,
     showGraticule = false,
@@ -1720,6 +2174,7 @@ export const ApLeafletMap = forwardRef<ApLeafletMapHandle, ApLeafletMapProps>(fu
     policeStationOpacity = 1,
     selectedPoliceStationId,
     showImageryOverlay = false,
+    autoSatelliteOverlay = true,
     showGoogleRoadmap = false,
     showSoiTopo = false,
     showDistrictsGisHist = false,
@@ -1733,6 +2188,7 @@ export const ApLeafletMap = forwardRef<ApLeafletMapHandle, ApLeafletMapProps>(fu
     showPharmaHubs = false,
     showDdacs = false,
     showEntryExit = false,
+    entryExitTypeLabels = false,
     showStockPoints = false,
     showOpsMainRoads = false,
     showOpsInternalRoads = false,
@@ -1765,7 +2221,10 @@ export const ApLeafletMap = forwardRef<ApLeafletMapHandle, ApLeafletMapProps>(fu
     adminHoverIdentify = true,
     highlightApFill = true,
     maskOutsideAp = false,
+    maskOutsideDrill = true,
+    autoAdminOverlays = true,
     hideApStateLabel = false,
+    apOnlyPermanentStateLabels = false,
     showScale = true,
     showAttribution = true,
     layoutRevision = 0,
@@ -1838,19 +2297,62 @@ export const ApLeafletMap = forwardRef<ApLeafletMapHandle, ApLeafletMapProps>(fu
   });
   const drillLevel = adminDrill?.level ?? 'state';
   const drillActive = drillLevel !== 'state';
-  const showMandalsEffective = shouldDrawMandals(drillLevel) || showMandals;
-  const showVillagesEffective = shouldDrawVillages(drillLevel) || showVillages;
+  const showMandalsEffective =
+    (autoAdminOverlays && shouldDrawMandals(drillLevel)) || showMandals;
+  const showVillagesEffective =
+    (autoAdminOverlays && shouldDrawVillages(drillLevel)) || showVillages;
   // India overview: no districts. AP state focus: districts visible for next-level pick (no isolation).
-  // Deeper drill: isolation as before.
-  const showDistrictsEffective = drillActive
-    ? drillLevel === 'district' || showDistricts
-    : apFocused;
+  // Deeper drill: isolation as before. Atlas (autoAdminOverlays=false) follows Eye flags only.
+  const showDistrictsEffective = autoAdminOverlays
+    ? drillActive
+      ? drillLevel === 'district' || showDistricts
+      : apFocused
+    : showDistricts;
   const districtData =
     districts && drillActive && adminDrill?.districtFeature
       ? asFeatureCollection([adminDrill.districtFeature])
       : districts;
-  const clipFeature = adminDrill ? drillFocusFeature(adminDrill) : null;
-  const clipStations = clipFeature;
+  const adminClip = adminDrill ? drillFocusFeature(adminDrill) : null;
+  /** Camera / drill clip — never use Routing New corridor here (keeps viewTarget/boundsView). */
+  const clipFeature = adminClip;
+  const clipStations = layerClipFeature ?? adminClip;
+  const corridorFilterActive = Boolean(filterMapLayers && layerClipFeature);
+  const corridorRevision = corridorFilterActive
+    ? `${layerClipFeature?.properties?.pins ?? 0}:${Number((layerClipFeature?.properties as { halfWidthKm?: number } | null)?.halfWidthKm ?? 0)}`
+    : 'off';
+  const layerClip = useMemo(
+    () => (fc: GeoJSON.FeatureCollection | null | undefined) => {
+      if (!fc) return null;
+      if (filterMapLayers) return filterMapLayers(fc);
+      return filterCollectionToParent(fc, adminClip);
+    },
+    [filterMapLayers, adminClip]
+  );
+  const highwaysClipped = useMemo(() => layerClip(highways), [layerClip, highways]);
+  const riversClipped = useMemo(() => layerClip(rivers), [layerClip, rivers]);
+  const waterClipped = useMemo(() => layerClip(water), [layerClip, water]);
+  const talukGisClipped = useMemo(() => layerClip(talukGis), [layerClip, talukGis]);
+  const borderPsClipped = useMemo(() => layerClip(borderPs), [layerClip, borderPs]);
+  const vspVillagesClipped = useMemo(() => layerClip(vspVillages), [layerClip, vspVillages]);
+  const soiGridClipped = useMemo(() => layerClip(soiGrid), [layerClip, soiGrid]);
+  const railVectorClipped = useMemo(() => layerClip(railVector), [layerClip, railVector]);
+  const roadsMajorClipped = useMemo(() => layerClip(roadsMajor), [layerClip, roadsMajor]);
+  const districtsHistClipped = useMemo(() => layerClip(districtsHist), [layerClip, districtsHist]);
+  const stateHistClipped = useMemo(() => layerClip(stateHist), [layerClip, stateHist]);
+  const asrBoundaryClipped = useMemo(() => layerClip(asrBoundary), [layerClip, asrBoundary]);
+  const pharmaHubsClipped = useMemo(() => layerClip(pharmaHubs), [layerClip, pharmaHubs]);
+  const checkPostsClipped = useMemo(() => layerClip(checkPosts), [layerClip, checkPosts]);
+  const dRoutesClipped = useMemo(() => layerClip(dRoutes), [layerClip, dRoutes]);
+  const ddacsClipped = useMemo(() => layerClip(ddacs), [layerClip, ddacs]);
+  const entryExitClipped = useMemo(() => layerClip(entryExit), [layerClip, entryExit]);
+  const ganjaSeizedClipped = useMemo(() => layerClip(ganjaSeized), [layerClip, ganjaSeized]);
+  const opsHotspotsClipped = useMemo(() => layerClip(opsHotspots), [layerClip, opsHotspots]);
+  const footTracksClipped = useMemo(() => layerClip(footTracks), [layerClip, footTracks]);
+  const internalRoadsClipped = useMemo(() => layerClip(internalRoads), [layerClip, internalRoads]);
+  const mainRoadsClipped = useMemo(() => layerClip(mainRoads), [layerClip, mainRoads]);
+  const stockPointsClipped = useMemo(() => layerClip(stockPoints), [layerClip, stockPoints]);
+  const tollPlazasClipped = useMemo(() => layerClip(tollPlazas), [layerClip, tollPlazas]);
+  const stateBorderClipped = useMemo(() => layerClip(state), [layerClip, state]);
   const rasterId: RasterBasemapId = basemap === 'maplibre' ? 'vector' : basemap;
   const tiles = BASEMAP_TILES[rasterId];
   const useMapLibre = basemap === 'maplibre';
@@ -1955,6 +2457,7 @@ export const ApLeafletMap = forwardRef<ApLeafletMapHandle, ApLeafletMapProps>(fu
         )}
         {!politicalClean && !useMapLibre && (
           <TileLayer
+            key={`basemap-tiles-${rasterId}-${underlayTiles.url}`}
             attribution={
               gisRasterBasemap
                 ? `${underlayTiles.attribution} · GIS-Source Raster overlays`
@@ -1973,6 +2476,7 @@ export const ApLeafletMap = forwardRef<ApLeafletMapHandle, ApLeafletMapProps>(fu
             rasterId={rasterId}
             drillLevel={drillLevel}
             showImageryOverlay={showImageryOverlay}
+            autoSatelliteOverlay={autoSatelliteOverlay}
             showHillshade={showHillshade}
             showGoogleRoadmap={showGoogleRoadmap}
             showSoiTopo={showSoiTopo}
@@ -1984,17 +2488,19 @@ export const ApLeafletMap = forwardRef<ApLeafletMapHandle, ApLeafletMapProps>(fu
             rasterId={rasterId}
             drillActive={drillActive}
             drillLevel={drillLevel}
-            showImageryOverlay={showImageryOverlay}
-            showHighways={showHighways}
+            showImageryOverlay={showImageryOverlay && autoSatelliteOverlay}
+            showHighways={
+              showHighways && !(suppressUnclippedRoadTiles || corridorFilterActive)
+            }
             showPlaces={showPlaces}
           />
         )}
         {!politicalClean && (
           <AdminHoverIdentify adminDrill={adminDrill} enabled={adminHoverIdentify} />
         )}
-        {!politicalClean && showGraticule && soiGrid && soiGrid.features.length > 0 && (
+        {!politicalClean && showGraticule && soiGridClipped && soiGridClipped.features.length > 0 && (
           <GeoJSON
-            data={soiGrid}
+            data={soiGridClipped}
             pointToLayer={(_feature, latlng) =>
               L.circleMarker(latlng, {
                 radius: 4,
@@ -2007,12 +2513,12 @@ export const ApLeafletMap = forwardRef<ApLeafletMapHandle, ApLeafletMapProps>(fu
             onEachFeature={(feature, layer) => bindNamedTooltip(feature, layer, 'SOI Map No')}
           />
         )}
-        {!politicalClean && showGraticule && (!soiGrid || soiGrid.features.length === 0) && (
+        {!politicalClean && showGraticule && (!soiGridClipped || soiGridClipped.features.length === 0) && (
           <Graticule />
         )}
-        {!politicalClean && showStateGisHist && stateHist && stateHist.features.length > 0 && (
+        {!politicalClean && showStateGisHist && stateHistClipped && stateHistClipped.features.length > 0 && (
           <GeoJSON
-            data={stateHist}
+            data={stateHistClipped}
             style={{
               color: '#9a3412',
               weight: 2.2,
@@ -2030,9 +2536,9 @@ export const ApLeafletMap = forwardRef<ApLeafletMapHandle, ApLeafletMapProps>(fu
             }}
           />
         )}
-        {!politicalClean && showDistrictsGisHist && districtsHist && districtsHist.features.length > 0 && (
+        {!politicalClean && showDistrictsGisHist && districtsHistClipped && districtsHistClipped.features.length > 0 && (
           <GeoJSON
-            data={districtsHist}
+            data={districtsHistClipped}
             style={{
               color: '#b45309',
               weight: 1,
@@ -2051,16 +2557,16 @@ export const ApLeafletMap = forwardRef<ApLeafletMapHandle, ApLeafletMapProps>(fu
             }}
           />
         )}
-        {!politicalClean && showTalukGis && talukGis && (
+        {!politicalClean && showTalukGis && talukGisClipped && (
           <GeoJSON
-            data={talukGis}
+            data={talukGisClipped}
             style={{ color: '#475569', weight: 0.9, fillColor: '#94a3b8', fillOpacity: 0.12 }}
             onEachFeature={(feature, layer) => bindNamedTooltip(feature, layer, 'Taluk')}
           />
         )}
-        {!politicalClean && showBorderPs && borderPs && (
+        {!politicalClean && showBorderPs && borderPsClipped && (
           <GeoJSON
-            data={borderPs}
+            data={borderPsClipped}
             pointToLayer={(_feature, latlng) =>
               L.circleMarker(latlng, {
                 radius: 4,
@@ -2075,9 +2581,9 @@ export const ApLeafletMap = forwardRef<ApLeafletMapHandle, ApLeafletMapProps>(fu
             }
           />
         )}
-        {!politicalClean && showVspVillagePts && vspVillages && (
+        {!politicalClean && showVspVillagePts && vspVillagesClipped && (
           <GeoJSON
-            data={vspVillages}
+            data={vspVillagesClipped}
             pointToLayer={(_feature, latlng) =>
               L.circleMarker(latlng, {
                 radius: 2.2,
@@ -2090,16 +2596,16 @@ export const ApLeafletMap = forwardRef<ApLeafletMapHandle, ApLeafletMapProps>(fu
             onEachFeature={(feature, layer) => bindNamedTooltip(feature, layer, 'Village')}
           />
         )}
-        {!politicalClean && water && showWaterbodies && (
+        {!politicalClean && waterClipped && showWaterbodies && (
           <GeoJSON
-            data={water}
+            data={waterClipped}
             style={{ color: '#0e7490', weight: 0.8, fillColor: '#38bdf8', fillOpacity: 0.28 }}
             onEachFeature={(feature, layer) => bindNamedTooltip(feature, layer, 'Water body')}
           />
         )}
-        {!politicalClean && rivers && showRivers && (
+        {!politicalClean && riversClipped && showRivers && (
           <GeoJSON
-            data={rivers}
+            data={riversClipped}
             style={{ color: '#1565c0', weight: 1.6, opacity: 0.75 }}
             onEachFeature={(feature, layer) => bindNamedTooltip(feature, layer, 'River')}
           />
@@ -2113,6 +2619,7 @@ export const ApLeafletMap = forwardRef<ApLeafletMapHandle, ApLeafletMapProps>(fu
             highlightApFill={highlightApFill}
             simplifyNeighbors={maskOutsideAp}
             hideApStateLabel={hideApStateLabel}
+            apOnlyPermanentStateLabels={apOnlyPermanentStateLabels}
             onApStateFocus={indiaStatePick ? undefined : indiaOverview ? onApStateFocus : undefined}
             statePick={indiaStatePick}
             onStatePick={onIndiaStatePick}
@@ -2136,17 +2643,22 @@ export const ApLeafletMap = forwardRef<ApLeafletMapHandle, ApLeafletMapProps>(fu
             interactive={false}
           />
         )}
-        {!politicalClean && ready && state && showStateBorder && drillActive && (
+        {!politicalClean &&
+          ready &&
+          stateBorderClipped &&
+          showStateBorder &&
+          drillActive &&
+          stateBorderClipped.features.length > 0 && (
           <GeoJSON
-            data={state}
+            data={stateBorderClipped}
             style={{ color: '#001428', weight: 1.5, fill: false, opacity: stateOpacity }}
             onEachFeature={(feature, layer) => bindNamedTooltip(feature, layer, 'State')}
           />
         )}
         <AdminClipMask
-          key={`clip-${adminDrill?.level ?? 'state'}-${adminDrill?.villageName ?? adminDrill?.mandalName ?? adminDrill?.districtName ?? 'none'}-${politicalClean ? 'w' : 'b'}-${maskOutsideAp ? 'apmask' : 'in'}-${highlightApFill ? 'c' : 'n'}`}
+          key={`clip-${adminDrill?.level ?? 'state'}-${adminDrill?.villageName ?? adminDrill?.mandalName ?? adminDrill?.districtName ?? 'none'}-${politicalClean ? 'w' : 'b'}-${maskOutsideAp ? 'apmask' : 'in'}-${highlightApFill ? 'c' : 'n'}-${maskOutsideDrill ? 'dm' : 'dn'}`}
           feature={
-            clipFeature ??
+            (maskOutsideDrill ? clipFeature : null) ??
             (maskOutsideAp && state?.features[0]
               ? state.features[0]
               : indiaReady
@@ -2213,13 +2725,14 @@ export const ApLeafletMap = forwardRef<ApLeafletMapHandle, ApLeafletMapProps>(fu
             onPoliceStationClick={onPoliceStationClick}
           />
         )}
-        {!politicalClean && highways && showHighways && (
+        {!politicalClean && highwaysClipped && showHighways && (
           <GeoJSON
-            data={highways}
+            key={`highways-corridor-${corridorRevision}-${highwaysClipped.features.length}`}
+            data={highwaysClipped}
             style={() => ({
-              color: '#c2410c',
-              weight: 2.6,
-              opacity: 0.95,
+              color: roadNetworkAlwaysOn ? '#ef4444' : '#c2410c',
+              weight: roadNetworkAlwaysOn ? 3 : 2.6,
+              opacity: roadNetworkAlwaysOn ? 1 : 0.95,
             })}
             onEachFeature={(feature, layer) => {
               const props = (feature.properties ?? {}) as Record<string, unknown>;
@@ -2232,72 +2745,168 @@ export const ApLeafletMap = forwardRef<ApLeafletMapHandle, ApLeafletMapProps>(fu
           <PostgisBboxRoadLayer
             layer="full"
             enabled={showApRoadsFull}
-            color="#1e3a8a"
-            weight={1.1}
+            color={roadNetworkAlwaysOn ? '#60a5fa' : '#1e3a8a'}
+            weight={roadNetworkAlwaysOn ? 3 : 1.1}
             label="AP Road"
+            clipFeature={layerClipFeature ?? clipFeature}
+            filterLayers={filterMapLayers}
+            roadVectorSafety={roadVectorSafety && !roadNetworkAlwaysOn}
+            alwaysOn={roadNetworkAlwaysOn}
           />
         )}
         {!politicalClean && showOpsVspRoads && (
           <PostgisBboxRoadLayer
             layer="vsp"
             enabled={showOpsVspRoads}
-            color="#0f766e"
-            weight={1.4}
+            color={roadNetworkAlwaysOn ? '#2dd4bf' : '#0f766e'}
+            weight={roadNetworkAlwaysOn ? 3 : 1.4}
             label="VSP Road"
+            clipFeature={layerClipFeature ?? clipFeature}
+            filterLayers={filterMapLayers}
+            roadVectorSafety={roadVectorSafety && !roadNetworkAlwaysOn}
+            alwaysOn={roadNetworkAlwaysOn}
           />
         )}
-        {!politicalClean && showApRoadsMajor && roadsMajor && (
-          <GeoJSON
-            data={roadsMajor}
-            style={(feature) => {
-              const rd = String(
-                (feature?.properties as { RD_TYPE?: string; RD_SUB_TYP?: string } | null)?.RD_TYPE ??
-                  (feature?.properties as { RD_SUB_TYP?: string } | null)?.RD_SUB_TYP ??
-                  ''
-              ).toUpperCase();
-              const isNh = /\bNH\b|NATIONAL/.test(rd);
-              return {
-                color: isNh ? '#c2410c' : '#a16207',
-                weight: isNh ? 2.2 : 1.4,
-                opacity: 0.85,
-              };
-            }}
-            onEachFeature={(feature, layer) => bindNamedTooltip(feature, layer, 'Major Road')}
-          />
+        {!politicalClean && showApRoadsMajor && roadsMajorClipped && (
+          roadVectorSafety && !roadNetworkAlwaysOn ? (
+            <SafeHeavyRoadGeoJSON
+              layerKey={`ap-roads-major-${corridorRevision}-${roadsMajorClipped.features.length}`}
+              data={roadsMajorClipped}
+              style={(feature) => {
+                const rd = String(
+                  (feature?.properties as { RD_TYPE?: string; RD_SUB_TYP?: string } | null)?.RD_TYPE ??
+                    (feature?.properties as { RD_SUB_TYP?: string } | null)?.RD_SUB_TYP ??
+                    ''
+                ).toUpperCase();
+                const isNh = /\bNH\b|NATIONAL/.test(rd);
+                return {
+                  color: isNh ? '#c2410c' : '#a16207',
+                  weight: isNh ? 2.2 : 1.4,
+                  opacity: 0.85,
+                };
+              }}
+              onEachFeature={(feature, layer) => bindNamedTooltip(feature, layer, 'Major Road')}
+            />
+          ) : (
+            <GeoJSON
+              key={`ap-roads-major-corridor-${corridorRevision}-${roadsMajorClipped.features.length}`}
+              data={roadsMajorClipped}
+              style={(feature) => {
+                const rd = String(
+                  (feature?.properties as { RD_TYPE?: string; RD_SUB_TYP?: string } | null)?.RD_TYPE ??
+                    (feature?.properties as { RD_SUB_TYP?: string } | null)?.RD_SUB_TYP ??
+                    ''
+                ).toUpperCase();
+                const isNh = /\bNH\b|NATIONAL/.test(rd);
+                return {
+                  color: roadNetworkAlwaysOn
+                    ? isNh
+                      ? '#ef4444'
+                      : '#facc15'
+                    : isNh
+                      ? '#c2410c'
+                      : '#a16207',
+                  weight: roadNetworkAlwaysOn ? 3 : isNh ? 2.2 : 1.4,
+                  opacity: roadNetworkAlwaysOn ? 1 : 0.85,
+                };
+              }}
+              onEachFeature={(feature, layer) => bindNamedTooltip(feature, layer, 'Major Road')}
+            />
+          )
         )}
-        {!politicalClean && showOpsMainRoads && mainRoads && mainRoads.features.length > 0 && (
-          <GeoJSON
-            data={mainRoads}
-            style={{ color: '#9a3412', weight: 2.1, opacity: 0.9 }}
-            onEachFeature={bindOpsName('Main Road')}
-          />
+        {!politicalClean && showOpsMainRoads && mainRoadsClipped && mainRoadsClipped.features.length > 0 && (
+          roadVectorSafety && !roadNetworkAlwaysOn ? (
+            <SafeHeavyRoadGeoJSON
+              layerKey={`ops-main-roads-${corridorRevision}`}
+              data={mainRoadsClipped}
+              style={{ color: '#9a3412', weight: 2.1, opacity: 0.9 }}
+              onEachFeature={bindOpsName('Main Road')}
+            />
+          ) : (
+            <GeoJSON
+              key={`ops-main-roads-corridor-${corridorRevision}-${mainRoadsClipped.features.length}`}
+              data={mainRoadsClipped}
+              style={{
+                color: roadNetworkAlwaysOn ? '#fb923c' : '#9a3412',
+                weight: roadNetworkAlwaysOn ? 3 : 2.1,
+                opacity: roadNetworkAlwaysOn ? 1 : 0.9,
+              }}
+              onEachFeature={bindOpsName('Main Road')}
+            />
+          )
         )}
-        {!politicalClean && showOpsInternalRoads && internalRoads && internalRoads.features.length > 0 && (
-          <GeoJSON
-            data={internalRoads}
-            style={{ color: '#57534e', weight: 1.2, opacity: 0.8 }}
-            onEachFeature={bindOpsName('Internal Road')}
-          />
+        {!politicalClean && showOpsInternalRoads && internalRoadsClipped && internalRoadsClipped.features.length > 0 && (
+          roadVectorSafety && !roadNetworkAlwaysOn ? (
+            <SafeHeavyRoadGeoJSON
+              layerKey={`ops-internal-roads-${corridorRevision}-${internalRoadsClipped.features.length}`}
+              data={internalRoadsClipped}
+              style={{
+                color: OPS_INTERNAL_ROADS_COLOR,
+                weight: OPS_INTERNAL_ROADS_WEIGHT,
+                opacity: OPS_INTERNAL_ROADS_OPACITY,
+              }}
+              onEachFeature={bindOpsName('Internal Road')}
+            />
+          ) : (
+            <GeoJSON
+              key={`ops-internal-roads-corridor-${corridorRevision}-${internalRoadsClipped.features.length}`}
+              data={internalRoadsClipped}
+              style={{
+                color: roadNetworkAlwaysOn ? '#a78bfa' : OPS_INTERNAL_ROADS_COLOR,
+                weight: roadNetworkAlwaysOn ? 3 : OPS_INTERNAL_ROADS_WEIGHT,
+                opacity: roadNetworkAlwaysOn ? 1 : OPS_INTERNAL_ROADS_OPACITY,
+              }}
+              onEachFeature={bindOpsName('Internal Road')}
+            />
+          )
         )}
-        {!politicalClean && showTrails && footTracks && footTracks.features.length > 0 && (
-          <GeoJSON
-            data={footTracks}
-            style={{ color: '#65a30d', weight: 2.2, opacity: 0.95, dashArray: '5 3' }}
-            onEachFeature={bindOpsName('Foot Track')}
-          />
+        {!politicalClean && showTrails && footTracksClipped && footTracksClipped.features.length > 0 && (
+          roadVectorSafety && !roadNetworkAlwaysOn ? (
+            <SafeHeavyRoadGeoJSON
+              layerKey={`foot-tracks-${corridorRevision}-${footTracksClipped.features.length}`}
+              data={footTracksClipped}
+              style={{ color: '#65a30d', weight: 2.2, opacity: 0.95, dashArray: '5 3' }}
+              onEachFeature={bindOpsName('Foot Track')}
+            />
+          ) : (
+            <GeoJSON
+              key={`foot-tracks-corridor-${corridorRevision}-${footTracksClipped.features.length}`}
+              data={footTracksClipped}
+              style={{
+                color: roadNetworkAlwaysOn ? '#a3e635' : '#65a30d',
+                weight: roadNetworkAlwaysOn ? 3 : 2.2,
+                opacity: roadNetworkAlwaysOn ? 1 : 0.95,
+                dashArray: '5 3',
+              }}
+              onEachFeature={bindOpsName('Foot Track')}
+            />
+          )
         )}
-        {!politicalClean && showAgencyRoutes && dRoutes && dRoutes.features.length > 0 && (
-          <GeoJSON
-            data={dRoutes}
-            style={{ color: '#ba1a1a', weight: 2.4, dashArray: '7 4', opacity: 0.95 }}
-            onEachFeature={bindOpsName('Drug Route')}
-          />
+        {!politicalClean && showAgencyRoutes && dRoutesClipped && dRoutesClipped.features.length > 0 && (
+          roadVectorSafety && !roadNetworkAlwaysOn ? (
+            <SafeHeavyRoadGeoJSON
+              layerKey="drug-routes"
+              data={dRoutesClipped}
+              style={{ color: '#ba1a1a', weight: 2.4, dashArray: '7 4', opacity: 0.95 }}
+              onEachFeature={bindOpsName('Drug Route')}
+            />
+          ) : (
+            <GeoJSON
+              data={dRoutesClipped}
+              style={{ color: '#ba1a1a', weight: 2.4, dashArray: '7 4', opacity: 0.95 }}
+              onEachFeature={bindOpsName('Drug Route')}
+            />
+          )
         )}
         {/* Rail above roads: violet casing + dash so IR stays distinct from NH/SH/metal. */}
-        {!politicalClean && showRailways && railVector && railVector.features.length > 0 && (
-          <IndianRailwayLayer data={railVector} />
+        {!politicalClean && showRailways && railVectorClipped && railVectorClipped.features.length > 0 && (
+          roadVectorSafety && !roadNetworkAlwaysOn ? (
+            <SafeIndianRailwayLayer data={railVectorClipped} />
+          ) : (
+            <IndianRailwayLayer data={railVectorClipped} />
+          )
         )}
-        {!politicalClean && showRailways && (!railVector || railVector.features.length === 0) && (
+        {!politicalClean && showRailways && (!railVectorClipped || railVectorClipped.features.length === 0) && (
           <TileLayer
             attribution={OPENRAILWAY_TILES.attribution}
             url={OPENRAILWAY_TILES.url}
@@ -2306,9 +2915,9 @@ export const ApLeafletMap = forwardRef<ApLeafletMapHandle, ApLeafletMapProps>(fu
             {...leafletOverzoom(OPENRAILWAY_TILES.maxZoom)}
           />
         )}
-        {!politicalClean && asrOn && asrBoundary && asrBoundary.features.length > 0 && (
+        {!politicalClean && asrOn && asrBoundaryClipped && asrBoundaryClipped.features.length > 0 && (
           <GeoJSON
-            data={asrBoundary}
+            data={asrBoundaryClipped}
             style={{
               color: '#5b21b6',
               weight: 2,
@@ -2319,78 +2928,77 @@ export const ApLeafletMap = forwardRef<ApLeafletMapHandle, ApLeafletMapProps>(fu
             onEachFeature={bindOpsName('ASR Boundary')}
           />
         )}
-        {!politicalClean && showHotspots && opsHotspots && (
-          <OpsHotspotsLayer data={opsHotspots} clipFeature={clipFeature} />
+        {!politicalClean && showHotspots && opsHotspotsClipped && (
+          <OpsHotspotsLayer data={opsHotspotsClipped} clipFeature={clipFeature} />
         )}
-        {!politicalClean && showCheckPosts && checkPosts && (
-          <GeoJSON
-            data={checkPosts}
-            pointToLayer={pointCircle('#1d4ed8', 7)}
-            onEachFeature={bindOpsName('Check Post')}
-          />
+        {!politicalClean && showCheckPosts && checkPostsClipped && (
+          <CheckPostsLayer data={checkPostsClipped} />
         )}
-        {!politicalClean && showTollPlazas && tollPlazas && (
+        {!politicalClean && showTollPlazas && tollPlazasClipped && (
           <GeoJSON
-            data={tollPlazas}
+            data={tollPlazasClipped}
             style={{ color: '#0f766e', weight: 1.2, fillColor: '#14b8a6', fillOpacity: 0.35 }}
             pointToLayer={pointCircle('#0f766e', 6)}
             onEachFeature={bindOpsName('Toll Plaza')}
           />
         )}
-        {!politicalClean && showGanjaSeized && ganjaSeized && (
+        {!politicalClean && showGanjaSeized && ganjaSeizedClipped && (
           <GeoJSON
-            data={ganjaSeized}
+            data={ganjaSeizedClipped}
             pointToLayer={pointCircle('#4338ca', 7)}
             onEachFeature={bindOpsName('Seizure')}
           />
         )}
-        {!politicalClean && showPharmaHubs && pharmaHubs && (
+        {!politicalClean && showPharmaHubs && pharmaHubsClipped && (
           <GeoJSON
-            data={pharmaHubs}
+            data={pharmaHubsClipped}
             pointToLayer={pointCircle('#a16207', 7)}
             onEachFeature={bindOpsName('Pharma Hub')}
           />
         )}
-        {!politicalClean && showDdacs && ddacs && (
+        {!politicalClean && showDdacs && ddacsClipped && (
           <GeoJSON
-            data={ddacs}
+            data={ddacsClipped}
             pointToLayer={pointCircle('#7c2d12', 7)}
             onEachFeature={bindOpsName('DDAC')}
           />
         )}
-        {!politicalClean && showEntryExit && entryExit && (
-          <GeoJSON
-            data={entryExit}
-            pointToLayer={pointCircle('#0369a1', 6)}
-            onEachFeature={bindOpsName('Entry / Exit')}
+        {!politicalClean && showEntryExit && entryExitClipped && (
+          <EntryExitPointsLayer
+            data={entryExitClipped}
+            typeLabels={entryExitTypeLabels}
+            onEachGeneric={bindOpsName('Entry / Exit')}
           />
         )}
-        {!politicalClean && showStockPoints && stockPoints && (
+        {!politicalClean && showStockPoints && stockPointsClipped && (
           <GeoJSON
-            data={stockPoints}
+            data={stockPointsClipped}
             pointToLayer={pointCircle('#9f1239', 7)}
             onEachFeature={bindOpsName('Stock Point')}
           />
         )}
         {!politicalClean && routeLatLngs.length > 1 && (
-          <Polyline positions={routeLatLngs} pathOptions={{ color: '#0f766e', weight: 4, opacity: 0.95 }} />
+          <LeafletLayerErrorBoundary resetKey={`route-${routeLatLngs.length}`}>
+            <Polyline positions={routeLatLngs} pathOptions={{ color: '#0f766e', weight: 4, opacity: 0.95 }} />
+          </LeafletLayerErrorBoundary>
         )}
         {!politicalClean &&
           overlayRoutes
             .filter((r) => r.visible !== false && r.points.length > 1)
             .map((r) => (
-              <Polyline
-                key={r.id}
-                positions={r.points.map((p) => [p.lat, p.lon] as LatLngExpression)}
-                pathOptions={{
-                  color: r.color,
-                  weight: r.weight ?? 4,
-                  opacity: r.opacity ?? 0.92,
-                  dashArray: r.dashArray,
-                  lineCap: 'round',
-                  lineJoin: 'round',
-                }}
-              />
+              <LeafletLayerErrorBoundary key={r.id} resetKey={`${r.id}-${r.points.length}`}>
+                <Polyline
+                  positions={r.points.map((p) => [p.lat, p.lon] as LatLngExpression)}
+                  pathOptions={{
+                    color: r.color,
+                    weight: r.weight ?? 4,
+                    opacity: r.opacity ?? 0.92,
+                    dashArray: r.dashArray,
+                    lineCap: 'round',
+                    lineJoin: 'round',
+                  }}
+                />
+              </LeafletLayerErrorBoundary>
             ))}
         {!politicalClean &&
           geoJsonOverlays
@@ -2399,12 +3007,16 @@ export const ApLeafletMap = forwardRef<ApLeafletMapHandle, ApLeafletMapProps>(fu
               <GeoJSON
                 key={`gj-${o.id}-${o.data.features.length}`}
                 data={o.data}
+                interactive={false}
                 style={(feature) => {
                   const stroke = o.featureStyle?.(feature as GeoJSON.Feature);
+                  const fill = o.fill === true;
                   return {
                     color: stroke?.color ?? o.color,
                     weight: stroke?.weight ?? o.weight ?? 1.6,
                     opacity: o.opacity ?? 0.9,
+                    fill,
+                    fillOpacity: fill ? (o.fillOpacity ?? 0.2) : 0,
                     lineCap: 'round',
                     lineJoin: 'round',
                   };
@@ -2419,7 +3031,7 @@ export const ApLeafletMap = forwardRef<ApLeafletMapHandle, ApLeafletMapProps>(fu
           <Marker
             key={m.id}
             position={[m.lat, m.lon]}
-            icon={markerIcon(m.kind, Boolean(m.selected), m.badge)}
+            icon={markerIcon(m.kind, Boolean(m.selected), m.badge, m.heatIntensity)}
             eventHandlers={{ click: () => onMarkerClick?.(m.id) }}
           >
             <Tooltip sticky direction="top" opacity={0.96}>

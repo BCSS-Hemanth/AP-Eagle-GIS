@@ -1,0 +1,14 @@
+---
+description: Only change modules the user explicitly names; never touch others
+alwaysApply: true
+---
+
+# Module-scoped changes only
+
+When the user asks for a fix or feature:
+
+1. **Change only the module(s) they name** (e.g. Roads Routing, Roads Routing New, Atlas, Locus, Map Viewer, Dashboard).
+2. **Do not modify other modules** — not “while we’re here,” not shared refactors that alter their behaviour, not drive-by cleanups in their files.
+3. **Shared code** (`ApLeafletMap`, `dashboardLayers`, catalog helpers, etc.): prefer **opt-in props / flags** defaulting to existing behaviour so unnamed modules stay unchanged. Never flip global defaults that affect modules the user did not specify.
+4. If a fix seems to require a shared change that would alter another module, **stop and ask** (or implement behind an opt-in used only by the named module) before proceeding.
+5. When in doubt, ask which module(s) are in scope before editing.

@@ -10,7 +10,10 @@ import {
   associateFeaturesWithPois,
   colorForRoutingNewLayer,
   displayRoadsForLayer,
+  filterCollectionToPoiAoi,
   midViewForAoiPoints,
+  POI_CORRIDOR_HALF_WIDTH_KM,
+  poiCorridorClipFeature,
   radiusQueryBbox,
   routeStrokeForProperties,
   routingNewLayersFromConfig,
@@ -47,6 +50,7 @@ interface RoadsRoutingNewWorkspaceProps {
   allLayers: GisLayer[];
   routingNewConfig: RoadsRoutingNewLayerConfig;
   onChangeLayerVisibility: (layerId: string, enabled: boolean) => void;
+  onEnableAllSavedLayers: () => void;
   onRemoveLayer: (layerId: string) => void;
   onClearSavedLayers: (layerIds: string[]) => void;
   onSwitchWorkspace: (ws: WorkspaceId) => void;
@@ -85,6 +89,7 @@ export const RoadsRoutingNewWorkspace: React.FC<RoadsRoutingNewWorkspaceProps> =
   allLayers,
   routingNewConfig,
   onChangeLayerVisibility,
+  onEnableAllSavedLayers: _onEnableAllSavedLayers,
   onRemoveLayer,
   onClearSavedLayers,
   onSwitchWorkspace,
@@ -115,7 +120,6 @@ export const RoadsRoutingNewWorkspace: React.FC<RoadsRoutingNewWorkspaceProps> =
   } | null>(null);
   const [boundsToken, setBoundsToken] = useState(0);
   const suppressMapClickRef = useRef(false);
-  const [bufferKm, setBufferKm] = useState(25);
   const [fetchStates, setFetchStates] = useState<Record<string, LayerFetchState>>({});
   const [busy, setBusy] = useState(false);
   const [viewToken, setViewToken] = useState(1);
@@ -202,22 +206,23 @@ export const RoadsRoutingNewWorkspace: React.FC<RoadsRoutingNewWorkspaceProps> =
       onTriggerToast('Save layers from Admin, OPS, or Road Network, then Display Road Networks');
       return;
     }
-    // Load every saved radius road layer, including Eye-hidden ones. Visibility stays on the Eye.
+    // Zoom to the pin corridor first — enabling dense networks at India scale
+    // loads tens of thousands of SVG paths and crashes Leaflet (appendChild).
+    // Layers stay Eye-off after load; user turns them on from Saved layers.
+    setViewMode('aoi');
+    setViewToken((t) => t + 1);
+
     const candidates = savedLayers.filter((l) => usesRoutingNewRadiusMatch(l.id));
     if (!candidates.length) {
       setHasDisplayed(true);
-      setViewMode('aoi');
-      setViewToken((t) => t + 1);
       onTriggerToast(
-        `Saved layers ready for ${pois.length} POI${pois.length === 1 ? '' : 's'} — turn the Eye on to show them on the map`
+        `Layers loaded for ${pois.length} POI${pois.length === 1 ? '' : 's'} — Eye-on to show (no radius road networks to match)`
       );
       return;
     }
 
     const gen = ++loadGenRef.current;
     setBusy(true);
-    setViewMode('aoi');
-    setViewToken((t) => t + 1);
 
     const next: Record<string, LayerFetchState> = {};
     for (const layer of candidates) {
@@ -262,7 +267,7 @@ export const RoadsRoutingNewWorkspace: React.FC<RoadsRoutingNewWorkspaceProps> =
             if (!apiLayer) throw new Error('Unknown API layer');
             const parts = await Promise.all(
               pois.map(async (poi) => {
-                const box = radiusQueryBbox(poi, bufferKm);
+                const box = radiusQueryBbox(poi, POI_CORRIDOR_HALF_WIDTH_KM);
                 const fetchUrl = `/api/gis-roads/geojson?layer=${apiLayer}&bbox=${box.west},${box.south},${box.east},${box.north}&limit=25000`;
                 const cached = fcCacheRef.current.get(fetchUrl);
                 if (cached) return cached;
@@ -285,9 +290,12 @@ export const RoadsRoutingNewWorkspace: React.FC<RoadsRoutingNewWorkspaceProps> =
           }
 
           const display = displayRoadsForLayer(layer.id, full);
-          const associated = associateFeaturesWithPois(display.fc, pois, bufferKm, {
-            clip: display.clip,
-          });
+          const associated = associateFeaturesWithPois(
+            display.fc,
+            pois,
+            POI_CORRIDOR_HALF_WIDTH_KM,
+            { clip: display.clip }
+          );
           const fc: GeoJSON.FeatureCollection = {
             type: 'FeatureCollection',
             features: associated.features,
@@ -332,30 +340,55 @@ export const RoadsRoutingNewWorkspace: React.FC<RoadsRoutingNewWorkspaceProps> =
     setHasDisplayed(true);
     const n = pois.length;
     onTriggerToast(
-      `Road networks loaded for ${n} POI${n === 1 ? '' : 's'} (±${bufferKm} km) — layers stay hidden until you turn the Eye on`
+      `Road networks loaded for ${n} POI${n === 1 ? '' : 's'} (pin corridor) — Eye-on to show`
     );
-  }, [pois, bufferKm, savedLayers, onTriggerToast]);
+  }, [pois, savedLayers, onTriggerToast]);
+
+  /** Half of Roads Routing route-alternative weight (6 → 3). */
+  const ROAD_NETWORK_WEIGHT = 3;
+
+  const poiLonLats = useMemo(
+    () => pois.map((p) => ({ lon: p.lon, lat: p.lat })),
+    [pois]
+  );
+
+  const corridorClipFeature = useMemo(
+    () => (poiLonLats.length ? poiCorridorClipFeature(poiLonLats) : null),
+    [poiLonLats]
+  );
+
+  const filterMapLayers = useCallback(
+    (fc: GeoJSON.FeatureCollection) => {
+      if (!poiLonLats.length) return { type: 'FeatureCollection', features: [] };
+      return filterCollectionToPoiAoi(fc, poiLonLats, POI_CORRIDOR_HALF_WIDTH_KM);
+    },
+    [poiLonLats]
+  );
 
   const geoJsonOverlays = useMemo(() => {
     return savedLayers
       .filter((l) => l.enabled)
       .map((l) => {
         const st = fetchStates[l.id];
+        const raw = st?.fc ?? { type: 'FeatureCollection' as const, features: [] };
         return {
           id: l.id,
           color: colorForRoutingNewLayer(l.id),
-          weight: l.id === 'lyr-highways' ? 3.6 : 2.2,
-          opacity: 0.92,
+          weight: ROAD_NETWORK_WEIGHT,
+          opacity: 1,
+          fill: false,
           visible: Boolean(st && !st.loading && st.count > 0),
-          data: st?.fc ?? { type: 'FeatureCollection' as const, features: [] },
+          data: poiLonLats.length
+            ? filterCollectionToPoiAoi(raw, poiLonLats, POI_CORRIDOR_HALF_WIDTH_KM)
+            : raw,
           featureStyle: (feature: GeoJSON.Feature) => {
             const stroke = routeStrokeForProperties(feature.properties);
-            return stroke ? { color: stroke.color, weight: stroke.weight } : null;
+            return stroke ? { color: stroke.color, weight: ROAD_NETWORK_WEIGHT } : null;
           },
         };
       })
       .filter((o) => o.visible && o.data.features.length > 0);
-  }, [savedLayers, fetchStates]);
+  }, [savedLayers, fetchStates, poiLonLats]);
 
   const markers = useMemo(() => {
     return pois.map((p, i) => ({
@@ -378,9 +411,9 @@ export const RoadsRoutingNewWorkspace: React.FC<RoadsRoutingNewWorkspaceProps> =
         token: viewToken,
       };
     }
-    const mid = midViewForAoiPoints(pois, bufferKm);
+    const mid = midViewForAoiPoints(pois, POI_CORRIDOR_HALF_WIDTH_KM);
     return { ...mid, token: viewToken };
-  }, [pois, bufferKm, viewToken, viewMode]);
+  }, [pois, viewToken, viewMode]);
 
   const savedCount = savedLayers.length;
   const mapOn = (id: string) => savedLayers.some((layer) => layer.id === id && layer.enabled);
@@ -451,8 +484,11 @@ export const RoadsRoutingNewWorkspace: React.FC<RoadsRoutingNewWorkspaceProps> =
         ? `Point placement — click the map to add ${poiLabel(pois.length)}`
         : `Point placement in ${pickedState.name} — click the map to place ${poiLabel(0)}`;
     }
+    if (pois.length && hasDisplayed) {
+      return 'Pin corridor active — Eye-on layers show road networks between the pins';
+    }
     if (pois.length) {
-      return 'Click a state to zoom in before placing more points';
+      return 'Pins set — Display Road Networks, then Eye-on layers (corridor between pins only)';
     }
     return 'Click a state to zoom in. Pins are placed only after that zoom.';
   })();
@@ -538,24 +574,6 @@ export const RoadsRoutingNewWorkspace: React.FC<RoadsRoutingNewWorkspaceProps> =
             )}
           </div>
 
-          <label className="block text-[10px] font-semibold text-on-surface-variant uppercase tracking-wider">
-            AOI buffer (km around selected points)
-            <input
-              type="number"
-              min={5}
-              max={150}
-              step={5}
-              value={bufferKm}
-              onChange={(e) => {
-                const next = Math.max(5, Math.min(150, Number(e.target.value) || 25));
-                setBufferKm(next);
-              }}
-              onBlur={() => {
-                if (hasDisplayed && pois.length) void loadNetworks();
-              }}
-              className="mt-1 h-8 w-full px-2 rounded border border-outline-variant/50 bg-white text-xs font-mono"
-            />
-          </label>
           <button
             type="button"
             data-testid="roads-routing-new-display"
@@ -674,9 +692,9 @@ export const RoadsRoutingNewWorkspace: React.FC<RoadsRoutingNewWorkspaceProps> =
                             </div>
                             <div>
                               {st.count > 0
-                                ? 'Loaded · matches in AOI'
+                                ? 'Loaded · matches in corridor'
                                 : 'Loaded · no matching features'}
-                              {layer.enabled ? '' : ' · turn Eye on to show'}
+                              {layer.enabled ? '' : ' · hidden'}
                             </div>
                             {poiHits.length > 0 && (
                               <div>
@@ -703,10 +721,14 @@ export const RoadsRoutingNewWorkspace: React.FC<RoadsRoutingNewWorkspaceProps> =
                 ))}
               </div>
             )}
-            {hasDisplayed && !loadingAny && layersWithMatches === 0 && savedLayers.some((l) => l.enabled) && (
+            {hasDisplayed &&
+              !loadingAny &&
+              layersWithMatches === 0 &&
+              savedLayers.some((l) => l.enabled && usesRoutingNewRadiusMatch(l.id)) && (
               <p className="mt-2 text-[10px] text-on-surface-variant">
-                No road-network features found around the selected point
-                {pois.length === 1 ? '' : 's'} at this buffer. Try a larger buffer or different POIs.
+                No radius-matched road features near the selected point
+                {pois.length === 1 ? '' : 's'} at this buffer. Zoom in for Full / OPS map layers,
+                or try a larger buffer.
               </p>
             )}
           </section>
@@ -749,6 +771,9 @@ export const RoadsRoutingNewWorkspace: React.FC<RoadsRoutingNewWorkspaceProps> =
           boundsView={boundsView}
           markers={markers}
           geoJsonOverlays={geoJsonOverlays}
+          filterMapLayers={poiLonLats.length ? filterMapLayers : undefined}
+          layerClipFeature={corridorClipFeature}
+          suppressUnclippedRoadTiles={poiLonLats.length > 0}
           showStateBorder={mapOn('lyr-state-border')}
           showDistricts={mapOn('lyr-districts')}
           showMandals={mapOn('lyr-mandals')}
@@ -762,9 +787,12 @@ export const RoadsRoutingNewWorkspace: React.FC<RoadsRoutingNewWorkspaceProps> =
           showGraticule={mapOn('lyr-soi-grid')}
           showHighways={mapOn('lyr-highways')}
           showTrails={mapOn('lyr-forest-trails')}
+          roadNetworkAlwaysOn
           showOpsMainRoads={mapOn('lyr-ops-main-roads')}
           showOpsInternalRoads={mapOn('lyr-ops-internal-roads')}
           showApRoadsMajor={mapOn('lyr-ap-roads-major')}
+          showApRoadsFull={mapOn('lyr-ap-roads-full')}
+          showOpsVspRoads={mapOn('lyr-ops-vsp-roads')}
           showRailways={mapOn('lyr-railways')}
           showRivers={mapOn('lyr-rivers')}
           showWaterbodies={mapOn('lyr-waterbodies')}
@@ -781,7 +809,7 @@ export const RoadsRoutingNewWorkspace: React.FC<RoadsRoutingNewWorkspaceProps> =
           initialCenter={INDIA_CENTER}
           initialZoom={INDIA_DEFAULT_ZOOM}
           viewTarget={viewTarget}
-          layoutRevision={`roads-routing-new:npoi:${pois.length}:${savedLayers.map((l) => `${l.id}:${l.enabled ? 1 : 0}`).join(',')}:${totalFeatures}:${pickedState?.name ?? ''}:${placing ? 'place' : 'browse'}`}
+          layoutRevision={`roads-routing-new:npoi:${pois.length}:${savedLayers.map((l) => `${l.id}:${l.enabled ? 1 : 0}`).join(',')}:${totalFeatures}:${pickedState?.name ?? ''}:${placing ? 'place' : 'browse'}:corridor`}
         />
         <div
           data-testid="roads-routing-new-map-hint"

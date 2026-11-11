@@ -820,9 +820,9 @@ export const ApMapLibre3DMap = forwardRef<ApLeafletMapHandle, ApMapLibre3DMapPro
         addFill('admin-districts-fill', 'admin-districts', '#0f2942', 0.04);
         addLine('admin-districts-line', 'admin-districts', '#0f2942', 1.05);
         addFill('admin-mandals-fill', 'admin-mandals', '#94a3b8', 0.04);
-        addLine('admin-mandals-line', 'admin-mandals', '#475569', 0.75);
+        addLine('admin-mandals-line', 'admin-mandals', '#000000', 1.4);
         addFill('admin-villages-fill', 'admin-villages', '#cbd5e1', 0.05);
-        addLine('admin-villages-line', 'admin-villages', '#334155', 0.6);
+        addLine('admin-villages-line', 'admin-villages', '#000000', 1.0);
         const addLabel = (id: string, source: string, field: string, size: number, minzoom: number) => {
           if (map.getLayer(id)) return;
           try {

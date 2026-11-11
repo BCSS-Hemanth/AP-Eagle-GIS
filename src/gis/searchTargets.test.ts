@@ -14,20 +14,21 @@ describe('global search targets', () => {
   ) as GeoJSON.FeatureCollection;
   const rows = policeStationsToRows(data);
 
-  it('includes KMZ Araku-PS and no invented inspectable station', () => {
+  it('excludes KMZ police stations from header search targets', () => {
     const targets = buildSearchTargets(INSPECTABLE_FEATURES, rows);
-    const arakuHits = targets.filter((t) => /araku/i.test(t.name));
-    expect(arakuHits.some((t) => t.id === 'araku_ps')).toBe(true);
-    expect(arakuHits.some((t) => t.id === 'ps-araku')).toBe(false);
+    expect(targets).toHaveLength(0);
+    expect(targets.some((t) => t.id === 'ps_maredumilli')).toBe(false);
+    expect(targets.some((t) => t.id === 'ps_chintapalli')).toBe(false);
+    expect(targets.some((t) => t.id === 'ps_bhupalpalli')).toBe(false);
   });
 
-  it('flies header search for Araku-PS to the KMZ point', () => {
+  it('still resolves a KMZ station id for map fly (not via search index)', () => {
     const targets = buildSearchTargets(INSPECTABLE_FEATURES, rows);
-    const resolved = resolveFlyTarget('araku_ps', INSPECTABLE_FEATURES, rows, targets);
-    expect(resolved?.stationId).toBe('araku_ps');
-    expect(resolved?.feature.name).toBe('Araku-PS');
-    expect(resolved?.feature.lat).toBeCloseTo(18.3236, 3);
-    expect(resolved?.feature.lon).toBeCloseTo(82.8864, 3);
+    const resolved = resolveFlyTarget('ps_chintapalli', INSPECTABLE_FEATURES, rows, targets);
+    expect(resolved?.stationId).toBe('ps_chintapalli');
+    expect(resolved?.feature.name).toBe('PS-Chintapalli');
+    expect(resolved?.feature.lat).toBeCloseTo(17.8698, 3);
+    expect(resolved?.feature.lon).toBeCloseTo(82.3499, 3);
   });
 
   it('does not resolve invented inspectable station ids', () => {

@@ -119,14 +119,15 @@ describe('dashboard layer catalog save', () => {
     expect(roadsOnly['lyr-highways']?.enabled).toBe(false);
     expect(roadsOnly['lyr-ap-roads-major']).toBeUndefined();
 
-    const keepEye = destinationConfigFromSelection(
+    const keepOpacity = destinationConfigFromSelection(
       layers,
       new Set(['lyr-highways']),
       'assigned',
       (layer) => layer.id === 'lyr-highways',
       { 'lyr-highways': { enabled: true, opacity: 80 } }
     );
-    expect(keepEye['lyr-highways']).toEqual({ enabled: true, opacity: layers.find((l) => l.id === 'lyr-highways')!.opacity });
+    // Save always stores Eye-off; prior opacity is kept.
+    expect(keepOpacity['lyr-highways']).toEqual({ enabled: false, opacity: 80 });
   });
 
   it('hover lists show live catalog selection immediately plus saved destination layers', () => {

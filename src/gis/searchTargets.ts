@@ -1,5 +1,4 @@
 import { InspectableFeature, PoliceStationRow } from '../types/gis';
-import { MAJOR_CITIES } from '../data/apGeo';
 import {
   findLinkedStation,
   matchInspectableStation,
@@ -113,31 +112,16 @@ export function featureToStationRow(feature: InspectableFeature): PoliceStationR
   };
 }
 
+/** KMZ / Border PS stay on the map layers; they are not header search targets. */
+export function isHeaderSearchPoliceStation(_row: PoliceStationRow): boolean {
+  return false;
+}
+
 export function buildSearchTargets(
   inspectable: Record<string, InspectableFeature>,
-  kmzRows: PoliceStationRow[]
+  _kmzRows: PoliceStationRow[]
 ): InspectableFeature[] {
-  const kmzFeatures = kmzRows.map((row) =>
-    stationToInspectable(row, matchInspectableStation(row, inspectable))
-  );
-  const linkedIds = new Set(
-    kmzRows
-      .map((row) => matchInspectableStation(row, inspectable)?.id)
-      .filter((id): id is string => Boolean(id))
-  );
-  const rest = Object.values(inspectable).filter((feature) => !linkedIds.has(feature.id));
-  const cities = MAJOR_CITIES.map((city) =>
-    placeToInspectable({
-      id: `city:${city.name}`,
-      kind: 'District',
-      name: city.name,
-      lat: city.lat,
-      lon: city.lon,
-      district: city.name,
-      parent: city.kind.toUpperCase(),
-    })
-  );
-  return [...kmzFeatures, ...rest, ...cities];
+  return Object.values(inspectable);
 }
 
 export function resolveFlyTarget(

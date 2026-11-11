@@ -140,9 +140,6 @@ export const SavedLayersHoverMenu: React.FC<SavedLayersHoverMenuProps> = ({
               ))}
             </div>
           )}
-          <p className="px-2.5 py-1 border-t border-outline-variant/25 text-[9px] text-on-surface-variant">
-            Remove only — add layers from the catalog table, then Save.
-          </p>
         </div>
       )}
     </div>

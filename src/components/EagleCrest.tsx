@@ -1,44 +1,16 @@
 import React, { useState, useEffect } from 'react';
 import { InspectableFeature } from '../types/gis';
 
+const EAGLE_CREST_SRC = '/assets/eagle-force-crest.png';
+
 export const EagleCrest: React.FC<{ className?: string }> = ({ className = 'w-8 h-8' }) => {
   return (
-    <svg
-      viewBox="0 0 48 48"
-      fill="none"
-      xmlns="http://www.w3.org/2000/svg"
-      className={className}
-      aria-label="EAGLE Force Andhra Pradesh Crest"
-    >
-      {/* Outer Tactical Shield */}
-      <path
-        d="M24 3L6 9.5V22.5C6 33.8 13.7 42.9 24 46C34.3 42.9 42 33.8 42 22.5V9.5L24 3Z"
-        fill="#001428"
-        stroke="#0f2942"
-        strokeWidth="1.5"
-      />
-      {/* Inner Gold/Teal Trim Shield */}
-      <path
-        d="M24 6.2L9.2 11.6V22.4C9.2 31.8 15.5 39.6 24 42.4C32.5 39.6 38.8 31.8 38.8 22.4V11.6L24 6.2Z"
-        fill="#0f2942"
-        stroke="#d4af37"
-        strokeWidth="1.1"
-      />
-      {/* Geospatial Latitude/Longitude Globe Ring */}
-      <circle cx="24" cy="23" r="9.5" stroke="#006a61" strokeWidth="1.1" strokeOpacity="0.85" />
-      <ellipse cx="24" cy="23" rx="4.8" ry="9.5" stroke="#86f2e4" strokeWidth="0.7" strokeOpacity="0.55" />
-      <line x1="14.5" y1="23" x2="33.5" y2="23" stroke="#86f2e4" strokeWidth="0.7" strokeOpacity="0.55" />
-      {/* Stylized Sovereign Eagle Wings */}
-      <path
-        d="M12.5 19.5C15.8 19.2 18.8 20.6 21.2 22.8L24 16.5L26.8 22.8C29.2 20.6 32.2 19.2 35.5 19.5C33.8 23.2 30.8 25.4 26.8 26.2L28.5 31.5L24 28.8L19.5 31.5L21.2 26.2C17.2 25.4 14.2 23.2 12.5 19.5Z"
-        fill="#f8fafc"
-      />
-      {/* Sovereign Gold Crown Star */}
-      <polygon
-        points="24,9.5 25.1,12.1 27.9,12.3 25.7,14.1 26.4,16.8 24,15.3 21.6,16.8 22.3,14.1 20.1,12.3 22.9,12.1"
-        fill="#fbbf24"
-      />
-    </svg>
+    <img
+      src={EAGLE_CREST_SRC}
+      alt="EAGLE Force Andhra Pradesh Crest"
+      className={`${className} object-contain`}
+      draggable={false}
+    />
   );
 };
 

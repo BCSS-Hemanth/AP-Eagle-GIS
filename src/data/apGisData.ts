@@ -318,7 +318,7 @@ export const INITIAL_GIS_LAYERS: GisLayer[] = [
     codeName: 'internal_roads',
     enabled: false,
     opacity: 85,
-    swatchType: 'line-navy',
+    swatchType: 'line-violet',
     metaRight: 'GIS-Source OPS KMZ',
     geometryType: 'LineString',
     featureCount: 404,

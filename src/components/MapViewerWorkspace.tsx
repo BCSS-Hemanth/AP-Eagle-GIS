@@ -1181,6 +1181,9 @@ export const MapViewerWorkspace: React.FC<MapViewerWorkspaceProps> = ({
                                 {lyr.swatchType === 'line-trail' && (
                                   <span className="w-3 h-0 border-t border-dotted border-secondary shrink-0" />
                                 )}
+                                {lyr.swatchType === 'line-violet' && (
+                                  <span className="w-3 h-0.5 bg-[#7c3aed] rounded-full shrink-0" />
+                                )}
                                 {lyr.swatchType === 'line-rail' && (
                                   <span
                                     className="w-3 h-0.5 shrink-0 border-t-2 border-dashed"

@@ -22,28 +22,22 @@ describe('authenticate', () => {
 
 describe('RBAC workspace matrix', () => {
   it('gives state admin every workspace', () => {
-    expect(allowedWorkspaces('STATE_SPATIAL_ADMIN')).toContain('feature-editor');
+    expect(allowedWorkspaces('STATE_SPATIAL_ADMIN')).toContain('atlas');
     expect(canAccessWorkspace('STATE_SPATIAL_ADMIN', 'users-audit-trail')).toBe(true);
     expect(canAccessWorkspace('STATE_SPATIAL_ADMIN', 'administrative-layers')).toBe(true);
-    expect(canAccessWorkspace('STATE_SPATIAL_ADMIN', 'atlas-map-books')).toBe(true);
+    expect(canAccessWorkspace('STATE_SPATIAL_ADMIN', 'atlas')).toBe(true);
   });
 
   it('hides write workspaces from analyst viewers', () => {
-    expect(canAccessWorkspace('ANALYST_VIEWER', 'interactive-map')).toBe(true);
-    expect(canAccessWorkspace('ANALYST_VIEWER', 'feature-editor')).toBe(false);
-    expect(canAccessWorkspace('ANALYST_VIEWER', 'import-export')).toBe(
-      false
-    );
+    expect(canAccessWorkspace('ANALYST_VIEWER', 'ndps-spatial-dashboard')).toBe(true);
+    expect(canAccessWorkspace('ANALYST_VIEWER', 'atlas')).toBe(true);
     expect(canAccessWorkspace('ANALYST_VIEWER', 'mobile-locus-export')).toBe(false);
+    expect(canAccessWorkspace('ANALYST_VIEWER', 'users-audit-trail')).toBe(false);
   });
 
-  it('lets field commanders digitize but not import', () => {
-    expect(canAccessWorkspace('FIELD_COMMANDER_EAGLE', 'feature-editor')).toBe(
-      true
-    );
-    expect(
-      canAccessWorkspace('FIELD_COMMANDER_EAGLE', 'import-export')
-    ).toBe(false);
+  it('lets field commanders access ops maps but not user admin', () => {
+    expect(canAccessWorkspace('FIELD_COMMANDER_EAGLE', 'operational-layers')).toBe(true);
+    expect(canAccessWorkspace('FIELD_COMMANDER_EAGLE', 'users-audit-trail')).toBe(false);
   });
 });
 

@@ -60,7 +60,7 @@ export function mergeEnabledLayersIntoRoutingConfig(
   for (const layer of layers) {
     if (groupFilter && !groupFilter.includes(layer.groupId)) continue;
     if (!layer.enabled) continue;
-    next[layer.id] = { enabled: true, opacity: layer.opacity };
+    next[layer.id] = { enabled: false, opacity: layer.opacity };
   }
   return next;
 }

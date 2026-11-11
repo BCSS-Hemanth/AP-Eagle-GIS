@@ -6,19 +6,16 @@ import type { ComponentType } from 'react';
 import {
   BookOpen,
   Compass,
-  Edit3,
   FileBarChart2,
   Grid,
   Layers,
   Activity,
   LayoutDashboard,
-  Map as MapIcon,
   Navigation2,
   Route,
   Satellite,
   Share2,
   ShieldCheck,
-  Upload,
 } from 'lucide-react';
 import type { WorkspaceId } from '../types/gis';
 
@@ -49,7 +46,6 @@ export const APP_NAV_SECTIONS: AppNavSection[] = [
         label: 'NDPS Analytics',
         icon: Activity,
       },
-      { id: 'interactive-map', label: 'Interactive Map', icon: MapIcon },
     ],
   },
   {
@@ -62,17 +58,15 @@ export const APP_NAV_SECTIONS: AppNavSection[] = [
       { id: 'roads-routing', label: 'Roads Routing', icon: Navigation2 },
       { id: 'roads-routing-new', label: 'Roads Routing New', icon: Satellite },
       { id: 'raster-imagery', label: 'Raster & Imagery', icon: Grid },
-      { id: 'import-export', label: 'Import & Export', icon: Upload },
-      { id: 'feature-editor', label: 'Feature Editor', icon: Edit3 },
     ],
   },
   {
     id: 'm3',
     title: 'Products & Field',
     items: [
-      { id: 'atlas-map-books', label: 'Atlas & Map Books', icon: BookOpen },
+      { id: 'atlas', label: 'Atlas', icon: BookOpen },
       { id: 'reports-seizure-analytics', label: 'Reports & Seizure Analytics', icon: FileBarChart2 },
-      { id: 'mobile-locus-export', label: 'Mobile / Locus Export', icon: Share2 },
+      { id: 'mobile-locus-export', label: 'Locus', icon: Share2 },
     ],
   },
   {

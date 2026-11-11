@@ -28,12 +28,15 @@ export const MAPLIBRE_TERRAIN_TILES = 'https://s3.amazonaws.com/elevation-tiles-
 export const MAPLIBRE_3D_ATTRIBUTION =
   'Terrain &copy; Mapzen / AWS elevation tiles. 3D buildings from OpenStreetMap where heights exist. Not Google.';
 
-/** Quiet India overview underlay — no city/state names (avoids clash with our state tooltips). */
+/**
+ * Quiet India overview underlay — light canvas, sparse labels (avoids clash with our state tooltips).
+ * Do not use CARTO basemaps.cartocdn without an API key (tiles render “API KEY REQUIRED”).
+ */
 export const INDIA_OVERVIEW_UNDERLAY_TILES = {
-  url: 'https://{s}.basemaps.cartocdn.com/light_nolabels/{z}/{x}/{y}{r}.png',
+  url: 'https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Light_Gray_Base/MapServer/tile/{z}/{y}/{x}',
   attribution:
-    '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/">CARTO</a>',
-  maxZoom: 19,
+    'Tiles &copy; Esri &mdash; Esri, DeLorme, NAVTEQ',
+  maxZoom: 16,
 };
 
 export const BASEMAP_TILES: Record<
@@ -61,10 +64,10 @@ export const BASEMAP_TILES: Record<
   },
   hybrid: {
     url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
-    attribution: 'Imagery &copy; Esri | Labels &copy; CARTO',
+    attribution: 'Imagery &copy; Esri',
     maxZoom: 19,
     labelsUrl:
-      'https://{s}.basemaps.cartocdn.com/rastertiles/voyager_only_labels/{z}/{x}/{y}{r}.png',
+      'https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}',
   },
 };
 

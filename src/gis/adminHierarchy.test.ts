@@ -11,6 +11,8 @@ import {
   featureCentroid,
   filterByAdminName,
   filterFeaturesInParent,
+  filterCollectionToParent,
+  featureIntersectsParent,
   clipFeatureToParent,
   focusPolygonAtPoint,
   isolateChildFeature,
@@ -59,12 +61,85 @@ describe('admin hierarchy spatial join', () => {
     ]);
   });
 
+  it('filters mixed geometry collections to the parent extent', () => {
+    const parent = square(0, 0, 10, 10, { district_name: 'Parent' });
+    const fc: GeoJSON.FeatureCollection = {
+      type: 'FeatureCollection',
+      features: [
+        {
+          type: 'Feature',
+          properties: { id: 'in-pt' },
+          geometry: { type: 'Point', coordinates: [5, 5] },
+        },
+        {
+          type: 'Feature',
+          properties: { id: 'out-pt' },
+          geometry: { type: 'Point', coordinates: [20, 20] },
+        },
+        {
+          type: 'Feature',
+          properties: { id: 'in-line' },
+          geometry: {
+            type: 'LineString',
+            coordinates: [
+              [1, 1],
+              [8, 8],
+            ],
+          },
+        },
+        {
+          type: 'Feature',
+          properties: { id: 'out-line' },
+          geometry: {
+            type: 'LineString',
+            coordinates: [
+              [20, 20],
+              [21, 21],
+            ],
+          },
+        },
+        square(2, 2, 3, 3, { id: 'in-poly' }),
+        square(30, 30, 31, 31, { id: 'out-poly' }),
+      ],
+    };
+    const filtered = filterCollectionToParent(fc, parent)!;
+    expect(filtered.features.map((f) => f.properties?.id)).toEqual(['in-pt', 'in-line', 'in-poly']);
+    expect(featureIntersectsParent(fc.features[0], parent)).toBe(true);
+    expect(featureIntersectsParent(fc.features[1], parent)).toBe(false);
+  });
+
   it('matches mandal names after stripping administrative tokens', () => {
     const children = asFeatureCollection([
       square(0, 0, 1, 1, { mandal_name: 'Markapur Mandal' }),
     ]).features;
     expect(filterByAdminName(children, 'mandal_name', 'markapur').length).toBe(1);
     expect(adminNamesEqual('Y.S.R.', 'YSR')).toBe(true);
+  });
+
+  it('keeps ASR mandals and drops neighboring East Godavari / Kakinada villages', () => {
+    const districts = JSON.parse(
+      readFileSync(resolvePath(root, 'public/geo/ap-districts-2022.geojson'), 'utf8')
+    ) as GeoJSON.FeatureCollection;
+    const mandals = JSON.parse(
+      readFileSync(resolvePath(root, 'public/geo/ap-mandals.geojson'), 'utf8')
+    ) as GeoJSON.FeatureCollection;
+    const villages = JSON.parse(
+      readFileSync(resolvePath(root, 'public/geo/villages/east_godavari.geojson'), 'utf8')
+    ) as GeoJSON.FeatureCollection;
+    const asr = districts.features.find((f) =>
+      adminNamesEqual(String((f.properties as { district_name?: string }).district_name), 'Alluri Sitharama Raju')
+    );
+    expect(asr).toBeTruthy();
+    const asrMandals = filterFeaturesInParent(mandals.features, asr!);
+    expect(asrMandals).toHaveLength(22);
+    expect(asrMandals.every((f) => f.properties?.district_name === 'Alluri Sitharama Raju')).toBe(true);
+
+    const neighbor = villages.features.filter((f) => {
+      const props = f.properties as { village_name?: string; mandal_name?: string };
+      return props.village_name === 'Gokavaram' && props.mandal_name === 'Prathipadu';
+    });
+    expect(neighbor.length).toBeGreaterThan(0);
+    expect(filterFeaturesInParent(neighbor, asr!)).toHaveLength(0);
   });
 
   it('parents Konakanamitla inside Prakasam using 2022 district polygons', () => {
@@ -174,7 +249,7 @@ describe('admin hierarchy spatial join', () => {
 
     const parent = square(79.5, 16.0, 80.6, 16.8, { district_name: 'Guntur' });
     const clipped = clipFeatureToParent(merged, parent);
-    expect(clipped.geometry?.type).toBe('Polygon');
+    expect(clipped?.geometry?.type).toBe('Polygon');
   });
 
   it('splits the real Rajupalem MultiPolygon to the Guntur click, not the distant part', () => {
@@ -207,11 +282,12 @@ describe('admin hierarchy spatial join', () => {
 
     // NWIC Rajupalem sits in 2022 Palnadu, not 2022 Guntur (vintage split).
     const clipped = clipFeatureToParent(merged!, palnadu!);
-    expect(clipped.geometry?.type).toBe('Polygon');
-    const clipLons = (clipped.geometry as GeoJSON.Polygon).coordinates[0].map((p) => Number(p[0]));
+    expect(clipped?.geometry?.type).toBe('Polygon');
+    const clipLons = (clipped!.geometry as GeoJSON.Polygon).coordinates[0].map((p) => Number(p[0]));
     expect(Math.min(...clipLons)).toBeGreaterThan(79.8);
     expect(Math.max(...clipLons)).toBeLessThan(80.2);
-    expect(clipFeatureToParent(merged!, guntur!).geometry?.type).toBe('MultiPolygon');
+    // Centroid-only parenting must not keep distant MultiPolygon parts via bbox overlap.
+    expect(clipFeatureToParent(merged!, guntur!)).toBeNull();
 
     const nearMiss = isolateChildFeature(merged!, [80.08, 16.43], palnadu);
     expect(nearMiss.geometry?.type).toBe('Polygon');

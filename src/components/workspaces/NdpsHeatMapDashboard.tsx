@@ -94,6 +94,7 @@ export const NdpsHeatMapDashboard: React.FC<NdpsHeatMapDashboardProps> = ({
         showPharmaHubs={mapFlags.showPharmaHubs}
         showDdacs={mapFlags.showDdacs}
         showEntryExit={mapFlags.showEntryExit}
+        entryExitTypeLabels
         showStockPoints={mapFlags.showStockPoints}
         showOpsMainRoads={mapFlags.showOpsMainRoads}
         showOpsInternalRoads={mapFlags.showOpsInternalRoads}

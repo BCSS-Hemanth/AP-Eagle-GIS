@@ -56,8 +56,8 @@ export function applyLayerConfig(layers: GisLayer[], config: DashboardLayerConfi
  * Config a Save button should write from the current selection.
  * `snapshot` (Dashboard) records every layer: selected on, the rest off.
  * `assigned` (Roads Routing / Roads Routing New) keeps only selected layers,
- * hidden on the map by default (`enabled: false`). The Eye icon turns them on.
- * Re-saving keeps the previous Eye state for layers that were already assigned.
+ * always Eye-off on Save (`enabled: false`). The Eye icon turns them on.
+ * Find Routes / Display Road Networks can enable saved layers in bulk.
  * `accept` drops layers that destination cannot store; unselected layers are omitted, so a later Save removes them.
  */
 export function destinationConfigFromSelection(
@@ -74,8 +74,8 @@ export function destinationConfigFromSelection(
     if (mode === 'assigned' && !selected) continue;
     if (mode === 'assigned') {
       out[layer.id] = {
-        enabled: previous?.[layer.id]?.enabled ?? false,
-        opacity: layer.opacity,
+        enabled: false,
+        opacity: previous?.[layer.id]?.opacity ?? layer.opacity,
       };
       continue;
     }

@@ -1,0 +1,116 @@
+{
+  "phase": "1C-raster-kmz",
+  "generatedAt": "2026-11-03T10:08:09.920733+00:00",
+  "sourceRoot": "C:\\Users\\HEMANTH\\OneDrive\\Desktop\\GIS-Source\\Raster\\Raster",
+  "conflictPolicy": {
+    "lyr-cartosat": "Replaces Esri World Imagery \u2014 uses google_sat + aob + nt_cg",
+    "lyr-hillshade": "Replaces Esri World Hillshade \u2014 uses google_terrain",
+    "basemap-topo-aoi": "SOI mosaic (soi_topo) preferred over OpenTopoMap inside coverage",
+    "duplicates": "Loose JPG/PNG copies omitted; KMZ LatLonBox is authoritative"
+  },
+  "products": [
+    {
+      "id": "google_roadmap",
+      "file": "google_roadmap/manifest.json",
+      "overlays": 1,
+      "levels": [
+        0
+      ],
+      "role": "roadmap",
+      "coverage": {
+        "north": 19.2937774296294,
+        "south": 16.72337690606434,
+        "east": 84.8389430730627,
+        "west": 79.50351725595735
+      }
+    },
+    {
+      "id": "google_sat",
+      "file": "google_sat/manifest.json",
+      "overlays": 1,
+      "levels": [
+        0
+      ],
+      "role": "satellite_overview",
+      "coverage": {
+        "north": 19.28829231732288,
+        "south": 16.95483848343099,
+        "east": 84.7983579533911,
+        "west": 79.06147613692502
+      }
+    },
+    {
+      "id": "google_terrain",
+      "file": "google_terrain/manifest.json",
+      "overlays": 1,
+      "levels": [
+        0
+      ],
+      "role": "terrain",
+      "coverage": {
+        "north": 19.32672080538658,
+        "south": 16.92243654534708,
+        "east": 84.90009360349852,
+        "west": 78.99378699131326
+      }
+    },
+    {
+      "id": "aob",
+      "file": "aob/manifest.json",
+      "overlays": 356,
+      "levels": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6
+      ],
+      "role": "satellite_detail",
+      "coverage": {
+        "north": 18.364953,
+        "south": 18.030967506835637,
+        "east": 82.48536145702327,
+        "west": 82.095337
+      }
+    },
+    {
+      "id": "nt_cg",
+      "file": "nt_cg/manifest.json",
+      "overlays": 484,
+      "levels": [
+        5,
+        11,
+        12,
+        13,
+        14
+      ],
+      "role": "satellite_detail",
+      "coverage": {
+        "north": 17.842833,
+        "south": 17.698979,
+        "east": 81.348267,
+        "west": 81.076355
+      }
+    },
+    {
+      "id": "soi_topo",
+      "file": "soi_topo/manifest.json",
+      "overlays": 239,
+      "levels": [
+        1,
+        2,
+        3,
+        4,
+        5
+      ],
+      "role": "topo",
+      "coverage": {
+        "north": 18.25105775781489,
+        "south": 17.50094188010158,
+        "east": 82.49871518179049,
+        "west": 81.74808324820937
+      }
+    }
+  ]
+}

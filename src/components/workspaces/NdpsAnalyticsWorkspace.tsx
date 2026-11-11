@@ -5,7 +5,6 @@ import {
   ChartLine,
   Link2,
   Target,
-  UserRound,
 } from 'lucide-react';
 import { ApLeafletMap } from '../gis/ApLeafletMap';
 import { AP_STATE_FOCUS_DRILL, type AdminDrill } from '../../gis/adminHierarchy';
@@ -22,6 +21,13 @@ import {
   type NdpsRiskLevel,
 } from '../../data/ndpsAnalyticsDummy';
 
+/** Match reference heat-map: strong red intensity only in these districts. */
+const HIGH_HEAT_DISTRICTS = new Set([
+  'Guntur',
+  'Alluri Sitharama Raju',
+  'Srikakulam',
+]);
+
 const HEAT_MARKERS = NDPS_HEAT_POINTS.map((pt) => ({
   id: pt.id,
   lat: pt.lat,
@@ -29,39 +35,25 @@ const HEAT_MARKERS = NDPS_HEAT_POINTS.map((pt) => ({
   kind: 'location' as const,
   label: pt.district,
   detail: `NDPS cases: ${pt.cases.toLocaleString()}`,
+  heatIntensity: HIGH_HEAT_DISTRICTS.has(pt.district) ? 1 : 0,
 }));
 
 const GUNTUR_DISTRICT = 'Guntur';
 const GUNTUR_MARKER_ID = NDPS_HEAT_POINTS.find((pt) => pt.district === GUNTUR_DISTRICT)?.id ?? 'h2';
-const GUNTUR_CASES = NDPS_HEAT_POINTS.find((pt) => pt.district === GUNTUR_DISTRICT)?.cases ?? 611;
+const GUNTUR_CASES = NDPS_HEAT_POINTS.find((pt) => pt.district === GUNTUR_DISTRICT)?.cases ?? 680;
 /** Towns inside the 2022 Guntur polygon (Sattenapalle is Palnadu, so it is not used). */
 const GUNTUR_PLACES = [
   { name: 'Mangalagiri', lat: 16.4308, lon: 80.5686 },
   { name: 'Tenali', lat: 16.2428, lon: 80.64 },
   { name: 'Ponnur', lat: 16.066, lon: 80.548 },
 ] as const;
-/** Case split is stable for a page load and always sums to the district total. */
-const GUNTUR_SEED = Math.floor(Math.random() * 1_000_000_000);
 
-function mulberry32(seed: number) {
-  let a = seed >>> 0;
-  return () => {
-    a = (a + 0x6d2b79f5) | 0;
-    let t = Math.imul(a ^ (a >>> 15), 1 | a);
-    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
-}
-
-function splitCases(total: number, parts: number, rand: () => number): number[] {
-  const weights = Array.from({ length: parts }, () => 0.4 + rand());
-  const sumW = weights.reduce((sum, w) => sum + w, 0);
-  const counts = weights.slice(0, parts - 1).map((w) => Math.max(1, Math.floor((w / sumW) * total)));
-  const used = counts.reduce((sum, n) => sum + n, 0);
-  counts.push(Math.max(1, total - used));
-  const drift = total - counts.reduce((sum, n) => sum + n, 0);
-  counts[counts.length - 1] += drift;
-  return counts;
+/** Mangalagiri (heat glow) always gets the highest share; remaining towns split the rest. */
+function splitGunturCases(total: number): [number, number, number] {
+  const mangalagiri = Math.ceil(total * 0.48);
+  const tenali = Math.floor(total * 0.28);
+  const ponnur = Math.max(1, total - mangalagiri - tenali);
+  return [mangalagiri, tenali, ponnur];
 }
 
 const TOP_DISTRICT_MAX = Math.max(...NDPS_TOP_DISTRICTS.map((d) => d.cases), 1);
@@ -185,7 +177,7 @@ const HeatMapPanel: React.FC = () => {
 
   const gunturMarkers = useMemo(() => {
     if (!gunturFeature) return [];
-    const counts = splitCases(GUNTUR_CASES, GUNTUR_PLACES.length, mulberry32(GUNTUR_SEED + 17));
+    const counts = splitGunturCases(GUNTUR_CASES);
     return GUNTUR_PLACES.map((place, index) => ({
       id: `guntur-hot-${place.name}`,
       lat: place.lat,
@@ -193,6 +185,7 @@ const HeatMapPanel: React.FC = () => {
       kind: 'location' as const,
       label: place.name,
       detail: `NDPS cases: ${counts[index]?.toLocaleString() ?? '0'}`,
+      heatIntensity: place.name === 'Mangalagiri' ? 1 : 0,
     }));
   }, [gunturFeature]);
 
@@ -376,10 +369,15 @@ export const NdpsAnalyticsWorkspace: React.FC = () => (
               {NDPS_RECENT_HIGH_RISK.map((o) => (
                 <li
                   key={o.id}
-                  className="flex items-end gap-1.5 rounded-md border border-red-100 bg-gradient-to-r from-red-50 to-white px-1.5 py-1"
+                  className="flex items-center gap-1.5 rounded-md border border-red-100 bg-gradient-to-r from-red-50 to-white px-1.5 py-1"
                 >
-                  <div className="w-6 h-6 rounded-full bg-sky-600 text-white flex items-center justify-center shrink-0">
-                    <UserRound className="w-3 h-3" />
+                  <div className="w-8 h-8 rounded-full overflow-hidden border border-red-200/80 bg-slate-200 shrink-0 ring-1 ring-white">
+                    <img
+                      src={o.photoUrl}
+                      alt={o.name}
+                      className="h-full w-full object-cover object-center"
+                      draggable={false}
+                    />
                   </div>
                   <div className="min-w-0 flex-1">
                     <div className="text-[11px] font-semibold text-slate-900 truncate">
@@ -388,7 +386,7 @@ export const NdpsAnalyticsWorkspace: React.FC = () => (
                     </div>
                     <div className="text-[9px] text-slate-500 truncate">{o.location}</div>
                   </div>
-                  <span className="ml-auto text-[8px] font-bold px-1.5 py-0.5 rounded bg-red-600 text-white shrink-0 self-end">
+                  <span className="ml-auto text-[8px] font-bold px-1.5 py-0.5 rounded bg-red-600 text-white shrink-0">
                     Risk: {o.risk}
                   </span>
                 </li>

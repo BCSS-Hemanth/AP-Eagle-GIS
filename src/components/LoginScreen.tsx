@@ -20,7 +20,7 @@ export const LoginScreen: React.FC = () => {
     <div className="min-h-screen bg-[#001428] text-white flex items-center justify-center p-4">
       <div className="w-full max-w-md bg-white text-[#0b1c30] rounded-lg shadow-2xl overflow-hidden">
         <div className="bg-[#001428] text-white px-5 py-4 flex items-center gap-3">
-          <EagleCrest />
+          <EagleCrest className="w-12 h-12 shrink-0" />
           <div>
             <div className="text-[10px] font-bold uppercase tracking-widest text-[#86f2e4]">
               Government of Andhra Pradesh
