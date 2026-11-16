@@ -5,21 +5,13 @@
  *   npm run db:load-roads
  */
 import fs from 'node:fs';
-import proj4 from 'proj4';
 import { open as openShapefile } from 'shapefile';
-import {
-  VSP_LCC_PROJ4,
-  apRoadsShpPath,
-  vspRoadsShpPath,
-} from './config';
+import { apRoadsShpPath } from './config';
 import {
   ensureRoadsSchema,
   geometryBbox,
   withClient,
 } from './db';
-
-proj4.defs('EPSG:4326', '+proj=longlat +datum=WGS84 +no_defs');
-proj4.defs('VSP_LCC', VSP_LCC_PROJ4);
 
 type Props = Record<string, unknown>;
 type Mode = 'postgis' | 'bbox';
@@ -36,21 +28,13 @@ function str(v: unknown): string | null {
   return s || null;
 }
 
-function lineWgs84(
-  coords: number[][],
-  reproject: boolean
-): GeoJSON.LineString | null {
+function lineWgs84(coords: number[][]): GeoJSON.LineString | null {
   if (!coords || coords.length < 2) return null;
   const out: [number, number][] = [];
   for (const c of coords) {
     if (!c || c.length < 2) continue;
-    let x = c[0];
-    let y = c[1];
-    if (reproject) {
-      const [lon, lat] = proj4('VSP_LCC', 'EPSG:4326', [x, y]);
-      x = lon;
-      y = lat;
-    }
+    const x = c[0];
+    const y = c[1];
     if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
     if (Math.abs(x) > 180 || Math.abs(y) > 90) continue;
     out.push([x, y]);
@@ -94,7 +78,7 @@ type Row = {
 
 async function insertBatch(
   mode: Mode,
-  source: 'ap_full' | 'vsp',
+  source: 'ap_full',
   rows: Row[]
 ): Promise<number> {
   if (!rows.length) return 0;
@@ -158,9 +142,8 @@ async function insertBatch(
 async function loadSource(
   mode: Mode,
   label: string,
-  source: 'ap_full' | 'vsp',
-  shpPath: string,
-  reproject: boolean
+  source: 'ap_full',
+  shpPath: string
 ): Promise<{ inserted: number; skipped: number }> {
   console.log(`\n→ Loading ${label}\n  ${shpPath}`);
   await withClient(async (client) => {
@@ -181,11 +164,11 @@ async function loadSource(
   for await (const { props, geom } of readLines(shpPath)) {
     const parts: GeoJSON.LineString[] = [];
     if (geom.type === 'LineString') {
-      const line = lineWgs84(geom.coordinates as number[][], reproject);
+      const line = lineWgs84(geom.coordinates as number[][]);
       if (line) parts.push(line);
     } else {
       for (const ring of geom.coordinates as number[][][]) {
-        const line = lineWgs84(ring, reproject);
+        const line = lineWgs84(ring);
         if (line) parts.push(line);
       }
     }
@@ -246,12 +229,14 @@ async function main() {
   });
 
   const ap = apRoadsShpPath();
-  const vsp = vspRoadsShpPath();
   if (!fs.existsSync(ap)) throw new Error(`ap_roads.shp not found at ${ap}`);
-  if (!fs.existsSync(vsp)) throw new Error(`VSP.shp not found at ${vsp}`);
 
-  const a = await loadSource(mode, 'Admin ap_roads (full)', 'ap_full', ap, false);
-  const v = await loadSource(mode, 'OPS VSP roads (LCC→WGS84)', 'vsp', vsp, true);
+  // Drop legacy OPS VSP roads if a prior load left them in the DB.
+  await withClient(async (client) => {
+    await client.query(`DELETE FROM gis_road_segments WHERE source = 'vsp'`);
+  });
+
+  const a = await loadSource(mode, 'Admin ap_roads (full)', 'ap_full', ap);
 
   const stats = await withClient(async (client) => {
     const full = await client.query(
@@ -261,13 +246,9 @@ async function main() {
       `SELECT count(*)::int AS n FROM gis_road_segments
        WHERE source = 'ap_full' AND rd_sub_typ = 'National Highway'`
     );
-    const vspN = await client.query(
-      `SELECT count(*)::int AS n FROM gis_road_segments WHERE source = 'vsp'`
-    );
     return {
       full: full.rows[0].n as number,
       nh: nh.rows[0].n as number,
-      vsp: vspN.rows[0].n as number,
     };
   });
 
@@ -275,7 +256,6 @@ async function main() {
   console.log(`  mode              ${mode}`);
   console.log(`  ap_full          ${stats.full} (skipped ${a.skipped})`);
   console.log(`  national highway ${stats.nh}  ← replaces OSRM NH sketch in app`);
-  console.log(`  vsp              ${stats.vsp} (skipped ${v.skipped})`);
   console.log(`\nNext: npm run server:roads`);
 }
 

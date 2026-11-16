@@ -48,7 +48,7 @@ export const LeftNavigationRail: React.FC<LeftNavigationRailProps> = ({
       onMouseLeave={onLeave}
       className={`fixed left-0 top-14 bottom-0 bg-surface-container-lowest border-r border-outline-variant/35 flex flex-col transition-all duration-200 select-none ${
         expanded ? 'w-64 shadow-lg' : 'w-14'
-      } ${collapsed && hovered ? 'z-50' : 'z-40'}`}
+      } ${collapsed && hovered ? 'z-[800]' : 'z-40'}`}
     >
       <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden gis-scroll py-2 pb-3 space-y-3">
         {APP_NAV_SECTIONS.map((section) => {

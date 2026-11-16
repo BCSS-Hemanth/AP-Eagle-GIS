@@ -87,10 +87,18 @@ describe('map zoom bands and overlays', () => {
     expect(shouldOverlaySatellite(13, 'vector', 'district', false)).toBe(false);
     expect(shouldOverlaySatellite(14, 'vector', 'state', false)).toBe(true);
     expect(shouldOverlaySatellite(18, 'satellite', 'village', false)).toBe(false);
+    expect(shouldOverlaySatellite(14, 'esri-topo', 'village', false)).toBe(false);
+    expect(shouldOverlaySatellite(14, 'esri-street', 'mandal', false)).toBe(false);
     expect(MAP_DETAIL_SOURCES.esriImagery).toMatch(/gap-fill/);
-    expect(MAP_DETAIL_SOURCES.esriHillshade).toMatch(/google_terrain/);
-    expect(MAP_DETAIL_SOURCES.osmWater).toMatch(/reservoirs/);
+    expect(MAP_DETAIL_SOURCES.esriHillshade).toMatch(/removed/i);
+    expect(MAP_DETAIL_SOURCES.osmRivers).toMatch(/Godavari/);
     expect(MAP_DETAIL_SOURCES.geodesicBuffer).toMatch(/geodesic/);
+  });
+
+  it('captions Atlas Esri basemap views without stacking sat AOI labels', () => {
+    expect(mapDetailCaption(10, 'esri-topo', false, false)).toContain('Esri World Topographic');
+    expect(mapDetailCaption(10, 'esri-street', false, false)).toContain('Esri World Street Map');
+    expect(mapDetailCaption(10, 'esri-topo', false, false)).not.toContain('GIS-Source sat AOI');
   });
 
   it('keeps road casings off on the statewide district view', () => {
@@ -114,13 +122,14 @@ describe('map zoom bands and overlays', () => {
     expect(shouldOverlayPlaces(8, false, true)).toBe(true);
   });
 
-  it('captions imagery as Esri gap-fill plus GIS-Source sat AOI', () => {
+  it('captions forced imagery overlay as Esri gap-fill', () => {
     const text = mapDetailCaption(15, 'vector', true, true);
-    expect(text).toContain('Esri imagery + GIS-Source sat AOI');
+    expect(text).toContain('Esri imagery');
+    expect(text).not.toContain('GIS-Source sat AOI');
     expect(text).toContain('OSM raster');
   });
 
-  it('captions satellite basemap as Esri only (no GIS-Source AOI patch)', () => {
+  it('captions satellite basemap as Esri only', () => {
     const text = mapDetailCaption(7, 'satellite', false, false);
     expect(text).toContain('Esri imagery');
     expect(text).not.toContain('GIS-Source sat AOI');

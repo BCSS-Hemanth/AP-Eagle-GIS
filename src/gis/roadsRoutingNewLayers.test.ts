@@ -49,13 +49,19 @@ describe('roadsRoutingNewLayers', () => {
   });
 
   it('keeps independent colours and visual-layer classification', () => {
-    expect(isRoadsRoutingNewVisualLayer('lyr-ops-vsp-roads')).toBe(true);
+    expect(isRoadsRoutingNewVisualLayer('lyr-ap-roads-full')).toBe(true);
+    expect(isRoadsRoutingNewVisualLayer('lyr-ops-vsp-roads')).toBe(false);
     expect(isRoadsRoutingNewVisualLayer('lyr-pss')).toBe(false);
     expect(usesRoutingNewRadiusMatch('lyr-highways')).toBe(false);
     expect(usesRoutingNewRadiusMatch('lyr-forest-trails')).toBe(false);
     expect(usesRoutingNewRadiusMatch('lyr-ops-main-roads')).toBe(false);
+    expect(usesRoutingNewRadiusMatch('lyr-ganja-transport-routes')).toBe(false);
+    expect(isRoadsRoutingNewVisualLayer('lyr-ganja-transport-routes')).toBe(true);
+    expect(isRoadsRoutingNewVisualLayer('lyr-roads-asr-classified')).toBe(true);
+    expect(isRoadsRoutingNewVisualLayer('lyr-asr-road-network')).toBe(true);
+    expect(isRoadsRoutingNewVisualLayer('lyr-route-modeling')).toBe(true);
+    expect(usesRoutingNewRadiusMatch('lyr-asr-road-network')).toBe(false);
     expect(usesRoutingNewRadiusMatch('lyr-ap-roads-full')).toBe(false);
-    expect(usesRoutingNewRadiusMatch('lyr-ops-vsp-roads')).toBe(false);
     const districts = INITIAL_GIS_LAYERS.find((layer) => layer.id === 'lyr-districts')!;
     const checkposts = INITIAL_GIS_LAYERS.find((layer) => layer.id === 'lyr-checkposts')!;
     expect(isRoadsRoutingNewCatalogLayer(districts)).toBe(true);

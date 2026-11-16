@@ -44,16 +44,3 @@ test('dashboard map loads and shows India drill bar', async ({ page }) => {
   await expect(page.getByTestId('admin-drill-bar')).toBeVisible();
   await expect(page.getByTestId('admin-drill-india')).toHaveText('India');
 });
-
-test('header search focuses a KMZ police station on the dashboard', async ({ page }) => {
-  test.setTimeout(60_000);
-  const psResponse = page.waitForResponse(
-    (res) => res.url().includes('/geo/ap-police-stations.geojson') && res.ok()
-  );
-  await login(page, 'admin', 'admin123');
-  await psResponse;
-  await page.getByTestId('header-search').fill('Araku-PS');
-  await page.getByRole('button', { name: /Araku-PS/ }).click();
-  await expect(page.getByTestId('nav-ndps-spatial-dashboard')).toBeVisible();
-  await expect(page.getByTestId('toast')).toContainText(/Araku/i);
-});

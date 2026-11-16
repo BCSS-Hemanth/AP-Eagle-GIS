@@ -5,6 +5,7 @@ import {
   GIS_SOURCE_ADMIN_LAYERS,
   GIS_SOURCE_OPS_LAYERS,
   GIS_SOURCE_RASTER_PRODUCTS,
+  GIS_SOURCE_ROAD_KMZ_LAYERS,
 } from './gisSourceCatalog';
 import { INITIAL_GIS_LAYERS } from '../data/apGisData';
 
@@ -41,15 +42,29 @@ describe('GIS-Source Admin Phase 1A catalog', () => {
     const ids = new Set(INITIAL_GIS_LAYERS.map((l) => l.id));
     for (const id of [
       'lyr-border-ps',
+      'lyr-proposed-anpr',
+      'lyr-ap-neighbor-states',
+      'lyr-aob-dists',
+      'lyr-kmz-villages',
+      'lyr-ps-border-area',
+      'lyr-atlas-map-data',
       'lyr-taluk-gis',
       'lyr-vsp-village-pts',
       'lyr-ap-roads-major',
+      'lyr-roads-asr-classified',
+      'lyr-asr-road-network',
+      'lyr-route-modeling',
     ]) {
       expect(ids.has(id)).toBe(true);
     }
-    expect(INITIAL_GIS_LAYERS.find((l) => l.id === 'lyr-soi-grid')?.sourceTable).toContain(
-      'soi_50k_grid'
+    expect(INITIAL_GIS_LAYERS.find((l) => l.id === 'lyr-proposed-anpr')?.groupId).toBe('grp-admin');
+    expect(INITIAL_GIS_LAYERS.find((l) => l.id === 'lyr-proposed-anpr')?.featureCount).toBe(42);
+    expect(INITIAL_GIS_LAYERS.find((l) => l.id === 'lyr-ap-neighbor-states')?.groupId).toBe('grp-admin');
+    expect(INITIAL_GIS_LAYERS.find((l) => l.id === 'lyr-roads-asr-classified')?.groupId).toBe(
+      'grp-transport'
     );
+    expect(INITIAL_GIS_LAYERS.find((l) => l.id === 'lyr-asr-road-network')?.featureCount).toBe(5768);
+    expect(INITIAL_GIS_LAYERS.find((l) => l.id === 'lyr-soi-grid')).toBeUndefined();
     expect(INITIAL_GIS_LAYERS.find((l) => l.id === 'lyr-railways')?.sourceTable).toContain('rail_nt');
   });
 });
@@ -80,7 +95,6 @@ describe('GIS-Source OPS Phase 1B independent KMZs', () => {
       'lyr-checkposts',
       'lyr-toll-plazas',
       'lyr-seizure-polys',
-      'lyr-asr-agency',
       'lyr-pharma-hubs',
       'lyr-ddacs',
       'lyr-entry-exit',
@@ -93,19 +107,98 @@ describe('GIS-Source OPS Phase 1B independent KMZs', () => {
       expect(byId[id].sourceTable).toContain('gis-source/ops');
       expect(byId[id].featureCount).toBeGreaterThan(0);
     }
+    // ASR Dist-Admin Boundary keeps OPS KMZ geometry but lives under Administrative.
+    expect(byId['lyr-asr-agency']?.groupId).toBe('grp-admin');
+    expect(byId['lyr-asr-agency']?.sourceTable).toContain('gis-source/ops/asr_boundary');
+    expect(byId['lyr-asr-agency']?.featureCount).toBe(1);
     expect(byId['lyr-drug-routes'].sourceTable).not.toContain('ap-agency-route');
+    expect(byId['lyr-ganja-transport-routes'].groupId).toBe('grp-transport');
+    expect(byId['lyr-ganja-transport-routes'].name).toBe('D - Routes (Ganja Transport)');
+    expect(byId['lyr-ganja-transport-routes'].featureCount).toBe(234);
     expect(byId['lyr-forest-trails'].sourceTable).not.toContain('Waymarked');
   });
 });
 
 const EXPECTED_RASTER_COUNTS: Record<keyof typeof GIS_SOURCE_RASTER_PRODUCTS, number> = {
-  googleRoadmap: 1,
-  googleSat: 1,
-  googleTerrain: 1,
-  aob: 356,
-  ntCg: 484,
   soiTopo: 239,
 };
+
+describe('Proposed ANPR Admin KMZ', () => {
+  it('keeps converted ANPR locations under Administrative GIS-Source admin', () => {
+    const root = resolve(process.cwd(), 'public');
+    const disk = resolve(root, GIS_SOURCE_ADMIN_LAYERS.proposedAnpr.replace(/^\//, ''));
+    expect(existsSync(disk), disk).toBe(true);
+    const json = JSON.parse(readFileSync(disk, 'utf8'));
+    expect(json.features.length).toBe(42);
+    const types = new Set(json.features.map((f: { geometry: { type: string } }) => f.geometry.type));
+    expect(types.has('Point')).toBe(true);
+    expect(types.has('LineString')).toBe(true);
+  });
+});
+
+describe('Road Network Ganja Transport KMZ', () => {
+  it('keeps the converted KMZ as its own Road Network layer', () => {
+    const root = resolve(process.cwd(), 'public');
+    const disk = resolve(root, GIS_SOURCE_ROAD_KMZ_LAYERS.ganjaTransportRoutes.replace(/^\//, ''));
+    expect(existsSync(disk), disk).toBe(true);
+    const json = JSON.parse(readFileSync(disk, 'utf8'));
+    expect(json.type).toBe('FeatureCollection');
+    expect(json.features.length).toBe(234);
+    const types = new Set(json.features.map((f: { geometry: { type: string } }) => f.geometry.type));
+    expect(types.has('LineString')).toBe(true);
+    expect(types.has('Point')).toBe(true);
+    expect(types.has('Polygon')).toBe(true);
+    const line = json.features.find(
+      (f: { geometry: { type: string } }) => f.geometry.type === 'LineString'
+    );
+    const [lon, lat] = line.geometry.coordinates[0];
+    expect(lon).toBeGreaterThan(76);
+    expect(lon).toBeLessThan(86);
+    expect(lat).toBeGreaterThan(12);
+    expect(lat).toBeLessThan(20);
+    expect(json.features[0].properties.source_kmz).toContain('Ganja');
+  });
+});
+
+const EXPECTED_PARTIAL_ADMIN_COUNTS = {
+  apNeighborStates: 15,
+  aobDists: 31,
+  kmzVillages: 266,
+  psBorderArea: 99,
+  atlasMapData: 1005,
+} as const;
+
+const EXPECTED_PARTIAL_ROAD_COUNTS = {
+  roadsAsrClassified: 261,
+  asrRoadNetwork: 5768,
+  routeModeling: 5823,
+} as const;
+
+describe('Partial-match KMZ layers (separate catalog overlays)', () => {
+  it('registers converted admin partial KMZs with expected feature counts', () => {
+    const root = resolve(process.cwd(), 'public');
+    for (const [id, count] of Object.entries(EXPECTED_PARTIAL_ADMIN_COUNTS) as Array<
+      [keyof typeof EXPECTED_PARTIAL_ADMIN_COUNTS, number]
+    >) {
+      const disk = resolve(root, GIS_SOURCE_ADMIN_LAYERS[id].replace(/^\//, ''));
+      expect(existsSync(disk), disk).toBe(true);
+      const json = JSON.parse(readFileSync(disk, 'utf8'));
+      expect(json.features.length).toBe(count);
+    }
+  });
+
+  it('registers converted road partial KMZs with expected feature counts', () => {
+    const root = resolve(process.cwd(), 'public');
+    for (const [id, count] of Object.entries(EXPECTED_PARTIAL_ROAD_COUNTS) as Array<
+      [keyof typeof EXPECTED_PARTIAL_ROAD_COUNTS, number]
+    >) {
+      const disk = resolve(root, GIS_SOURCE_ROAD_KMZ_LAYERS[id].replace(/^\//, ''));
+      expect(existsSync(disk), disk).toBe(true);
+      const json = JSON.parse(readFileSync(disk, 'utf8'));
+      expect(json.features.length).toBe(count);
+    }
+  });
+});
 
 describe('GIS-Source Raster Phase 1C', () => {
   it('registers converted raster manifests with KMZ-matched overlay counts', () => {
@@ -126,13 +219,12 @@ describe('GIS-Source Raster Phase 1C', () => {
     }
   });
 
-  it('points cartosat/hillshade/soi legend rows at GIS-Source (not Esri)', () => {
+  it('points SOI topo legend row at GIS-Source (sat packs removed)', () => {
     const byId = Object.fromEntries(INITIAL_GIS_LAYERS.map((l) => [l.id, l]));
-    expect(byId['lyr-cartosat'].sourceTable).toContain('gis-source/raster');
-    expect(byId['lyr-cartosat'].sourceTable).not.toMatch(/Esri/i);
-    expect(byId['lyr-hillshade'].sourceTable).toContain('google_terrain');
-    expect(byId['lyr-hillshade'].sourceTable).not.toMatch(/World_Hillshade/);
+    expect(byId['lyr-cartosat']).toBeUndefined();
+    expect(byId['lyr-hillshade']).toBeUndefined();
+    expect(byId['lyr-google-roadmap']).toBeUndefined();
     expect(byId['lyr-soi-topo'].featureCount).toBe(239);
-    expect(byId['lyr-google-roadmap'].featureCount).toBe(1);
+    expect(byId['lyr-soi-topo'].sourceTable).toContain('soi_topo');
   });
 });

@@ -20,12 +20,19 @@ interface GraphEdge {
   undirectedId: string;
 }
 
-interface Graph {
+export interface RoadGraph {
   nodes: Map<NodeKey, LonLat>;
   adj: Map<NodeKey, GraphEdge[]>;
 }
 
+type Graph = RoadGraph;
+
 const EARTH_M = 6371000;
+
+/** Default node budget per input line — edges still keep full original vertices between nodes. */
+export const ROAD_GRAPH_MAX_VERTICES_PER_LINE = 800;
+/** Soft-join nearby layer seams / T-junctions. */
+export const ROAD_GRAPH_ENDPOINT_SNAP_M = 120;
 
 export function haversineM(a: LonLat, b: LonLat): number {
   const toR = (d: number) => (d * Math.PI) / 180;
@@ -83,9 +90,18 @@ export function filterFcByCorridor(
   return { type: 'FeatureCollection', features };
 }
 
+function polylineMeters(coords: LonLat[]): number {
+  let meters = 0;
+  for (let i = 0; i < coords.length - 1; i++) {
+    meters += haversineM(coords[i], coords[i + 1]);
+  }
+  return meters;
+}
+
 function addUndirected(graph: Graph, a: NodeKey, b: NodeKey, layerId: string, coords: LonLat[]) {
   if (a === b || coords.length < 2) return;
-  const meters = haversineM(coords[0], coords[coords.length - 1]);
+  // Length along the stored polyline (not chord) so costs match drawn geometry.
+  const meters = polylineMeters(coords);
   if (!Number.isFinite(meters) || meters <= 0) return;
   const uid = undirectedEdgeId(a, b, layerId);
   if (!graph.adj.has(a)) graph.adj.set(a, []);
@@ -100,13 +116,18 @@ function addUndirected(graph: Graph, a: NodeKey, b: NodeKey, layerId: string, co
   });
 }
 
-/** Build a graph from one or more line FeatureCollections tagged by layer id. */
+/**
+ * Build a routing graph from any LineString/MultiLineString layers.
+ * Layer-agnostic: every saved / future road FC uses the same geometry-preserving rules.
+ * Graph nodes may be subsampled for Dijkstra; each edge keeps the full original polyline
+ * between its endpoints so drawn routes hug the mapped network.
+ */
 export function buildRoadGraph(
   layers: Array<{ layerId: string; fc: GeoJSON.FeatureCollection }>,
   options?: { maxVerticesPerLine?: number; endpointSnapM?: number }
 ): Graph {
-  const maxVerts = options?.maxVerticesPerLine ?? 280;
-  const snapM = options?.endpointSnapM ?? 55;
+  const maxVerts = options?.maxVerticesPerLine ?? ROAD_GRAPH_MAX_VERTICES_PER_LINE;
+  const snapM = options?.endpointSnapM ?? ROAD_GRAPH_ENDPOINT_SNAP_M;
   const graph: Graph = { nodes: new Map(), adj: new Map() };
   const endpoints: NodeKey[] = [];
 
@@ -116,32 +137,34 @@ export function buildRoadGraph(
       for (const line of lineCoords(feature.geometry)) {
         if (line.length < 2) continue;
         const step = line.length > maxVerts ? Math.ceil(line.length / maxVerts) : 1;
-        const sampled: LonLat[] = [];
-        for (let i = 0; i < line.length; i += step) sampled.push(line[i]);
-        const last = line[line.length - 1];
-        const tail = sampled[sampled.length - 1];
-        if (!tail || tail.lon !== last.lon || tail.lat !== last.lat) sampled.push(last);
+        const nodeIdx: number[] = [];
+        for (let i = 0; i < line.length; i += step) nodeIdx.push(i);
+        if (nodeIdx[nodeIdx.length - 1] !== line.length - 1) {
+          nodeIdx.push(line.length - 1);
+        }
 
-        endpoints.push(keyOf(sampled[0]), keyOf(sampled[sampled.length - 1]));
-        for (let i = 0; i < sampled.length - 1; i++) {
-          const a = sampled[i];
-          const b = sampled[i + 1];
+        endpoints.push(keyOf(line[nodeIdx[0]]), keyOf(line[nodeIdx[nodeIdx.length - 1]]));
+        for (let i = 0; i < nodeIdx.length - 1; i++) {
+          const i0 = nodeIdx[i];
+          const i1 = nodeIdx[i + 1];
+          const a = line[i0];
+          const b = line[i1];
           const ka = keyOf(a);
           const kb = keyOf(b);
+          const edgeCoords = line.slice(i0, i1 + 1);
           graph.nodes.set(ka, a);
           graph.nodes.set(kb, b);
-          addUndirected(graph, ka, kb, layerId, [a, b]);
+          addUndirected(graph, ka, kb, layerId, edgeCoords);
         }
       }
     }
   }
 
-  // Soft-connect nearby endpoints across layers (real junctions / dataset seams only).
+  // Soft-connect nearby endpoints (and T-junctions onto nearby vertices) across layers.
   const uniqueEnds = [...new Set(endpoints)].filter((k) => graph.nodes.has(k));
-  const cellSize = 500; // ~0.002 deg
+  const cellSize = 500;
   const buckets = new Map<string, NodeKey[]>();
-  for (const k of uniqueEnds) {
-    const p = graph.nodes.get(k)!;
+  for (const [k, p] of graph.nodes) {
     const c = `${Math.round(p.lon * cellSize)}:${Math.round(p.lat * cellSize)}`;
     if (!buckets.has(c)) buckets.set(c, []);
     buckets.get(c)!.push(k);
@@ -153,7 +176,7 @@ export function buildRoadGraph(
     for (let dx = -1; dx <= 1; dx++) {
       for (let dy = -1; dy <= 1; dy++) {
         for (const other of buckets.get(`${cx + dx}:${cy + dy}`) ?? []) {
-          if (other <= k) continue;
+          if (other === k) continue;
           const b = graph.nodes.get(other)!;
           const d = haversineM(a, b);
           if (d > 0 && d <= snapM) addUndirected(graph, k, other, 'snap-join', [a, b]);
@@ -164,18 +187,135 @@ export function buildRoadGraph(
   return graph;
 }
 
-function nearestNode(
-  graph: Graph,
-  point: LonLat,
-  maxM: number
-): { key: NodeKey; dist: number } | null {
-  let best: { key: NodeKey; dist: number } | null = null;
-  for (const [key, coord] of graph.nodes) {
-    const dist = haversineM(point, coord);
-    if (dist > maxM) continue;
-    if (!best || dist < best.dist) best = { key, dist };
+function closestOnSegment(
+  p: LonLat,
+  a: LonLat,
+  b: LonLat
+): { point: LonLat; dist: number; t: number } {
+  const lat0 = ((a.lat + b.lat + p.lat) / 3) * (Math.PI / 180);
+  const mx = Math.cos(lat0) * 111320;
+  const my = 110540;
+  const ax = a.lon * mx;
+  const ay = a.lat * my;
+  const bx = b.lon * mx;
+  const by = b.lat * my;
+  const px = p.lon * mx;
+  const py = p.lat * my;
+  const abx = bx - ax;
+  const aby = by - ay;
+  const ab2 = abx * abx + aby * aby;
+  const t = ab2 < 1e-12 ? 0 : Math.max(0, Math.min(1, ((px - ax) * abx + (py - ay) * aby) / ab2));
+  const point = {
+    lon: a.lon + (b.lon - a.lon) * t,
+    lat: a.lat + (b.lat - a.lat) * t,
+  };
+  return { point, dist: haversineM(p, point), t };
+}
+
+function closestOnPolyline(
+  p: LonLat,
+  line: LonLat[]
+): { point: LonLat; dist: number; index: number } | null {
+  if (line.length < 2) return null;
+  let best: { point: LonLat; dist: number; index: number } | null = null;
+  for (let i = 0; i < line.length - 1; i++) {
+    const hit = closestOnSegment(p, line[i], line[i + 1]);
+    if (!best || hit.dist < best.dist) {
+      best = { point: hit.point, dist: hit.dist, index: i };
+    }
   }
   return best;
+}
+
+type NetworkAttach = {
+  key: NodeKey;
+  dist: number;
+  point: LonLat;
+};
+
+/**
+ * Snap a pin onto the nearest point on any edge polyline (not only sparse graph nodes).
+ * Injects a temporary node and splits the edge so routes leave/join along the mapped road.
+ */
+function attachPinToNetwork(graph: Graph, point: LonLat, maxM: number): NetworkAttach | null {
+  let best: {
+    dist: number;
+    point: LonLat;
+    fromKey: NodeKey;
+    edge: GraphEdge;
+    index: number;
+  } | null = null;
+
+  for (const [fromKey, edges] of graph.adj) {
+    for (const edge of edges) {
+      // Process each undirected edge once.
+      if (fromKey > edge.to) continue;
+      const hit = closestOnPolyline(point, edge.coords);
+      if (!hit || hit.dist > maxM) continue;
+      if (!best || hit.dist < best.dist) {
+        best = {
+          dist: hit.dist,
+          point: hit.point,
+          fromKey,
+          edge,
+          index: hit.index,
+        };
+      }
+    }
+  }
+  if (!best) return null;
+
+  const snapKey = keyOf(best.point);
+  // Already essentially on an existing node.
+  if (graph.nodes.has(snapKey)) {
+    return { key: snapKey, dist: best.dist, point: graph.nodes.get(snapKey)! };
+  }
+
+  const coords = best.edge.coords;
+  const i = best.index;
+  const before = [...coords.slice(0, i + 1), best.point];
+  const after = [best.point, ...coords.slice(i + 1)];
+  // Drop duplicate if projection landed on a vertex.
+  const cleanBefore =
+    before.length >= 2 &&
+    before[before.length - 2].lon === best.point.lon &&
+    before[before.length - 2].lat === best.point.lat
+      ? before.slice(0, -1)
+      : before;
+  const cleanAfter =
+    after.length >= 2 && after[1].lon === best.point.lon && after[1].lat === best.point.lat
+      ? after.slice(1)
+      : after;
+
+  const uid = best.edge.undirectedId;
+  for (const [node, list] of graph.adj) {
+    graph.adj.set(
+      node,
+      list.filter((e) => e.undirectedId !== uid)
+    );
+  }
+
+  graph.nodes.set(snapKey, best.point);
+  const toKey = best.edge.to;
+  if (cleanBefore.length >= 2) {
+    addUndirected(graph, best.fromKey, snapKey, best.edge.layerId, cleanBefore);
+  }
+  if (cleanAfter.length >= 2) {
+    addUndirected(graph, snapKey, toKey, best.edge.layerId, cleanAfter);
+  }
+  return { key: snapKey, dist: best.dist, point: best.point };
+}
+
+function cloneGraph(graph: Graph): Graph {
+  const nodes = new Map(graph.nodes);
+  const adj = new Map<NodeKey, GraphEdge[]>();
+  for (const [k, edges] of graph.adj) {
+    adj.set(
+      k,
+      edges.map((e) => ({ ...e, coords: e.coords.map((c) => ({ ...c })) }))
+    );
+  }
+  return { nodes, adj };
 }
 
 function dijkstra(
@@ -257,7 +397,8 @@ export function estimateDurationMin(distanceKm: number, kmh = 45): number {
 
 /**
  * Shortest + diversified alternatives on a combined multi-layer road graph.
- * Unverified A/B snap connectors are flagged; snap-join edges between datasets are junction seams.
+ * Works for every LineString layer fed into {@link buildRoadGraph} (existing + future).
+ * Pins attach onto edge geometry so routes follow mapped centerlines on the map.
  */
 export function findNetworkRoutes(
   graph: Graph,
@@ -267,8 +408,11 @@ export function findNetworkRoutes(
   snapMaxM = 1200
 ): NetworkRouteResult[] {
   if (graph.nodes.size === 0) return [];
-  const startNear = nearestNode(graph, from, snapMaxM);
-  const endNear = nearestNode(graph, to, snapMaxM);
+
+  // Clone so pin attachment splits do not mutate the caller's reusable graph.
+  const work = cloneGraph(graph);
+  const startNear = attachPinToNetwork(work, from, snapMaxM);
+  const endNear = attachPinToNetwork(work, to, snapMaxM);
   if (!startNear || !endNear) return [];
 
   const notesBase: string[] = [];
@@ -300,13 +444,13 @@ export function findNetworkRoutes(
   };
 
   for (let i = 0; i < k * 3 && results.length < k; i++) {
-    const hit = dijkstra(graph, startNear.key, endNear.key, { penalties });
+    const hit = dijkstra(work, startNear.key, endNear.key, { penalties });
     if (!hit || hit.coords.length < 2) break;
 
     const sig = pathSignature(hit.coords);
     const tooSimilarGeom =
       seen.has(sig) ||
-      resultEdgeSets.some((prev) => overlapRatio(prev, hit.edgeIds) >= 0.72);
+      resultEdgeSets.some((prev) => overlapRatio(prev, hit.edgeIds) >= 0.88);
 
     if (!tooSimilarGeom) {
       seen.add(sig);
@@ -320,7 +464,7 @@ export function findNetworkRoutes(
       const notes = [...notesBase];
       if (hit.layerIds.has('snap-join')) {
         notes.push(
-          'Path uses short junction seams (<~60 m) where selected road layers meet — not invented corridors.'
+          'Path uses short junction seams where selected road layers meet — not invented corridors.'
         );
       }
 
@@ -333,7 +477,6 @@ export function findNetworkRoutes(
       });
     }
 
-    // Penalize used edges so the next search seeks a different corridor.
     for (const id of hit.edgeIds) {
       const prev = penalties.get(id) ?? 1;
       penalties.set(id, prev * (tooSimilarGeom ? 12 : 5));

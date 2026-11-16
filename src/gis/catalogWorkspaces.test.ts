@@ -24,7 +24,7 @@ describe('catalogWorkspaces', () => {
     expect(canSaveToRoadsModules('administrative-layers')).toBe(true);
     expect(canSaveToRoadsModules('operational-layers')).toBe(true);
     expect(canSaveToRoadsModules('road-network-layers')).toBe(true);
-    expect(canSaveToRoadsModules('raster-imagery')).toBe(false);
+    expect(canSaveToRoadsModules('ndps-spatial-dashboard')).toBe(false);
   });
 
   it('keeps OPS main/internal roads in Road Network, not Operational', () => {
@@ -42,6 +42,18 @@ describe('catalogWorkspaces', () => {
     const admin = new Set(
       layersInCatalogScope('administrative-layers', INITIAL_GIS_LAYERS).map((l) => l.id)
     );
+    expect(admin.has('lyr-proposed-anpr')).toBe(true);
+    expect(admin.has('lyr-ap-neighbor-states')).toBe(true);
+    expect(admin.has('lyr-aob-dists')).toBe(true);
+    expect(admin.has('lyr-kmz-villages')).toBe(true);
+    expect(admin.has('lyr-ps-border-area')).toBe(true);
+    expect(admin.has('lyr-atlas-map-data')).toBe(true);
+    expect(admin.has('lyr-asr-agency')).toBe(true);
+    expect(ops.has('lyr-asr-agency')).toBe(false);
+    expect(roadNet.has('lyr-roads-asr-classified')).toBe(true);
+    expect(roadNet.has('lyr-asr-road-network')).toBe(true);
+    expect(roadNet.has('lyr-route-modeling')).toBe(true);
+    expect(admin.has('lyr-roads-asr-classified')).toBe(false);
     expect(admin.has('lyr-highways')).toBe(false);
     expect(admin.has('lyr-ap-roads-major')).toBe(false);
     expect(admin.has('lyr-ap-roads-full')).toBe(false);
@@ -49,6 +61,9 @@ describe('catalogWorkspaces', () => {
     expect(roadNet.has('lyr-railways')).toBe(true);
     expect(ops.has('lyr-ops-main-roads')).toBe(false);
     expect(ops.has('lyr-ops-internal-roads')).toBe(false);
+    expect(roadNet.has('lyr-ganja-transport-routes')).toBe(true);
+    expect(ops.has('lyr-ganja-transport-routes')).toBe(false);
+    expect(admin.has('lyr-ganja-transport-routes')).toBe(false);
   });
 
   it('segregates hover layers by Administrative / Operational / Road Network', () => {

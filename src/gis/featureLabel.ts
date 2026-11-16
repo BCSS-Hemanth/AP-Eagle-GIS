@@ -64,7 +64,6 @@ export type LayerNameFallback =
   | 'Internal Road'
   | 'Drug Route'
   | 'River'
-  | 'Water body'
   | 'Foot Track'
   | 'Indian Railway'
   | 'Hotspot'

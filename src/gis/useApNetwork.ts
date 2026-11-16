@@ -1,10 +1,10 @@
 import { useEffect, useState } from 'react';
 import { fetchNationalHighwaysPreferPostgis } from './gisPostgisRoads';
+import { repairLineJumpFeatureCollection } from './splitLineJumps';
 
 let cachedHighways: GeoJSON.FeatureCollection | null = null;
 let cachedRivers: GeoJSON.FeatureCollection | null = null;
 let cachedAgency: GeoJSON.FeatureCollection | null = null;
-let cachedWater: GeoJSON.FeatureCollection | null = null;
 let cachedHighwaySource: 'postgis' | 'osrm-fallback' | null = null;
 let loadPromise: Promise<void> | null = null;
 
@@ -16,19 +16,6 @@ async function loadJson(path: string) {
   return res.json();
 }
 
-async function loadJsonOptional(path: string): Promise<GeoJSON.FeatureCollection> {
-  try {
-    const res = await fetch(path);
-    if (!res.ok) return EMPTY_FC;
-    const json = await res.json();
-    if (json?.type === 'FeatureCollection') return json;
-    if (json?.type === 'Feature') return { type: 'FeatureCollection', features: [json] };
-    return EMPTY_FC;
-  } catch {
-    return EMPTY_FC;
-  }
-}
-
 function asCollection(json: GeoJSON.FeatureCollection | GeoJSON.Feature | null): GeoJSON.FeatureCollection {
   if (!json) return EMPTY_FC;
   if (json.type === 'FeatureCollection') return json;
@@ -36,26 +23,25 @@ function asCollection(json: GeoJSON.FeatureCollection | GeoJSON.Feature | null):
 }
 
 async function loadNetwork() {
-  if (cachedHighways && cachedRivers && cachedAgency && cachedWater) return;
-  const [highwaysHit, rivers, agency, water] = await Promise.all([
+  if (cachedHighways && cachedRivers && cachedAgency) return;
+  const [highwaysHit, rivers, agency] = await Promise.all([
     fetchNationalHighwaysPreferPostgis(),
     loadJson('/geo/ap-rivers.geojson'),
     // Conflict policy: GIS-Source ops d_routes replaces OSRM agency corridor stub.
     loadJson('/geo/gis-source/ops/d_routes.geojson'),
-    loadJsonOptional('/geo/ap-waterbodies.geojson'),
   ]);
   cachedHighways = highwaysHit.fc;
   cachedHighwaySource = highwaysHit.source;
-  cachedRivers = rivers;
+  // OSM Overpass rivers sometimes concatenate distant relation members into one
+  // LineString (~1000 km jumps) — that draws long straight chords across India.
+  cachedRivers = repairLineJumpFeatureCollection(asCollection(rivers));
   cachedAgency = asCollection(agency);
-  cachedWater = water;
 }
 
 export function useApNetwork() {
   const [highways, setHighways] = useState<GeoJSON.FeatureCollection | null>(cachedHighways);
   const [rivers, setRivers] = useState<GeoJSON.FeatureCollection | null>(cachedRivers);
   const [agency, setAgency] = useState<GeoJSON.FeatureCollection | null>(cachedAgency);
-  const [water, setWater] = useState<GeoJSON.FeatureCollection | null>(cachedWater);
   const [ready, setReady] = useState(Boolean(cachedHighways && cachedRivers && cachedAgency));
 
   useEffect(() => {
@@ -67,7 +53,6 @@ export function useApNetwork() {
         setHighways(cachedHighways);
         setRivers(cachedRivers);
         setAgency(cachedAgency);
-        setWater(cachedWater);
         setReady(true);
       })
       .catch(() => {
@@ -82,7 +67,6 @@ export function useApNetwork() {
     highways,
     rivers,
     agency,
-    water,
     ready,
     highwaySource: cachedHighwaySource,
   };

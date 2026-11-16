@@ -1,6 +1,6 @@
 /** Client helpers for PostGIS-backed GIS road layers. */
 
-export type GisPostgisRoadLayer = 'full' | 'vsp' | 'nh';
+export type GisPostgisRoadLayer = 'full' | 'nh';
 
 export const GIS_POSTGIS_ROADS = {
   nh: {
@@ -14,12 +14,23 @@ export const GIS_POSTGIS_ROADS = {
     apiLayer: 'full' as const,
     requireBbox: true,
   },
-  vsp: {
-    id: 'lyr-ops-vsp-roads' as const,
-    apiLayer: 'vsp' as const,
-    requireBbox: true,
-  },
 } as const;
+
+/**
+ * Viewport GeoJSON fetch caps for the full ~153k network.
+ * Never request the whole table — only a zoom-scaled slice of the current bbox.
+ */
+export function fullRoadsFetchLimit(zoom: number, alwaysOn = false): number {
+  if (alwaysOn) {
+    if (zoom < 10) return 2500;
+    if (zoom < 12) return 5000;
+    return 8000;
+  }
+  if (zoom < 9) return 1200;
+  if (zoom < 11) return 2500;
+  if (zoom < 13) return 4500;
+  return 7000;
+}
 
 const EMPTY_FC: GeoJSON.FeatureCollection = { type: 'FeatureCollection', features: [] };
 

@@ -1,27 +1,33 @@
 import type { GisLayer } from '../types/gis';
+import { catalogModuleForLayer } from './catalogWorkspaces';
 import type { DashboardLayerConfig, DashboardLayerEntry, JsonStorage } from './dashboardLayers';
-import { leafletFlagsFromLayers } from './dashboardLayers';
+import { isLayerOn, leafletFlagsFromLayers } from './dashboardLayers';
+import { INITIAL_GIS_LAYERS } from '../data/apGisData';
 
 /** Persist layers explicitly saved into Roads Routing (union across catalog modules). */
 export const ROADS_ROUTING_LAYER_STORAGE_KEY = 'ap-eagle.roads-routing-layers.v1';
 
 export type RoadsRoutingLayerConfig = DashboardLayerConfig;
 
-/** Line layers that can contribute to continuous road-network routing. */
-export const ROUTABLE_ROAD_LAYER_IDS = [
-  'lyr-highways',
-  'lyr-ap-roads-full',
-  'lyr-ops-vsp-roads',
-  'lyr-ap-roads-major',
-  'lyr-ops-main-roads',
-  'lyr-ops-internal-roads',
-  'lyr-forest-trails',
+/**
+ * Road Network line layers that must never enter the driving graph
+ * (rail, water, intel corridors — not traversable road centerlines).
+ * New road LineStrings in the Road Network catalog are routable by default.
+ */
+export const ROUTING_NON_ROUTABLE_LINE_IDS = [
+  'lyr-railways',
+  'lyr-rivers',
+  'lyr-ganja-transport-routes',
+  'lyr-drug-routes',
 ] as const;
 
 /** Shown on the routing map / analysed near routes — not used as road topology. */
 export const ROUTING_LOCATION_LAYER_IDS = [
   'lyr-pss',
   'lyr-border-ps',
+  'lyr-proposed-anpr',
+  'lyr-ps-border-area',
+  'lyr-kmz-villages',
   'lyr-checkposts',
   'lyr-toll-plazas',
   'lyr-entry-exit',
@@ -32,19 +38,70 @@ export const ROUTING_LOCATION_LAYER_IDS = [
   'lyr-seizure-polys',
 ] as const;
 
-/** Corridor / rail overlays — display only; never treated as verified driving roads. */
+/** Non-line / non-road overlays — display only. */
 export const ROUTING_OVERLAY_ONLY_LAYER_IDS = [
   'lyr-drug-routes',
+  'lyr-ganja-transport-routes',
   'lyr-railways',
+  'lyr-rivers',
   'lyr-asr-agency',
+  'lyr-ap-neighbor-states',
+  'lyr-aob-dists',
+  'lyr-atlas-map-data',
 ] as const;
 
-export function isRoutableRoadLayer(id: string): boolean {
-  return (ROUTABLE_ROAD_LAYER_IDS as readonly string[]).includes(id);
+function isNonRoutableLineId(id: string): boolean {
+  return (ROUTING_NON_ROUTABLE_LINE_IDS as readonly string[]).includes(id);
 }
+
+/**
+ * True when a layer can contribute edges to the GIS routing graph.
+ * Rule: Road Network catalog + LineString − explicit non-road denylist.
+ * Future Road Network line layers are included automatically and use the same
+ * geometry-preserving graph builder ({@link buildRoadGraph}) as existing layers.
+ */
+export function isRoutableRoadLayer(layerOrId: GisLayer | string): boolean {
+  if (typeof layerOrId === 'string') {
+    const hit = INITIAL_GIS_LAYERS.find((l) => l.id === layerOrId);
+    return hit ? isRoutableRoadLayer(hit) : false;
+  }
+  const layer = layerOrId;
+  if (layer.geometryType !== 'LineString') return false;
+  if (isNonRoutableLineId(layer.id)) return false;
+  if (catalogModuleForLayer(layer) !== 'road-network-layers') return false;
+  return true;
+}
+
+/** Snapshot of current catalog ids that satisfy {@link isRoutableRoadLayer} (tests / diagnostics). */
+export function listRoutableRoadLayerIds(
+  catalog: readonly GisLayer[] = INITIAL_GIS_LAYERS
+): string[] {
+  return catalog.filter((l) => isRoutableRoadLayer(l)).map((l) => l.id);
+}
+
+/** @deprecated Prefer {@link listRoutableRoadLayerIds} — kept for older call sites/tests. */
+export const ROUTABLE_ROAD_LAYER_IDS = listRoutableRoadLayerIds();
 
 export function isRoutingLocationLayer(id: string): boolean {
   return (ROUTING_LOCATION_LAYER_IDS as readonly string[]).includes(id);
+}
+
+/**
+ * Resolve a fetchable GeoJSON URL from the layer catalog `sourceTable`.
+ * Supports `/api/...`, `/geo/...`, and `public/geo/...` forms used in GIS-Source.
+ */
+export function resolveLayerGeoJsonUrl(layer: GisLayer): string | null {
+  const raw = (layer.sourceTable ?? '').trim();
+  if (!raw) return null;
+  if (raw.startsWith('/api/') || raw.startsWith('/geo/')) return raw;
+  if (raw.startsWith('public/geo/')) return `/${raw.slice('public/'.length)}`;
+  if (raw.startsWith('geo/')) return `/${raw}`;
+  return null;
+}
+
+/** PostGIS road extracts that require a bbox query param. */
+export function isPostgisRoadGeoJsonUrl(url: string): boolean {
+  return url.startsWith('/api/gis-roads');
 }
 
 /**
@@ -124,7 +181,13 @@ export function loadRoadsRoutingLayerConfig(
 }
 
 export function routingMapFlags(layers: GisLayer[]) {
-  return leafletFlagsFromLayers(layers);
+  const base = leafletFlagsFromLayers(layers);
+  // Saved-layer lists are sparse — do not inherit Dashboard “default on” for admin borders.
+  return {
+    ...base,
+    showStateBorder: isLayerOn(layers, 'lyr-state-border'),
+    showDistricts: isLayerOn(layers, 'lyr-districts'),
+  };
 }
 
 function browserStorage(): JsonStorage | null {

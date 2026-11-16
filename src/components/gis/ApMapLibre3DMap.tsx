@@ -45,6 +45,7 @@ import {
   formatFeatureTooltip,
   type LayerNameFallback,
 } from '../../gis/featureLabel';
+import { drugRouteHoverLabel } from '../../gis/drugRouteLabel';
 import {
   formatRailTooltip,
   RAIL_CASING_COLOR,
@@ -96,7 +97,6 @@ interface ApMapLibre3DMapProps {
   showAgencyRoutes?: boolean;
   showRailways?: boolean;
   showRivers?: boolean;
-  showWaterbodies?: boolean;
   showHillshade?: boolean;
   showTrails?: boolean;
   showMandals?: boolean;
@@ -148,7 +148,7 @@ interface ApMapLibre3DMapProps {
   ingestedLayers?: IngestedLayer[];
   onInspectHit?: (hit: {
     name: string;
-    kind: 'OSM Building' | 'Highway' | 'River' | 'Water body';
+    kind: 'OSM Building' | 'Highway' | 'River';
     lat: number;
     lon: number;
     detail: string;
@@ -201,7 +201,6 @@ export const ApMapLibre3DMap = forwardRef<ApLeafletMapHandle, ApMapLibre3DMapPro
       showAgencyRoutes = false,
       showRailways = false,
       showRivers = false,
-      showWaterbodies = false,
       showHillshade = false,
       showTrails = false,
       showMandals = false,
@@ -277,7 +276,6 @@ export const ApMapLibre3DMap = forwardRef<ApLeafletMapHandle, ApMapLibre3DMapPro
       markerData: EMPTY_FC as GeoJSON.FeatureCollection,
       highways: EMPTY_FC as GeoJSON.GeoJSON,
       rivers: EMPTY_FC as GeoJSON.GeoJSON,
-      water: EMPTY_FC as GeoJSON.GeoJSON,
       agency: EMPTY_FC as GeoJSON.GeoJSON,
       rail: EMPTY_FC as GeoJSON.FeatureCollection,
       buffers: EMPTY_FC as GeoJSON.GeoJSON,
@@ -317,7 +315,7 @@ export const ApMapLibre3DMap = forwardRef<ApLeafletMapHandle, ApMapLibre3DMapPro
     const clipFeature = adminDrill ? drillFocusFeature(adminDrill) : null;
 
     const { districts, state, ready: boundsReady } = useApBoundaries();
-    const { highways, rivers, agency, water } = useApNetwork();
+    const { highways, rivers, agency } = useApNetwork();
     const { rail: railVector } = useGisSourceAdmin({ showRailVector: showRailways });
     const mandals = useApMandals(true);
     const stations = usePoliceStations(showPoliceStations);
@@ -424,7 +422,6 @@ export const ApMapLibre3DMap = forwardRef<ApLeafletMapHandle, ApMapLibre3DMapPro
     const stateData = showStateBorder && state && !drillActive ? state : EMPTY_FC;
     const highwayData = showHighways && highways ? highways : EMPTY_FC;
     const riverData = showRivers && rivers ? rivers : EMPTY_FC;
-    const waterData = showWaterbodies && water ? water : EMPTY_FC;
     const agencyData = showAgencyRoutes && agency ? agency : EMPTY_FC;
     const railData =
       showRailways && railVector && railVector.features.length > 0 ? railVector : EMPTY_FC;
@@ -453,7 +450,6 @@ export const ApMapLibre3DMap = forwardRef<ApLeafletMapHandle, ApMapLibre3DMapPro
       markerData,
       highways: highwayData,
       rivers: riverData,
-      water: waterData,
       agency: agencyData,
       rail: railData,
       buffers: bufferData,
@@ -489,7 +485,6 @@ export const ApMapLibre3DMap = forwardRef<ApLeafletMapHandle, ApMapLibre3DMapPro
       setGeojson(map, 'gis-markers', gis.markerData);
       setGeojson(map, 'gis-highways', gis.highways);
       setGeojson(map, 'gis-rivers', gis.rivers);
-      setGeojson(map, 'gis-water', gis.water);
       setGeojson(map, 'gis-agency', gis.agency);
       setGeojson(map, 'gis-rail', gis.rail);
       setGeojson(map, 'gis-buffers', gis.buffers);
@@ -773,7 +768,6 @@ export const ApMapLibre3DMap = forwardRef<ApLeafletMapHandle, ApMapLibre3DMapPro
           'gis-markers',
           'gis-highways',
           'gis-rivers',
-          'gis-water',
           'gis-agency',
           'gis-rail',
           'gis-buffers',
@@ -820,7 +814,7 @@ export const ApMapLibre3DMap = forwardRef<ApLeafletMapHandle, ApMapLibre3DMapPro
         addFill('admin-districts-fill', 'admin-districts', '#0f2942', 0.04);
         addLine('admin-districts-line', 'admin-districts', '#0f2942', 1.05);
         addFill('admin-mandals-fill', 'admin-mandals', '#94a3b8', 0.04);
-        addLine('admin-mandals-line', 'admin-mandals', '#000000', 1.4);
+        addLine('admin-mandals-line', 'admin-mandals', '#000000', 1.4, [4, 3]);
         addFill('admin-villages-fill', 'admin-villages', '#cbd5e1', 0.05);
         addLine('admin-villages-line', 'admin-villages', '#000000', 1.0);
         const addLabel = (id: string, source: string, field: string, size: number, minzoom: number) => {
@@ -853,8 +847,6 @@ export const ApMapLibre3DMap = forwardRef<ApLeafletMapHandle, ApMapLibre3DMapPro
         addLabel('admin-mandals-label', 'admin-mandals', 'mandal_name', 12, 8);
         addLabel('admin-villages-label', 'admin-villages', 'village_name', 11, 11);
         addLine('gis-highways-line', 'gis-highways', '#c2410c', 2.4);
-        addFill('gis-water-fill', 'gis-water', '#38bdf8', 0.28);
-        addLine('gis-water-line', 'gis-water', '#0e7490', 0.8);
         addLine('gis-rivers-line', 'gis-rivers', '#1565c0', 1.8);
         addLine('gis-agency-line', 'gis-agency', '#ba1a1a', 2.4, [2, 1]);
         if (!map.getLayer('gis-rail-casing')) {
@@ -1043,8 +1035,6 @@ export const ApMapLibre3DMap = forwardRef<ApLeafletMapHandle, ApMapLibre3DMapPro
         'gis-rail-line': 'Indian Railway',
         'gis-highways-line': 'Highway',
         'gis-rivers-line': 'River',
-        'gis-water-fill': 'Water body',
-        'gis-water-line': 'Water body',
         'gis-agency-line': 'Drug Route',
         'gis-stations-circle': 'Police Station',
         'gis-markers-circle': 'Feature',
@@ -1066,6 +1056,7 @@ export const ApMapLibre3DMap = forwardRef<ApLeafletMapHandle, ApMapLibre3DMapPro
         props: Record<string, unknown>
       ): string => {
         if (layerId === 'gis-rail-line') return formatRailTooltip(props as RailFeatureProps);
+        if (layerId === 'gis-agency-line') return drugRouteHoverLabel(props);
         if (layerId === 'gis-stations-circle') {
           return formatFeatureTooltip(
             { ...props, name: props.name ?? props.label },
@@ -1160,7 +1151,6 @@ export const ApMapLibre3DMap = forwardRef<ApLeafletMapHandle, ApMapLibre3DMapPro
             'osm-3d-buildings',
             'gis-highways-line',
             'gis-rivers-line',
-            'gis-water-fill',
           ].filter((id) => Boolean(map.getLayer(id)));
           const extra = extraLayers.length
             ? map.queryRenderedFeatures(e.point, { layers: extraLayers })[0]
@@ -1170,14 +1160,12 @@ export const ApMapLibre3DMap = forwardRef<ApLeafletMapHandle, ApMapLibre3DMapPro
           const heightRaw = Number(props.render_height ?? props.height);
           const heightM = Number.isFinite(heightRaw) && heightRaw > 0 ? heightRaw : undefined;
           const name = String(props.name ?? props.ref ?? extra.sourceLayer ?? extra.layer?.id ?? 'Feature');
-          const kind: 'OSM Building' | 'Highway' | 'River' | 'Water body' =
+          const kind: 'OSM Building' | 'Highway' | 'River' =
             extra.layer?.id === 'osm-3d-buildings'
               ? 'OSM Building'
               : extra.layer?.id === 'gis-rivers-line'
                 ? 'River'
-                : extra.layer?.id === 'gis-water-fill'
-                  ? 'Water body'
-                  : 'Highway';
+                : 'Highway';
           const detailParts = [
             kind,
             heightM != null ? `${heightM} m OSM height` : null,
@@ -1332,7 +1320,6 @@ export const ApMapLibre3DMap = forwardRef<ApLeafletMapHandle, ApMapLibre3DMapPro
       markerData,
       highwayData,
       riverData,
-      waterData,
       agencyData,
       railData,
       bufferData,
@@ -1341,7 +1328,6 @@ export const ApMapLibre3DMap = forwardRef<ApLeafletMapHandle, ApMapLibre3DMapPro
       pinData,
       showHighways,
       showRivers,
-      showWaterbodies,
       overlayRoads,
       overlayPlaces,
       overlayImagery,

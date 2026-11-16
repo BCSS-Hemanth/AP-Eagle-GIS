@@ -95,7 +95,67 @@ const LABEL_ANCHOR_OVERRIDES: Record<string, [number, number]> = {
   Assam: [26.32, 92.9],
   Gujarat: [22.9, 71.7],
   'West Bengal': [23.4, 87.9],
+  /** West of the atoll chain so the name reads next to visible island dots. */
+  Lakshadweep: [10.55, 71.85],
 };
+
+/**
+ * Tiny island UTs are sub-pixel at India overview zoom — return [lat, lon] dots
+ * for political-clean callouts (largest parts first, capped).
+ */
+export function tinyIslandCalloutLatLngs(
+  feature: GeoJSON.Feature | undefined | null,
+  maxPoints = 14
+): [number, number][] {
+  if (!feature?.geometry) return [];
+  const name = stateDisplayName(feature).toLowerCase();
+  if (!name.includes('lakshadweep')) return [];
+
+  type Part = { lat: number; lon: number; area: number };
+  const parts: Part[] = [];
+
+  const ringArea = (ring: number[][]) => {
+    let a = 0;
+    for (let i = 0; i < ring.length - 1; i += 1) {
+      const [x1, y1] = ring[i]!;
+      const [x2, y2] = ring[i + 1]!;
+      a += x1 * y2 - x2 * y1;
+    }
+    return Math.abs(a) * 0.5;
+  };
+  const ringCentroid = (ring: number[][]): [number, number] | null => {
+    let sx = 0;
+    let sy = 0;
+    let n = 0;
+    for (const c of ring) {
+      if (!c || c.length < 2) continue;
+      sx += c[0]!;
+      sy += c[1]!;
+      n += 1;
+    }
+    if (!n) return null;
+    return [sy / n, sx / n];
+  };
+
+  const geom = feature.geometry;
+  const polys: number[][][][] =
+    geom.type === 'MultiPolygon'
+      ? geom.coordinates
+      : geom.type === 'Polygon'
+        ? [geom.coordinates]
+        : [];
+
+  for (const poly of polys) {
+    const outer = poly[0];
+    if (!outer?.length) continue;
+    const c = ringCentroid(outer);
+    if (!c) continue;
+    parts.push({ lat: c[0], lon: c[1], area: ringArea(outer) });
+  }
+
+  parts.sort((a, b) => b.area - a.area);
+  return parts.slice(0, maxPoints).map((p) => [p.lat, p.lon]);
+}
 
 /** Label anchor [lat, lon] — override → curated label_* → polygon centroid. */
 export function stateLabelLatLng(

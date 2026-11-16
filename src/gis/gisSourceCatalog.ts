@@ -13,18 +13,16 @@
  * - check_posts → lyr-checkposts (tolls split to lyr-toll-plazas)
  * - hotspots / ganja_seized / asr_boundary / pharma_hubs fill former empty stubs
  * - Admin ap_roads_major stays Admin; OPS main_roads / internal_roads are separate OPS layers
- * - OPS VSP.shp roads: PostGIS load (`npm run db:load-roads`) reprojects LCC→WGS84; API layer=vsp
  * - Full ap_roads + National Highways: PostGIS (`layer=full` / `layer=nh`); replaces OSRM NH sketch when API is up
  *
  * Phase 1C = Raster KMZ GroundOverlays (WGS84 LatLonBox; no GeoTIFF/DEM in source).
  * Conflict resolution (GIS-Source wins):
- * - lyr-cartosat → google_sat + aob + nt_cg (removes Esri World Imagery overlay)
- * - lyr-hillshade → google_terrain (removes Esri World Hillshade)
  * - basemap topo AOI → soi_topo (OpenTopoMap demoted; OSM underlay only outside coverage)
- * - basemap satellite/hybrid → Esri World Imagery only (GIS-Source sat AOI not stacked; avoids rectangular patch)
+ * - basemap satellite/hybrid → Esri World Imagery (GIS-Source sat AOI packs removed)
  */
 export const GIS_SOURCE_ADMIN_BASE = '/geo/gis-source/admin';
 export const GIS_SOURCE_OPS_BASE = '/geo/gis-source/ops';
+export const GIS_SOURCE_ROADS_BASE = '/geo/gis-source/roads';
 export const GIS_SOURCE_RASTER_BASE = '/geo/gis-source/raster';
 
 export const GIS_SOURCE_ADMIN_LAYERS = {
@@ -33,9 +31,22 @@ export const GIS_SOURCE_ADMIN_LAYERS = {
   taluk: `${GIS_SOURCE_ADMIN_BASE}/ap_taluk_gis_source.geojson`,
   vspVillages: `${GIS_SOURCE_ADMIN_BASE}/vsp_villages_pts.geojson`,
   borderPs: `${GIS_SOURCE_ADMIN_BASE}/border_ps.geojson`,
-  soi50k: `${GIS_SOURCE_ADMIN_BASE}/soi_50k_grid.geojson`,
+  proposedAnpr: `${GIS_SOURCE_ADMIN_BASE}/proposed_anpr_locations.geojson`,
+  apNeighborStates: `${GIS_SOURCE_ADMIN_BASE}/ap_neighbor_states.geojson`,
+  aobDists: `${GIS_SOURCE_ADMIN_BASE}/aob_dists.geojson`,
+  kmzVillages: `${GIS_SOURCE_ADMIN_BASE}/kmz_villages.geojson`,
+  psBorderArea: `${GIS_SOURCE_ADMIN_BASE}/ps_border_area.geojson`,
+  atlasMapData: `${GIS_SOURCE_ADMIN_BASE}/atlas_map_data.geojson`,
   rail: `${GIS_SOURCE_ADMIN_BASE}/rail_nt.geojson`,
   roadsMajor: `${GIS_SOURCE_ADMIN_BASE}/ap_roads_major.geojson`,
+} as const;
+
+/** Road Network KMZ products. Independent of OPS d_routes (`lyr-drug-routes`). */
+export const GIS_SOURCE_ROAD_KMZ_LAYERS = {
+  ganjaTransportRoutes: `${GIS_SOURCE_ROADS_BASE}/ganja_transport_routes.geojson`,
+  roadsAsrClassified: `${GIS_SOURCE_ROADS_BASE}/roads_asr_classified.geojson`,
+  asrRoadNetwork: `${GIS_SOURCE_ROADS_BASE}/asr_road_network.geojson`,
+  routeModeling: `${GIS_SOURCE_ROADS_BASE}/route_modeling.geojson`,
 } as const;
 
 export const GIS_SOURCE_OPS_LAYERS = {
@@ -55,11 +66,6 @@ export const GIS_SOURCE_OPS_LAYERS = {
 } as const;
 
 export const GIS_SOURCE_RASTER_PRODUCTS = {
-  googleRoadmap: `${GIS_SOURCE_RASTER_BASE}/google_roadmap/manifest.json`,
-  googleSat: `${GIS_SOURCE_RASTER_BASE}/google_sat/manifest.json`,
-  googleTerrain: `${GIS_SOURCE_RASTER_BASE}/google_terrain/manifest.json`,
-  aob: `${GIS_SOURCE_RASTER_BASE}/aob/manifest.json`,
-  ntCg: `${GIS_SOURCE_RASTER_BASE}/nt_cg/manifest.json`,
   soiTopo: `${GIS_SOURCE_RASTER_BASE}/soi_topo/manifest.json`,
 } as const;
 

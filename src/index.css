@@ -211,6 +211,14 @@
   pointer-events: none;
 }
 
+/* SOI topo ImageOverlays: hide 1px seams and avoid crisp-edge tile blocks on zoom. */
+.leaflet-image-layer.ap-gis-source-raster,
+img.ap-gis-source-raster {
+  image-rendering: auto;
+  outline: 1px solid transparent;
+  backface-visibility: hidden;
+}
+
 /* Isolated selection: outlines stay, fills stay transparent so basemap shows through.
    Do not force pointer-events:auto — that overrides Leaflet interactive:false and
    blocks drag-to-pan when a district polygon covers the viewport. */
@@ -496,8 +504,10 @@
   padding: 0;
   margin: 0;
   white-space: normal;
-  pointer-events: none;
+  /* Re-enable over pane pointer-events:none so tall cards can scroll. */
+  pointer-events: auto;
   z-index: 750 !important;
+  max-width: none;
 }
 
 .leaflet-tooltip.ap-hotspot-tooltip::before {
@@ -509,14 +519,70 @@
   pointer-events: none;
 }
 
+/* NDPS heat map: permanent GIS district / mandal / AP labels. */
+.leaflet-tooltip.ap-heat-district-label {
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+  color: #0f172a;
+  font-family: var(--font-sans);
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  line-height: 1.15;
+  margin: 0 !important;
+  padding: 0 !important;
+  white-space: normal;
+  max-width: 110px;
+  text-align: center;
+  pointer-events: none;
+  text-shadow:
+    0 0 2px #f8fafc,
+    1px 0 0 #f8fafc,
+    -1px 0 0 #f8fafc,
+    0 1px 0 #f8fafc,
+    0 -1px 0 #f8fafc,
+    1px 1px 0 #f8fafc,
+    -1px -1px 0 #f8fafc;
+}
+
+.leaflet-tooltip.ap-heat-district-label::before {
+  display: none !important;
+}
+
+.leaflet-tooltip.ap-heat-district-label--mandal {
+  color: #334155;
+  font-size: 9px;
+  font-weight: 600;
+  max-width: 90px;
+}
+
+.leaflet-tooltip.ap-heat-district-label--state {
+  color: #1e3a8a;
+  font-size: 12px;
+  font-weight: 800;
+  max-width: 140px;
+  letter-spacing: 0.02em;
+}
+
+.leaflet-admin-labels-pane,
+.leaflet-admin-outline-pane {
+  pointer-events: none;
+}
+
 .ap-hotspot-card {
-  width: 196px;
+  width: 220px;
+  max-width: min(220px, calc(100vw - 24px));
   background: #ffffff;
   border: 1px solid #c8c8c8;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.22);
   font-family: Arial, Helvetica, sans-serif;
   color: #222;
-  overflow: hidden;
+  /* max-height/overflow-y applied at tooltipopen to fit the map pane */
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 
 .ap-hotspot-card__title {
@@ -581,7 +647,8 @@
 }
 
 .ap-hotspot-card__photo img {
-  width: 168px;
+  width: 196px;
+  max-width: 100%;
   height: 105px;
   object-fit: cover;
   object-position: center;

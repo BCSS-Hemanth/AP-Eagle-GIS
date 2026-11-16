@@ -62,7 +62,13 @@ export function useGisSourceAdmin(flags: {
   showTaluk?: boolean;
   showVspVillages?: boolean;
   showBorderPs?: boolean;
-  showSoiGrid?: boolean;
+  /** Proposed ANPR camera locations (Admin catalog opt-in). */
+  showProposedAnpr?: boolean;
+  showApNeighborStates?: boolean;
+  showAobDists?: boolean;
+  showKmzVillages?: boolean;
+  showPsBorderArea?: boolean;
+  showAtlasMapData?: boolean;
   showRailVector?: boolean;
   showRoadsMajor?: boolean;
   /** Pre-2014 undivided AP+TG districts — overlay only; never drives admin drill. */
@@ -76,7 +82,27 @@ export function useGisSourceAdmin(flags: {
     Boolean(flags.showVspVillages)
   );
   const borderPs = useOptionalFc(GIS_SOURCE_ADMIN_LAYERS.borderPs, Boolean(flags.showBorderPs));
-  const soiGrid = useOptionalFc(GIS_SOURCE_ADMIN_LAYERS.soi50k, Boolean(flags.showSoiGrid));
+  const proposedAnpr = useOptionalFc(
+    GIS_SOURCE_ADMIN_LAYERS.proposedAnpr,
+    Boolean(flags.showProposedAnpr)
+  );
+  const apNeighborStates = useOptionalFc(
+    GIS_SOURCE_ADMIN_LAYERS.apNeighborStates,
+    Boolean(flags.showApNeighborStates)
+  );
+  const aobDists = useOptionalFc(GIS_SOURCE_ADMIN_LAYERS.aobDists, Boolean(flags.showAobDists));
+  const kmzVillages = useOptionalFc(
+    GIS_SOURCE_ADMIN_LAYERS.kmzVillages,
+    Boolean(flags.showKmzVillages)
+  );
+  const psBorderArea = useOptionalFc(
+    GIS_SOURCE_ADMIN_LAYERS.psBorderArea,
+    Boolean(flags.showPsBorderArea)
+  );
+  const atlasMapData = useOptionalFc(
+    GIS_SOURCE_ADMIN_LAYERS.atlasMapData,
+    Boolean(flags.showAtlasMapData)
+  );
   const rail = useOptionalFc(GIS_SOURCE_ADMIN_LAYERS.rail, Boolean(flags.showRailVector));
   const roadsMajor = useOptionalFc(
     GIS_SOURCE_ADMIN_LAYERS.roadsMajor,
@@ -92,7 +118,12 @@ export function useGisSourceAdmin(flags: {
     taluk,
     vspVillages,
     borderPs,
-    soiGrid,
+    proposedAnpr,
+    apNeighborStates,
+    aobDists,
+    kmzVillages,
+    psBorderArea,
+    atlasMapData,
     rail,
     roadsMajor,
     districtsHist,

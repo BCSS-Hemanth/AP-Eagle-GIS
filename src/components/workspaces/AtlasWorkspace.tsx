@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
+import type { Layer as LeafletLayer } from 'leaflet';
 import {
   ChevronDown,
   Download,
@@ -11,9 +12,11 @@ import {
   Trash2,
 } from 'lucide-react';
 import { ApLeafletMap, type ApLeafletMapHandle } from '../gis/ApLeafletMap';
+import { WorkspaceSidebarSplit } from '../gis/WorkspaceSidebarSplit';
 import type { BasemapId } from '../../types/gis';
 import {
   featureBbox,
+  filterCollectionToParent,
   STATE_ADMIN_DRILL,
   type AdminDrill,
 } from '../../gis/adminHierarchy';
@@ -33,14 +36,22 @@ import {
 } from '../../gis/atlas/atlasConfig';
 import { loadAtlasDistrictFeature } from '../../gis/atlas/atlasDistrictGeometry';
 import {
+  ATLAS_PEDAKURAPADU_ROADS_ID,
   atlasInventoryForDistrict,
   atlasLayersByCategory,
 } from '../../gis/atlas/atlasInventory';
 import {
+  DEFAULT_ATLAS_EXPORT_DECORATIONS,
   exportAtlasMapImage,
+  type AtlasExportDecorationFlags,
   type AtlasExportFormat,
   type AtlasExportResolution,
 } from '../../gis/atlas/atlasExport';
+import { atlasExportLegendItems } from '../../gis/atlas/atlasExportLegend';
+import {
+  atlasRoadHoverLabel,
+  atlasRoadPathStyle,
+} from '../../gis/atlas/atlasRoadClassStyles';
 import { atlasLeafletFlags, atlasVisibleAppliedIds } from '../../gis/atlas/atlasMapFlags';
 import type {
   AtlasConfig,
@@ -55,19 +66,64 @@ const CATEGORIES: AtlasLayerCategory[] = [
   'road-network',
 ];
 
-/** View 1 = satellite; View 2 = OSM road-network street map. */
-export type AtlasMapViewId = 'view1' | 'view2';
+/**
+ * Atlas map views:
+ * 1 satellite · 2 OSM roads · 3 Esri topo · 4 Esri street
+ */
+export type AtlasMapViewId = 'view1' | 'view2' | 'view3' | 'view4';
 
 const ATLAS_VIEW_BASEMAP: Record<AtlasMapViewId, BasemapId> = {
   view1: 'satellite',
   view2: 'vector',
+  view3: 'esri-topo',
+  view4: 'esri-street',
 };
+
+const ATLAS_VIEW_META: Record<
+  AtlasMapViewId,
+  { label: string; hint: string; caption: string; exportLabel: string }
+> = {
+  view1: {
+    label: 'View 1',
+    hint: 'Esri World Imagery',
+    caption: 'Esri satellite',
+    exportLabel: 'View 1 · satellite',
+  },
+  view2: {
+    label: 'View 2',
+    hint: 'OpenStreetMap roads',
+    caption: 'OpenStreetMap roads',
+    exportLabel: 'View 2 · OSM roads',
+  },
+  view3: {
+    label: 'View 3',
+    hint: 'Esri World Topographic',
+    caption: 'Esri World Topographic',
+    exportLabel: 'View 3 · Esri topo',
+  },
+  view4: {
+    label: 'View 4',
+    hint: 'Esri World Street Map',
+    caption: 'Esri World Street Map',
+    exportLabel: 'View 4 · Esri street',
+  },
+};
+
+const ATLAS_VIEW_OPTIONS = (
+  Object.keys(ATLAS_VIEW_META) as AtlasMapViewId[]
+).map((id) => ({ id, ...ATLAS_VIEW_META[id] }));
 
 interface AtlasWorkspaceProps {
   onTriggerToast: (msg: string) => void;
+  mapExpanded?: boolean;
+  onMapExpandedChange?: (expanded: boolean) => void;
 }
 
-export const AtlasWorkspace: React.FC<AtlasWorkspaceProps> = ({ onTriggerToast }) => {
+export const AtlasWorkspace: React.FC<AtlasWorkspaceProps> = ({
+  onTriggerToast,
+  mapExpanded = false,
+  onMapExpandedChange,
+}) => {
   const mapRef = useRef<ApLeafletMapHandle>(null);
   const mapHostRef = useRef<HTMLDivElement>(null);
 
@@ -79,7 +135,7 @@ export const AtlasWorkspace: React.FC<AtlasWorkspaceProps> = ({ onTriggerToast }
   const [displaying, setDisplaying] = useState(false);
   /** Bumps on Display / Fit district so the map reframes without isolating. */
   const [fitToken, setFitToken] = useState(0);
-  const [mapExpanded, setMapExpanded] = useState(false);
+  const setMapExpanded = (expanded: boolean) => onMapExpandedChange?.(expanded);
   const [atlasView, setAtlasView] = useState<AtlasMapViewId>('view1');
   const [viewTarget, setViewTarget] = useState<{
     lat: number;
@@ -95,9 +151,13 @@ export const AtlasWorkspace: React.FC<AtlasWorkspaceProps> = ({ onTriggerToast }
   const [exportOpen, setExportOpen] = useState(false);
   const [exportFormat, setExportFormat] = useState<AtlasExportFormat>('png');
   const [exportRes, setExportRes] = useState<AtlasExportResolution>('high');
-  /** Which Atlas map view (1 = satellite, 2 = OSM roads) to capture on download. */
+  /** Which Atlas map view to capture on download. */
   const [exportView, setExportView] = useState<AtlasMapViewId>('view1');
+  const [exportDecorations, setExportDecorations] = useState<AtlasExportDecorationFlags>(
+    () => ({ ...DEFAULT_ATLAS_EXPORT_DECORATIONS })
+  );
   const [exporting, setExporting] = useState(false);
+  const [pedakurapaduRoads, setPedakurapaduRoads] = useState<GeoJSON.FeatureCollection | null>(null);
 
   const meta = atlasDistrictById(districtId ?? undefined);
   const inventory = districtId ? atlasInventoryForDistrict(districtId) : null;
@@ -124,6 +184,31 @@ export const AtlasWorkspace: React.FC<AtlasWorkspaceProps> = ({ onTriggerToast }
     [compositionActive, districtCfg.appliedLayerIds, districtCfg.layerVisibility]
   );
   const mapFlags = useMemo(() => atlasLeafletFlags(visibleIds), [visibleIds]);
+  const showPedakurapaduRoads = visibleIds.has(ATLAS_PEDAKURAPADU_ROADS_ID);
+
+  useEffect(() => {
+    if (!showPedakurapaduRoads) return;
+    let cancelled = false;
+    fetch('/geo/atlas/pedakurapadu-roads.geojson')
+      .then((res) => {
+        if (!res.ok) throw new Error(`Pedakurapadu roads ${res.status}`);
+        return res.json() as Promise<GeoJSON.FeatureCollection>;
+      })
+      .then((data) => {
+        if (!cancelled) setPedakurapaduRoads(data);
+      })
+      .catch(() => {
+        if (!cancelled) setPedakurapaduRoads(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [showPedakurapaduRoads]);
+
+  const pedakurapaduClipped = useMemo(
+    () => (showPedakurapaduRoads ? filterCollectionToParent(pedakurapaduRoads, districtFeature) : null),
+    [showPedakurapaduRoads, pedakurapaduRoads, districtFeature]
+  );
 
   /**
    * Fit the selected district into most of the viewport with padding so
@@ -168,6 +253,34 @@ export const AtlasWorkspace: React.FC<AtlasWorkspaceProps> = ({ onTriggerToast }
       },
     ];
   }, [compositionActive, districtFeature, mapFlags.showDistricts]);
+
+  const atlasMapOverlays = useMemo(() => {
+    if (!pedakurapaduClipped?.features.length) return districtHighlightOverlays;
+    return [
+      ...districtHighlightOverlays,
+      {
+        id: ATLAS_PEDAKURAPADU_ROADS_ID,
+        data: pedakurapaduClipped,
+        color: '#0e7490',
+        weight: 2,
+        opacity: 0.95,
+        fill: false as const,
+        fillOpacity: 0,
+        interactive: true,
+        featureStyle: (feature: GeoJSON.Feature) => {
+          const s = atlasRoadPathStyle(feature.properties);
+          return { color: s.color, weight: s.weight };
+        },
+        onEachFeature: (feature: GeoJSON.Feature, layer: LeafletLayer) => {
+          layer.bindTooltip(atlasRoadHoverLabel(feature.properties, 'Road'), {
+            sticky: true,
+            direction: 'top',
+            opacity: 0.96,
+          });
+        },
+      },
+    ];
+  }, [districtHighlightOverlays, pedakurapaduClipped]);
 
   /** District-level drill so every Atlas layer is spatially restricted to the selection. */
   const atlasAdminDrill = useMemo<AdminDrill>(() => {
@@ -387,7 +500,7 @@ export const AtlasWorkspace: React.FC<AtlasWorkspaceProps> = ({ onTriggerToast }
     }
     setExporting(true);
     try {
-      // Switch map to the selected download view so capture matches View 1 / View 2.
+      // Switch map to the selected download view so capture matches the chosen view.
       if (exportView !== atlasView) {
         handleAtlasViewChange(exportView);
         await waitForExportView(exportView === 'view1' ? 1100 : 900);
@@ -395,15 +508,21 @@ export const AtlasWorkspace: React.FC<AtlasWorkspaceProps> = ({ onTriggerToast }
         await waitForExportView(200);
       }
       const base = `eagle_atlas_${districtId ?? 'map'}_${exportView}_${exportRes}`;
+      const legendItems =
+        exportDecorations.legend && inventory
+          ? atlasExportLegendItems(visibleIds, inventory.layers)
+          : [];
       const { fileName } = await exportAtlasMapImage({
         mapEl: el,
         format: exportFormat,
         resolution: exportRes,
         fileBaseName: base,
+        decorations: exportDecorations,
+        legendItems,
       });
       setExportOpen(false);
       onTriggerToast(
-        `Downloaded ${fileName} (${exportView === 'view1' ? 'View 1 · satellite' : 'View 2 · OSM roads'})`
+        `Downloaded ${fileName} (${ATLAS_VIEW_META[exportView].exportLabel})`
       );
     } catch (err) {
       onTriggerToast(
@@ -432,24 +551,17 @@ export const AtlasWorkspace: React.FC<AtlasWorkspaceProps> = ({ onTriggerToast }
 
   const viewSwitcher = (
     <div
-      className={`shrink-0 flex items-center gap-1.5 px-2 py-1.5 border-b border-outline-variant/40 ${
-        mapExpanded ? 'bg-[#0b1c30] text-white border-white/10' : 'bg-surface-container-lowest'
+      className={`shrink-0 flex flex-wrap items-center gap-1.5 px-2 py-1.5 border-b border-outline-variant/40 ${
+        mapExpanded
+          ? 'bg-white/95 text-on-surface border-outline-variant/40 shadow-sm rounded-br-md'
+          : 'bg-surface-container-lowest'
       }`}
       data-testid="atlas-view-switcher"
     >
-      <span
-        className={`text-[10px] font-bold uppercase tracking-wide mr-1 ${
-          mapExpanded ? 'text-white/70' : 'text-on-surface-variant'
-        }`}
-      >
+      <span className="text-[10px] font-bold uppercase tracking-wide mr-1 text-on-surface-variant">
         Map view
       </span>
-      {(
-        [
-          { id: 'view1' as const, label: 'View 1', hint: 'Satellite' },
-          { id: 'view2' as const, label: 'View 2', hint: 'Road network' },
-        ] as const
-      ).map((opt) => {
+      {ATLAS_VIEW_OPTIONS.map((opt) => {
         const active = atlasView === opt.id;
         return (
           <button
@@ -461,42 +573,22 @@ export const AtlasWorkspace: React.FC<AtlasWorkspaceProps> = ({ onTriggerToast }
             onClick={() => handleAtlasViewChange(opt.id)}
             className={`h-7 px-2.5 rounded text-[11px] font-bold transition-colors ${
               active
-                ? mapExpanded
-                  ? 'bg-white text-[#0b1c30]'
-                  : 'bg-primary text-on-primary'
-                : mapExpanded
-                  ? 'bg-white/10 text-white/90 hover:bg-white/20'
-                  : 'bg-surface-container border border-outline-variant/50 text-on-surface-variant hover:bg-surface-container-high'
+                ? 'bg-primary text-on-primary'
+                : 'bg-surface-container border border-outline-variant/50 text-on-surface-variant hover:bg-surface-container-high'
             }`}
           >
             {opt.label}
           </button>
         );
       })}
-      <span
-        className={`text-[10px] ml-1 truncate ${
-          mapExpanded ? 'text-white/70' : 'text-on-surface-variant'
-        }`}
-      >
-        {atlasView === 'view1' ? 'Esri satellite' : 'OpenStreetMap roads'}
+      <span className="text-[10px] ml-1 truncate text-on-surface-variant">
+        {ATLAS_VIEW_META[atlasView].caption}
       </span>
-      {mapExpanded ? (
-        <button
-          type="button"
-          data-testid="atlas-exit-fullscreen"
-          className="ml-auto h-8 px-3 rounded bg-white text-[#0b1c30] text-[11px] font-bold inline-flex items-center gap-1.5"
-          onClick={() => setMapExpanded(false)}
-          title="Exit full screen (Esc)"
-        >
-          <Minimize2 className="w-3.5 h-3.5" />
-          Exit full screen
-        </button>
-      ) : null}
     </div>
   );
 
   const mapStage = (
-    <div className="flex-1 min-h-0 min-w-0 relative" ref={mapHostRef} data-testid="atlas-map-host">
+    <div className="flex-1 h-full min-h-0 min-w-0 relative" ref={mapHostRef} data-testid="atlas-map-host">
       <ApLeafletMap
         ref={mapRef}
         className="h-full w-full"
@@ -505,8 +597,11 @@ export const AtlasWorkspace: React.FC<AtlasWorkspaceProps> = ({ onTriggerToast }
         interactive
         highlightApFill={false}
         autoSatelliteOverlay={false}
+        autoPlaceLabelsOnDrill={false}
         maskOutsideDrill={false}
         autoAdminOverlays={false}
+        classifyAtlasRoadTypes
+        showScale={false}
         apOnlyPermanentStateLabels
         showStateBorder={mapFlags.showStateBorder}
         showDistricts={mapFlags.showDistricts}
@@ -519,21 +614,28 @@ export const AtlasWorkspace: React.FC<AtlasWorkspaceProps> = ({ onTriggerToast }
         showPoliceStations={mapFlags.showPoliceStations}
         policeStationOpacity={mapFlags.policeStationOpacity}
         showBorderPs={mapFlags.showBorderPs}
+        showProposedAnpr={mapFlags.showProposedAnpr}
+        showApNeighborStates={mapFlags.showApNeighborStates}
+        showAobDists={mapFlags.showAobDists}
+        showKmzVillages={mapFlags.showKmzVillages}
+        showPsBorderArea={mapFlags.showPsBorderArea}
+        showAtlasMapData={mapFlags.showAtlasMapData}
         showTalukGis={mapFlags.showTalukGis}
         showVspVillagePts={mapFlags.showVspVillagePts}
         showDistrictsGisHist={mapFlags.showDistrictsGisHist}
         showStateGisHist={mapFlags.showStateGisHist}
-        showGraticule={mapFlags.showGraticule}
         showHighways={mapFlags.showHighways}
         showApRoadsFull={mapFlags.showApRoadsFull}
-        showOpsVspRoads={mapFlags.showOpsVspRoads}
         showApRoadsMajor={mapFlags.showApRoadsMajor}
         showTrails={mapFlags.showTrails}
         showOpsMainRoads={mapFlags.showOpsMainRoads}
         showOpsInternalRoads={mapFlags.showOpsInternalRoads}
+        showGanjaTransportRoutes={mapFlags.showGanjaTransportRoutes}
+        showRoadsAsrClassified={mapFlags.showRoadsAsrClassified}
+        showAsrRoadNetwork={mapFlags.showAsrRoadNetwork}
+        showRouteModeling={mapFlags.showRouteModeling}
         showRailways={mapFlags.showRailways}
         showRivers={mapFlags.showRivers}
-        showWaterbodies={mapFlags.showWaterbodies}
         showAgencyRoutes={mapFlags.showAgencyRoutes}
         showAsrBoundary={mapFlags.showAsrBoundary}
         showCheckPosts={mapFlags.showCheckPosts}
@@ -545,11 +647,11 @@ export const AtlasWorkspace: React.FC<AtlasWorkspaceProps> = ({ onTriggerToast }
         showPharmaHubs={mapFlags.showPharmaHubs}
         showHotspots={mapFlags.showHotspots}
         showGanjaSeized={mapFlags.showGanjaSeized}
-        showPlaces={mapFlags.showPlaces}
+        showPlaces={false}
         adminDrill={atlasAdminDrill}
         boundsView={boundsView}
         viewTarget={viewTarget ?? undefined}
-        geoJsonOverlays={districtHighlightOverlays}
+        geoJsonOverlays={atlasMapOverlays}
         layoutRevision={`atlas:${districtId ?? 'none'}:${atlasView}:${[...visibleIds].sort().join(',')}:${compositionActive ? 'on' : 'off'}:${fitToken}:${mapExpanded ? 'full' : 'shell'}`}
       />
       <div className="absolute top-2 left-2 z-[500] pointer-events-none rounded bg-black/70 text-white px-2 py-1 text-[10px] font-semibold shadow-sm">
@@ -573,71 +675,82 @@ export const AtlasWorkspace: React.FC<AtlasWorkspaceProps> = ({ onTriggerToast }
     </div>
   );
 
-  if (mapExpanded) {
-    return (
-      <div
-        className="fixed inset-0 z-[100] bg-[#0b1c30] flex flex-col"
-        data-testid="atlas-workspace-fullscreen"
-      >
-        {viewSwitcher}
-        {mapStage}
-      </div>
-    );
-  }
-
   return (
-    <div className="h-full min-h-0 flex flex-col" data-testid="atlas-workspace">
-      <header className="shrink-0 flex flex-wrap items-center justify-between gap-2 px-3 py-2 border-b border-outline-variant/40 bg-surface-container-lowest">
-        <div className="min-w-0">
-          <div className="text-[10px] font-bold uppercase tracking-wider text-secondary">
-            M3 · Atlas
+    <div
+      className={
+        mapExpanded
+          ? 'fixed inset-0 z-[900] bg-white flex flex-col'
+          : 'h-full min-h-0 flex flex-col'
+      }
+      data-testid={mapExpanded ? 'atlas-workspace-fullscreen' : 'atlas-workspace'}
+    >
+      {!mapExpanded ? (
+        <header className="shrink-0 flex flex-wrap items-center justify-between gap-2 px-3 py-2 border-b border-outline-variant/40 bg-surface-container-lowest">
+          <div className="min-w-0">
+            <div className="text-[10px] font-bold uppercase tracking-wider text-secondary">
+              M3 · Atlas
+            </div>
+            <h1 className="text-base font-bold text-primary truncate">
+              Atlas
+              {meta ? (
+                <span className="text-on-surface-variant font-semibold">
+                  {' '}
+                  — {meta.name}
+                </span>
+              ) : null}
+            </h1>
           </div>
-          <h1 className="text-base font-bold text-primary truncate">
-            Atlas
-            {meta ? (
-              <span className="text-on-surface-variant font-semibold">
-                {' '}
-                — {meta.name}
-              </span>
-            ) : null}
-          </h1>
-        </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <button
-            type="button"
-            className="h-8 px-2.5 rounded border border-outline-variant/50 text-[11px] font-semibold inline-flex items-center gap-1"
-            onClick={handleClear}
-            disabled={!districtId}
-          >
-            <RotateCcw className="w-3.5 h-3.5" />
-            Clear
-          </button>
-          <button
-            type="button"
-            className="h-8 px-2.5 rounded border border-outline-variant/50 text-[11px] font-semibold inline-flex items-center gap-1"
-            onClick={() => setMapExpanded(true)}
-          >
-            <Maximize2 className="w-3.5 h-3.5" />
-            Full map
-          </button>
-          <button
-            type="button"
-            data-testid="atlas-download-map"
-            className="h-8 px-3 rounded bg-primary text-on-primary text-[11px] font-bold inline-flex items-center gap-1.5 disabled:opacity-50"
-            disabled={!compositionActive || !visibleIds.size}
-            onClick={() => {
-              setExportView(atlasView);
-              setExportOpen(true);
-            }}
-          >
-            <Download className="w-3.5 h-3.5" />
-            Download Map
-          </button>
-        </div>
-      </header>
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              className="h-8 px-2.5 rounded border border-outline-variant/50 text-[11px] font-semibold inline-flex items-center gap-1"
+              onClick={handleClear}
+              disabled={!districtId}
+            >
+              <RotateCcw className="w-3.5 h-3.5" />
+              Clear
+            </button>
+            <button
+              type="button"
+              className="h-8 px-2.5 rounded border border-outline-variant/50 text-[11px] font-semibold inline-flex items-center gap-1"
+              onClick={() => setMapExpanded(true)}
+            >
+              <Maximize2 className="w-3.5 h-3.5" />
+              Full map
+            </button>
+            <button
+              type="button"
+              data-testid="atlas-download-map"
+              className="h-8 px-3 rounded bg-primary text-on-primary text-[11px] font-bold inline-flex items-center gap-1.5 disabled:opacity-50"
+              disabled={!compositionActive || !visibleIds.size}
+              onClick={() => {
+                setExportView(atlasView);
+                setExportOpen(true);
+              }}
+            >
+              <Download className="w-3.5 h-3.5" />
+              Download Map
+            </button>
+          </div>
+        </header>
+      ) : (
+        <button
+          type="button"
+          data-testid="atlas-exit-fullscreen"
+          onClick={() => setMapExpanded(false)}
+          title="Exit full screen (Esc)"
+          className="absolute top-2 right-3 z-[910] inline-flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-bold cursor-pointer bg-white text-[#0b3d7a] border border-[#0b3d7a]/30 shadow-md hover:bg-sky-50"
+        >
+          <Minimize2 className="w-3.5 h-3.5" />
+          Exit full screen
+        </button>
+      )}
 
-      <div className="flex-1 min-h-0 flex flex-col lg:flex-row">
-        <aside className="w-full lg:w-[340px] shrink-0 border-b lg:border-b-0 lg:border-r border-outline-variant/40 bg-surface-container-low overflow-y-auto max-h-[42vh] lg:max-h-none">
+      <WorkspaceSidebarSplit
+        testId="atlas-sidebar-split"
+        hideSidebar={mapExpanded}
+        sidebar={
+          <>
           <div className="p-3 space-y-3">
             <label className="block">
               <span className="text-[10.5px] font-bold uppercase tracking-wide text-on-surface-variant">
@@ -810,13 +923,14 @@ export const AtlasWorkspace: React.FC<AtlasWorkspaceProps> = ({ onTriggerToast }
               </>
             )}
           </div>
-        </aside>
-
+          </>
+        }
+      >
         <div className="flex-1 min-h-0 min-w-0 flex flex-col">
           {viewSwitcher}
           {mapStage}
         </div>
-      </div>
+      </WorkspaceSidebarSplit>
 
       {exportOpen && (
         <div
@@ -841,6 +955,8 @@ export const AtlasWorkspace: React.FC<AtlasWorkspaceProps> = ({ onTriggerToast }
               >
                 <option value="view1">View 1 — Esri satellite</option>
                 <option value="view2">View 2 — OpenStreetMap roads</option>
+                <option value="view3">View 3 — Esri World Topographic</option>
+                <option value="view4">View 4 — Esri World Street Map</option>
               </select>
             </label>
             <label className="block text-[11px] font-semibold">
@@ -867,6 +983,40 @@ export const AtlasWorkspace: React.FC<AtlasWorkspaceProps> = ({ onTriggerToast }
                 <option value="high">High</option>
               </select>
             </label>
+            <fieldset className="space-y-1.5" data-testid="atlas-export-decorations">
+              <legend className="text-[11px] font-semibold text-on-surface">
+                Include on map
+              </legend>
+              <p className="text-[10px] text-on-surface-variant">
+                Only checked elements are drawn onto the downloaded snapshot.
+              </p>
+              {(
+                [
+                  { key: 'northArrow' as const, label: 'North arrow' },
+                  { key: 'legend' as const, label: 'Legend' },
+                ] as const
+              ).map((opt) => (
+                <label
+                  key={opt.key}
+                  className="flex items-center gap-2 text-[11px] font-medium text-on-surface cursor-pointer"
+                >
+                  <input
+                    type="checkbox"
+                    className="accent-primary"
+                    data-testid={`atlas-export-${opt.key}`}
+                    checked={exportDecorations[opt.key]}
+                    disabled={exporting}
+                    onChange={(e) =>
+                      setExportDecorations((prev) => ({
+                        ...prev,
+                        [opt.key]: e.target.checked,
+                      }))
+                    }
+                  />
+                  {opt.label}
+                </label>
+              ))}
+            </fieldset>
             <div className="flex justify-end gap-2 pt-1">
               <button
                 type="button"

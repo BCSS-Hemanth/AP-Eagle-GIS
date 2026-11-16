@@ -41,7 +41,6 @@ export const ADMIN_GIS_SOURCE_SAFETY = {
     'lyr-taluk-gis',
     'lyr-vsp-village-pts',
     'lyr-border-ps',
-    'lyr-soi-grid',
     'lyr-railways',
     'lyr-ap-roads-major',
     'lyr-districts-gis-hist',

@@ -150,7 +150,15 @@ export function shouldOverlaySatellite(
   forced: boolean
 ): boolean {
   if (forced) return true;
-  if (rasterId === 'satellite' || rasterId === 'hybrid') return false;
+  // Full-frame Esri basemaps (incl. Atlas Views 3–5) skip auto satellite stacking.
+  if (
+    rasterId === 'satellite' ||
+    rasterId === 'hybrid' ||
+    rasterId === 'esri-topo' ||
+    rasterId === 'esri-street'
+  ) {
+    return false;
+  }
   if (drillLevel === 'village') return true;
   if (drillLevel === 'mandal' && zoom >= 13) return true;
   return zoom >= MAP_ZOOM.satelliteDetail;
@@ -179,7 +187,7 @@ export const MAP_DETAIL_SOURCES = {
   osmRaster: 'OpenStreetMap raster tiles (roads, water, landcover, building footprints at z≥16).',
   maplibreLiberty: 'OpenFreeMap Liberty vector style (no API key). Sparse at high zoom — OSM raster is stacked from z11.',
   esriImagery:
-    'Esri World Imagery is the statewide gap-fill underlay. GIS-Source google_sat + AOB + NT_CG GroundOverlays paint on top only inside their AOIs (not full AP).',
+    'Esri World Imagery is the statewide satellite underlay / high-zoom gap-fill. GIS-Source sat AOI packs were removed from the catalog.',
   esriRoads: 'Esri World Transportation reference overlay.',
   esriPlaces: 'Esri World Boundaries and Places labels.',
   buildings2d: 'Building outlines come from OSM raster at z≥16. They are not extruded.',
@@ -188,9 +196,8 @@ export const MAP_DETAIL_SOURCES = {
   adminMandals: '654 NWIC/SOI mandal polygons (vintage names; spatially parented to 2022 districts).',
   adminVillages: '18,100 NWIC/SOI village polygons, loaded by view bbox from z9.',
   osmRivers: 'OSM Overpass centerlines for Godavari, Krishna, Penna, Nagavali, Vamsadhara, Tungabhadra.',
-  osmWater: 'OSM Overpass named lakes and reservoirs in the AP envelope (ODbL).',
   esriHillshade:
-    'Replaced by GIS-Source google_terrain GroundOverlay. Esri World Hillshade is no longer used.',
+    'GIS-Source terrain / Google roadmap catalog layers removed. Esri World Hillshade is not an Atlas basemap.',
   geodesicBuffer: 'Client-side geodesic multi-ring buffer (QGIS native:multiringconstantbuffer analog) on WGS84.',
   unavailable: 'ISRO Cartosat-3 native GeoTIFF and DEM float grids were not in GIS-Source Raster.',
 } as const;
@@ -225,12 +232,18 @@ export function mapDetailCaption(
   const tiles: string[] = [];
   if (rasterId === 'satellite' || rasterId === 'hybrid') {
     tiles.push('Esri imagery');
+  } else if (rasterId === 'esri-topo') {
+    tiles.push('Esri World Topographic');
+  } else if (rasterId === 'esri-street') {
+    tiles.push('Esri World Street Map');
   } else if (imageryOn) {
-    tiles.push('Esri imagery + GIS-Source sat AOI');
+    tiles.push('Esri imagery');
   }
   if (useMapLibre) tiles.push(zoom >= MAP_ZOOM.osmRasterBoost ? 'OSM raster' : 'OpenFreeMap Liberty');
   else if (rasterId === 'topo') tiles.push('GIS-Source SOI topo');
   else if (rasterId === 'vector' && !imageryOn) tiles.push('OSM raster');
-  tiles.push('Esri roads/places');
+  if (rasterId !== 'esri-topo' && rasterId !== 'esri-street') {
+    tiles.push('Esri roads/places');
+  }
   return `z${zoom.toFixed(0)} · ${band} · ${tiles.join(' + ')}`;
 }

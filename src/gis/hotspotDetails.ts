@@ -18,11 +18,45 @@ import type { LonLat } from './adminHierarchy';
 import { pointInFeature } from './adminHierarchy';
 
 export const HOTSPOT_POPUP = {
-  widthPx: 196,
-  photoWidthPx: 168,
+  widthPx: 220,
+  photoWidthPx: 196,
   photoHeightPx: 105,
   imageSrc: '/geo/gis-source/ops/hotspot-reference.png',
+  /** Keep this many CSS pixels of map chrome clear around the card. */
+  mapPadPx: 8,
+  /** Floor when the map pane is very short. */
+  minVisiblePx: 140,
 } as const;
+
+/** How far to nudge a tooltip so its box stays inside the map container. */
+export function hotspotTooltipClampDelta(
+  tip: { top: number; left: number; right: number; bottom: number },
+  map: { top: number; left: number; right: number; bottom: number },
+  pad = HOTSPOT_POPUP.mapPadPx
+): { dx: number; dy: number } {
+  let dx = 0;
+  let dy = 0;
+  const tipH = tip.bottom - tip.top;
+  const mapH = map.bottom - map.top - pad * 2;
+  if (tipH >= mapH) {
+    // Prefer keeping the title / first fields visible; card scrolls for the rest.
+    dy = map.top + pad - tip.top;
+  } else {
+    if (tip.top < map.top + pad) dy += map.top + pad - tip.top;
+    if (tip.bottom + dy > map.bottom - pad) dy += map.bottom - pad - (tip.bottom + dy);
+  }
+  if (tip.left < map.left + pad) dx += map.left + pad - tip.left;
+  if (tip.right + dx > map.right - pad) dx += map.right - pad - (tip.right + dx);
+  return { dx, dy };
+}
+
+/** Max card height so a tall hotspot popup can scroll inside the map pane. */
+export function hotspotTooltipMaxHeightPx(
+  mapHeight: number,
+  pad = HOTSPOT_POPUP.mapPadPx
+): number {
+  return Math.max(HOTSPOT_POPUP.minVisiblePx, Math.floor(mapHeight - pad * 2));
+}
 
 export type HotspotDetails = {
   title: string;

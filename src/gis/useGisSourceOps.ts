@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { GIS_SOURCE_OPS_LAYERS } from './gisSourceCatalog';
+import { GIS_SOURCE_OPS_LAYERS, GIS_SOURCE_ROAD_KMZ_LAYERS } from './gisSourceCatalog';
 
 const EMPTY: GeoJSON.FeatureCollection = { type: 'FeatureCollection', features: [] };
 
@@ -70,6 +70,10 @@ export function useGisSourceOps(flags: {
   showFootTracks?: boolean;
   showInternalRoads?: boolean;
   showMainRoads?: boolean;
+  showGanjaTransportRoutes?: boolean;
+  showRoadsAsrClassified?: boolean;
+  showAsrRoadNetwork?: boolean;
+  showRouteModeling?: boolean;
   showStockPoints?: boolean;
   showTollPlazas?: boolean;
 }) {
@@ -88,6 +92,22 @@ export function useGisSourceOps(flags: {
       Boolean(flags.showInternalRoads)
     ),
     mainRoads: useOptionalFc(GIS_SOURCE_OPS_LAYERS.mainRoads, Boolean(flags.showMainRoads)),
+    ganjaTransportRoutes: useOptionalFc(
+      GIS_SOURCE_ROAD_KMZ_LAYERS.ganjaTransportRoutes,
+      Boolean(flags.showGanjaTransportRoutes)
+    ),
+    roadsAsrClassified: useOptionalFc(
+      GIS_SOURCE_ROAD_KMZ_LAYERS.roadsAsrClassified,
+      Boolean(flags.showRoadsAsrClassified)
+    ),
+    asrRoadNetwork: useOptionalFc(
+      GIS_SOURCE_ROAD_KMZ_LAYERS.asrRoadNetwork,
+      Boolean(flags.showAsrRoadNetwork)
+    ),
+    routeModeling: useOptionalFc(
+      GIS_SOURCE_ROAD_KMZ_LAYERS.routeModeling,
+      Boolean(flags.showRouteModeling)
+    ),
     stockPoints: useOptionalFc(GIS_SOURCE_OPS_LAYERS.stockPoints, Boolean(flags.showStockPoints)),
     tollPlazas: useOptionalFc(GIS_SOURCE_OPS_LAYERS.tollPlazas, Boolean(flags.showTollPlazas)),
   };

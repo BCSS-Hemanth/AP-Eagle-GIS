@@ -1,10 +1,24 @@
 import React, { useCallback, useMemo, useRef, useState } from 'react';
-import { MapPin, Navigation, Route, Trash2, Eye, EyeOff } from 'lucide-react';
+import {
+  Car,
+  Eye,
+  EyeOff,
+  Motorbike,
+  Navigation,
+  PersonStanding,
+  Plus,
+  Route,
+  Trash2,
+  X,
+} from 'lucide-react';
 import type { GisLayer, WorkspaceId } from '../../types/gis';
 import { ApLeafletMap } from '../gis/ApLeafletMap';
+import { WorkspaceSidebarSplit } from '../gis/WorkspaceSidebarSplit';
 import {
   isRoutableRoadLayer,
   isRoutingLocationLayer,
+  isPostgisRoadGeoJsonUrl,
+  resolveLayerGeoJsonUrl,
   routingMapFlags,
   routingLayersFromConfig,
   type RoadsRoutingLayerConfig,
@@ -19,33 +33,65 @@ import {
   graphStats,
   type LonLat,
 } from '../../gis/roadsRoutingGraph';
+import {
+  filterFcForTravelMode,
+  ROUTING_TRAVEL_MODE_LABEL,
+  travelModeSpeedKmh,
+  type RoutingTravelMode,
+} from '../../gis/roadsRoutingTravelMode';
 import { analyseOpsNearRoute, type OpsNearRoute } from '../../gis/roadsRoutingOps';
 import { osrmDrivingRouteAlternatives } from '../../gis/osmServices';
-import { GIS_SOURCE_ADMIN_LAYERS, GIS_SOURCE_OPS_LAYERS } from '../../gis/gisSourceCatalog';
 import { featureBbox } from '../../gis/adminHierarchy';
 import { INDIA_CENTER, INDIA_DEFAULT_ZOOM } from '../../data/apGeo';
-const ROUTE_COLORS = ['#2563eb', '#dc2626', '#059669', '#d97706', '#7c3aed'] as const;
 
-const LAYER_FC_URL: Record<string, string> = {
-  'lyr-highways': '/api/gis-roads/geojson?layer=nh',
-  'lyr-ap-roads-full': '/api/gis-roads/geojson?layer=full',
-  'lyr-ops-vsp-roads': '/api/gis-roads/geojson?layer=vsp',
-  'lyr-ap-roads-major': GIS_SOURCE_ADMIN_LAYERS.roadsMajor,
-  'lyr-ops-main-roads': GIS_SOURCE_OPS_LAYERS.mainRoads,
-  'lyr-ops-internal-roads': GIS_SOURCE_OPS_LAYERS.internalRoads,
-  'lyr-forest-trails': GIS_SOURCE_OPS_LAYERS.footTracks,
-  'lyr-checkposts': GIS_SOURCE_OPS_LAYERS.checkPosts,
-  'lyr-toll-plazas': GIS_SOURCE_OPS_LAYERS.tollPlazas,
-  'lyr-entry-exit': GIS_SOURCE_OPS_LAYERS.entryExit,
-  'lyr-stock-points': GIS_SOURCE_OPS_LAYERS.stockPoints,
-  'lyr-ddacs': GIS_SOURCE_OPS_LAYERS.ddacs,
-  'lyr-pharma-hubs': GIS_SOURCE_OPS_LAYERS.pharmaHubs,
-  'lyr-hotspots': GIS_SOURCE_OPS_LAYERS.hotspots,
-  'lyr-seizure-polys': GIS_SOURCE_OPS_LAYERS.ganjaSeized,
-  'lyr-border-ps': GIS_SOURCE_ADMIN_LAYERS.borderPs,
-  'lyr-drug-routes': GIS_SOURCE_OPS_LAYERS.dRoutes,
-  'lyr-railways': GIS_SOURCE_ADMIN_LAYERS.rail,
-};
+const TRAVEL_MODE_OPTIONS: Array<{
+  id: RoutingTravelMode;
+  label: string;
+  Icon: typeof Car;
+}> = [
+  { id: 'four-wheeler', label: 'Four-Wheeler', Icon: Car },
+  { id: 'two-wheeler', label: 'Two-Wheeler', Icon: Motorbike },
+  { id: 'on-foot', label: 'On Foot', Icon: PersonStanding },
+];
+const ROUTE_COLORS = ['#2563eb', '#dc2626', '#059669', '#d97706', '#7c3aed'] as const;
+const MARKER_KINDS = ['hq', 'station', 'checkpost', 'hotspot', 'seizure', 'city'] as const;
+
+interface RoutePointEntry {
+  id: string;
+  label: string;
+  latText: string;
+  lonText: string;
+}
+
+function pointLetter(index: number): string {
+  return index >= 0 && index < 26 ? String.fromCharCode(65 + index) : String(index + 1);
+}
+
+function nextRoutePointId(existing: RoutePointEntry[]): string {
+  let n = existing.length + 1;
+  const ids = new Set(existing.map((p) => p.id));
+  while (ids.has(`pt-${n}`)) n += 1;
+  return `pt-${n}`;
+}
+
+function parseCoord(text: string): number | null {
+  const t = text.trim();
+  if (!t || t === '-' || t === '.' || t === '-.') return null;
+  const n = Number(t);
+  return Number.isFinite(n) ? n : null;
+}
+
+function pointLonLat(p: RoutePointEntry): LonLat | null {
+  const lat = parseCoord(p.latText);
+  const lon = parseCoord(p.lonText);
+  if (lat == null || lon == null) return null;
+  if (lat < -90 || lat > 90 || lon < -180 || lon > 180) return null;
+  return { lat, lon };
+}
+
+function relabelPoints(points: RoutePointEntry[]): RoutePointEntry[] {
+  return points.map((p, i) => ({ ...p, label: pointLetter(i) }));
+}
 
 export interface CalculatedRoute {
   id: string;
@@ -103,10 +149,15 @@ export const RoadsRoutingWorkspace: React.FC<RoadsRoutingWorkspaceProps> = ({
   );
   const mapFlags = useMemo(() => routingMapFlags(savedLayers), [savedLayers]);
 
-  const [pointA, setPointA] = useState<LonLat | null>(null);
-  const [pointB, setPointB] = useState<LonLat | null>(null);
-  const [pinStep, setPinStep] = useState<'a' | 'b' | 'done'>('a');
+  const [points, setPoints] = useState<RoutePointEntry[]>([]);
+  /** Explicit opt-in: OSM/OSRM is never used unless the user turns this on. */
+  const [osmFallbackEnabled, setOsmFallbackEnabled] = useState(false);
+  /** Default: four-wheeler alternatives. Icons live only under Route Alternatives. */
+  const [travelMode, setTravelMode] = useState<RoutingTravelMode>('four-wheeler');
   const [placing, setPlacing] = useState(false);
+  const travelModeRef = useRef(travelMode);
+  travelModeRef.current = travelMode;
+  const routeGenRef = useRef(0);
   const [pickedState, setPickedState] = useState<{
     name: string;
     bbox: [number, number, number, number];
@@ -125,10 +176,66 @@ export const RoadsRoutingWorkspace: React.FC<RoadsRoutingWorkspaceProps> = ({
   const [routes, setRoutes] = useState<CalculatedRoute[]>([]);
   const [selectedRouteId, setSelectedRouteId] = useState<string | null>(null);
 
+  const resolvedPoints = useMemo(
+    () =>
+      points
+        .map((p) => {
+          const ll = pointLonLat(p);
+          return ll ? { id: p.id, label: p.label, ...ll } : null;
+        })
+        .filter((p): p is LonLat & { id: string; label: string } => p != null),
+    [points]
+  );
+  const pointA = resolvedPoints[0] ?? null;
+  const pointB = resolvedPoints[1] ?? null;
+
   const layerName = useCallback(
     (id: string) => allLayers.find((l) => l.id === id)?.name ?? id,
     [allLayers]
   );
+
+  const invalidateRoutes = () => {
+    setRoutes([]);
+    setSelectedRouteId(null);
+    setRouteFit(null);
+  };
+
+  const addPoint = () => {
+    const label = pointLetter(points.length);
+    setPoints((prev) =>
+      relabelPoints([
+        ...prev,
+        {
+          id: nextRoutePointId(prev),
+          label: pointLetter(prev.length),
+          latText: '',
+          lonText: '',
+        },
+      ])
+    );
+    if (pickedState) {
+      setPlacing(true);
+      onTriggerToast(
+        `Point ${label} added — enter coordinates or click the map inside ${pickedState.name}`
+      );
+    } else {
+      onTriggerToast(
+        `Point ${label} added — enter latitude/longitude, or click a state to pin on the map`
+      );
+    }
+  };
+
+  const removePoint = (id: string) => {
+    setPoints((prev) => relabelPoints(prev.filter((p) => p.id !== id)));
+    invalidateRoutes();
+  };
+
+  const updatePointCoord = (id: string, field: 'latText' | 'lonText', value: string) => {
+    setPoints((prev) =>
+      prev.map((p) => (p.id === id ? { ...p, [field]: value } : p))
+    );
+    invalidateRoutes();
+  };
 
   const handleStatePick = (feature: GeoJSON.Feature, name: string) => {
     if (placing) return;
@@ -141,9 +248,8 @@ export const RoadsRoutingWorkspace: React.FC<RoadsRoutingWorkspaceProps> = ({
     setPickedState({ name, bbox });
     setBoundsToken((t) => t + 1);
     setPlacing(true);
-    setPinStep(pointA && !pointB ? 'b' : pointA && pointB ? 'done' : 'a');
     onTriggerToast(
-      `${name} zoomed in. Neighbouring states stay visible — click the map to place Point A, then Point B.`
+      `${name} zoomed in. Neighbouring states stay visible — click Add Point or the map to place pins.`
     );
   };
 
@@ -153,31 +259,41 @@ export const RoadsRoutingWorkspace: React.FC<RoadsRoutingWorkspaceProps> = ({
       return;
     }
     if (!placing) return;
-    if (pinStep === 'a' || (!pointA && !pointB)) {
-      setPointA({ lat, lon });
-      setPointB(null);
-      setPinStep('b');
-      setRoutes([]);
-      setSelectedRouteId(null);
-      setRouteFit(null);
-      onTriggerToast('Point A set — click the map for Point B (destination)');
-      return;
-    }
-    if (pinStep === 'b' || (pointA && !pointB)) {
-      setPointB({ lat, lon });
-      setPinStep('done');
-      onTriggerToast('Point B set — save road/ops layers from catalogs, then Find Routes');
-    }
+    const latText = lat.toFixed(6);
+    const lonText = lon.toFixed(6);
+    setPoints((prev) => {
+      const emptyIdx = prev.findIndex((p) => pointLonLat(p) == null);
+      if (emptyIdx >= 0) {
+        const next = prev.map((p, i) =>
+          i === emptyIdx ? { ...p, latText, lonText } : p
+        );
+        onTriggerToast(
+          `Point ${next[emptyIdx].label} set (${lat.toFixed(4)}, ${lon.toFixed(4)})`
+        );
+        return next;
+      }
+      const next = relabelPoints([
+        ...prev,
+        {
+          id: nextRoutePointId(prev),
+          label: pointLetter(prev.length),
+          latText,
+          lonText,
+        },
+      ]);
+      const created = next[next.length - 1];
+      onTriggerToast(
+        `Point ${created.label} set (${lat.toFixed(4)}, ${lon.toFixed(4)})`
+      );
+      return next;
+    });
+    invalidateRoutes();
   };
 
   const clearPoints = () => {
-    setPointA(null);
-    setPointB(null);
-    setPinStep('a');
+    setPoints([]);
     setPlacing(false);
-    setRoutes([]);
-    setSelectedRouteId(null);
-    setRouteFit(null);
+    invalidateRoutes();
     onTriggerToast('Cleared pins and routes');
   };
 
@@ -190,31 +306,38 @@ export const RoadsRoutingWorkspace: React.FC<RoadsRoutingWorkspaceProps> = ({
     setPlacing(false);
     setPickedState(null);
     setRouteFit(null);
-    setPinStep(pointA && !pointB ? 'b' : pointA && pointB ? 'done' : 'a');
     setViewToken((t) => t + 1);
   };
 
-  const findRoutes = async () => {
+  const findRoutes = useCallback(async () => {
     if (!pointA || !pointB) {
-      onTriggerToast('Pin Point A and Point B on the map first');
+      onTriggerToast('Add at least Point A and Point B with valid coordinates first');
       return;
     }
-    const roadIds = savedLayers.filter((l) => isRoutableRoadLayer(l.id)).map((l) => l.id);
-    if (!roadIds.length) {
+    const mode = travelModeRef.current;
+    const modeLabel = ROUTING_TRAVEL_MODE_LABEL[mode];
+    // Only Eye-on Road Network layers saved into this module (never unsaved / Eye-off).
+    const routableSaved = savedLayers.filter(
+      (l) => l.enabled && isRoutableRoadLayer(l)
+    );
+    if (!routableSaved.length) {
       onTriggerToast(
-        'Save at least one road-network layer (NH, AP major, OPS main/internal, or foot tracks) via Save to Roads Routing'
+        'Eye-on at least one Road Network line layer in Saved layers, then Find Routes'
       );
       return;
     }
+    const gen = ++routeGenRef.current;
     setBusy(true);
+    // Drop previous-mode alternatives from the list and map immediately.
     setRoutes([]);
     setSelectedRouteId(null);
     try {
       const collected: CalculatedRoute[] = [];
       let colorIdx = 0;
       const nextColor = () => ROUTE_COLORS[colorIdx++ % ROUTE_COLORS.length];
+      const speedKmh = travelModeSpeedKmh(mode);
 
-      // Combined GIS road graph from ALL saved routable layers (corridor-clipped for performance).
+      // Combined GIS graph from enabled saved Road Network layers (corridor + mode filter).
       const graphLayers: Array<{ layerId: string; fc: GeoJSON.FeatureCollection }> = [];
       const loadNotes: string[] = [];
       const corridorPad = 0.55;
@@ -224,37 +347,40 @@ export const RoadsRoutingWorkspace: React.FC<RoadsRoutingWorkspaceProps> = ({
         east: Math.max(pointA.lon, pointB.lon) + corridorPad,
         north: Math.max(pointA.lat, pointB.lat) + corridorPad,
       };
-      for (const id of roadIds) {
-        const url = LAYER_FC_URL[id];
-        if (!url) continue;
-        // PostGIS layers must be requested with bbox (full network is too large otherwise).
+      for (const layer of routableSaved) {
+        const url = resolveLayerGeoJsonUrl(layer);
+        if (!url) {
+          loadNotes.push(`${layer.name}: no GeoJSON source on catalog entry.`);
+          continue;
+        }
+        // PostGIS extracts must be requested with bbox (full network is too large otherwise).
         let fetchUrl = url;
-        if (url.startsWith('/api/gis-roads')) {
-          const layer =
-            id === 'lyr-highways' ? 'nh' : id === 'lyr-ap-roads-full' ? 'full' : id === 'lyr-ops-vsp-roads' ? 'vsp' : null;
-          if (!layer) continue;
-          fetchUrl = `/api/gis-roads/geojson?layer=${layer}&bbox=${bbox.west},${bbox.south},${bbox.east},${bbox.north}`;
+        if (isPostgisRoadGeoJsonUrl(url)) {
+          const joiner = url.includes('?') ? '&' : '?';
+          fetchUrl = `${url}${joiner}bbox=${bbox.west},${bbox.south},${bbox.east},${bbox.north}`;
         }
         const full = await loadFc(fetchUrl);
-        const clipped = url.startsWith('/api/gis-roads')
+        const clipped = isPostgisRoadGeoJsonUrl(url)
           ? full
           : filterFcByCorridor(full, pointA, pointB, corridorPad);
-        if (!clipped.features.length) {
-          loadNotes.push(`${layerName(id)}: no segments in the A–B corridor.`);
+        const modeFiltered = filterFcForTravelMode(layer.id, clipped, mode);
+        if (!modeFiltered.features.length) {
+          loadNotes.push(
+            `${layer.name}: no ${modeLabel.toLowerCase()}-eligible segments in the A–B corridor.`
+          );
           continue;
         }
         loadNotes.push(
-          `${layerName(id)}: ${clipped.features.length} segments in corridor.`
+          `${layer.name}: ${modeFiltered.features.length} ${modeLabel.toLowerCase()} segments in corridor.`
         );
-        graphLayers.push({ layerId: id, fc: clipped });
+        graphLayers.push({ layerId: layer.id, fc: modeFiltered });
       }
 
       if (graphLayers.length) {
-        const graph = buildRoadGraph(graphLayers, {
-          maxVerticesPerLine: 220,
-          endpointSnapM: 60,
-        });
+        // Shared builder: every current/future routable LineString layer keeps full edge geometry.
+        const graph = buildRoadGraph(graphLayers);
         const stats = graphStats(graph);
+        // Up to 5 distinct continuous paths on the mode-filtered GIS road graph only.
         const networkHits = findNetworkRoutes(graph, pointA, pointB, 5, 1500);
         for (let i = 0; i < networkHits.length; i++) {
           const hit = networkHits[i];
@@ -262,89 +388,91 @@ export const RoadsRoutingWorkspace: React.FC<RoadsRoutingWorkspaceProps> = ({
             ? hit.layerIds
             : graphLayers.map((g) => g.layerId);
           collected.push({
-            id: `gis-${i + 1}`,
-            name: `GIS network alt ${i + 1}`,
+            id: `gis-${mode}-${i + 1}`,
+            name: `${modeLabel} alt ${i + 1}`,
             color: nextColor(),
             points: hit.points.map((p) => ({ lat: p.lat, lon: p.lon })),
             distanceKm: hit.distanceKm,
-            durationMin: estimateDurationMin(hit.distanceKm),
+            durationMin: estimateDurationMin(hit.distanceKm, speedKmh),
             layerIds: contributing,
             layerNames: contributing.map(layerName),
             source: 'gis-network',
             usedSnapConnectors: hit.usedSnapConnectors,
             notes: [
               ...hit.notes,
-              `Combined network graph: ${stats.nodes} nodes / ${stats.edges} edges from ${graphLayers.length} saved road layer(s).`,
-              ...loadNotes.slice(0, 4),
+              `Travel mode: ${modeLabel}.`,
+              `Combined network graph: ${stats.nodes} nodes / ${stats.edges} edges from ${graphLayers.length} enabled road layer(s).`,
+              ...loadNotes.slice(0, 6),
             ],
             ops: [],
-            // Only the first alternative is Eye-on; others stay loaded but hidden.
-            visible: i === 0,
+            visible: true,
           });
         }
       }
 
-      // OSRM only as a labelled reference when GIS found nothing, or as one optional extra.
-      if (collected.length === 0) {
-        const osrmHits = await osrmDrivingRouteAlternatives(pointA, pointB, 3);
-        for (let i = 0; i < osrmHits.length; i++) {
-          const hit = osrmHits[i];
-          collected.push({
-            id: `osrm-${i + 1}`,
-            name: `OSM reference alt ${i + 1}`,
-            color: nextColor(),
-            points: hit.points,
-            distanceKm: hit.distanceKm,
-            durationMin: hit.durationMin,
-            layerIds: [],
-            layerNames: [],
-            source: 'osrm',
-            usedSnapConnectors: false,
-            notes: [
-              'No continuous path on the saved GIS road layers between A and B.',
-              'This path is a public OSM/OSRM reference — not derived from your saved GIS road geometries.',
-              ...loadNotes.slice(0, 4),
-            ],
-            ops: [],
-            visible: i === 0,
-          });
-        }
-      } else if (collected.length < 3) {
-        // Optional single OSM reference for comparison (does not replace GIS alts).
-        const osrmHits = await osrmDrivingRouteAlternatives(pointA, pointB, 1);
-        if (osrmHits[0]) {
-          const hit = osrmHits[0];
-          collected.push({
-            id: `osrm-ref`,
-            name: 'OSM reference (comparison)',
-            color: nextColor(),
-            points: hit.points,
-            distanceKm: hit.distanceKm,
-            durationMin: hit.durationMin,
-            layerIds: [],
-            layerNames: [],
-            source: 'osrm',
-            usedSnapConnectors: false,
-            notes: [
-              'Optional OSM/OSRM comparison only — primary alternatives above use your saved GIS road geometries.',
-            ],
-            ops: [],
-            visible: false,
-          });
+      // OSM/OSRM only for wheeled modes when the user enables OSM (driving profile — not foot).
+      if (osmFallbackEnabled && mode !== 'on-foot') {
+        if (collected.length === 0) {
+          const osrmHits = await osrmDrivingRouteAlternatives(pointA, pointB, 3);
+          for (let i = 0; i < osrmHits.length; i++) {
+            const hit = osrmHits[i];
+            collected.push({
+              id: `osrm-${mode}-${i + 1}`,
+              name: `OSM reference alt ${i + 1}`,
+              color: nextColor(),
+              points: hit.points,
+              distanceKm: hit.distanceKm,
+              durationMin: hit.durationMin,
+              layerIds: [],
+              layerNames: [],
+              source: 'osrm',
+              usedSnapConnectors: false,
+              notes: [
+                `No continuous ${modeLabel.toLowerCase()} path on enabled GIS road layers between A and B.`,
+                'This path is a public OSM/OSRM reference — not derived from your saved GIS road geometries.',
+                ...loadNotes.slice(0, 4),
+              ],
+              ops: [],
+              visible: i === 0,
+            });
+          }
+        } else if (collected.length < 3) {
+          const osrmHits = await osrmDrivingRouteAlternatives(pointA, pointB, 1);
+          if (osrmHits[0]) {
+            const hit = osrmHits[0];
+            collected.push({
+              id: `osrm-ref-${mode}`,
+              name: 'OSM reference (comparison)',
+              color: nextColor(),
+              points: hit.points,
+              distanceKm: hit.distanceKm,
+              durationMin: hit.durationMin,
+              layerIds: [],
+              layerNames: [],
+              source: 'osrm',
+              usedSnapConnectors: false,
+              notes: [
+                'Optional OSM/OSRM comparison only — primary alternatives above use your enabled GIS road geometries.',
+              ],
+              ops: [],
+              visible: false,
+            });
+          }
         }
       }
 
-      // Ops / admin locations near each route
+      // Ops / admin locations near each route (Eye-on location layers only).
       const locLayers: Array<{
         layerId: string;
         layerName: string;
         fc: GeoJSON.FeatureCollection;
       }> = [];
       for (const layer of savedLayers) {
+        if (!layer.enabled) continue;
         if (!isRoutingLocationLayer(layer.id)) continue;
         // Skip KMZ / Border PS — many points are outside AP or mislabeled (e.g. Warangal).
         if (layer.id === 'lyr-pss' || layer.id === 'lyr-border-ps') continue;
-        const url = LAYER_FC_URL[layer.id];
+        const url = resolveLayerGeoJsonUrl(layer);
         if (!url) continue;
         const fc = await loadFc(url);
         if (fc.features.length) {
@@ -358,14 +486,9 @@ export const RoadsRoutingWorkspace: React.FC<RoadsRoutingWorkspaceProps> = ({
         );
       }
 
+      if (routeGenRef.current !== gen) return;
       setRoutes(collected);
-      // Zoom to A–B (+ routes). Saved Admin / OPS / Road layers stay Eye-off until the user
-      // turns them on — they remain loaded in the Saved Layers list.
-      const fitPts = [
-        pointA,
-        pointB,
-        ...collected.flatMap((r) => r.points),
-      ];
+      const fitPts = [pointA, pointB, ...collected.flatMap((r) => r.points)];
       let west = Infinity;
       let south = Infinity;
       let east = -Infinity;
@@ -386,28 +509,45 @@ export const RoadsRoutingWorkspace: React.FC<RoadsRoutingWorkspaceProps> = ({
           token: Date.now(),
         });
       }
-      for (const layer of savedLayers) {
-        if (layer.enabled) onChangeRoutingLayerVisibility(layer.id, false);
-      }
 
       if (!collected.length) {
         onTriggerToast(
-          'No continuous connected path found on the saved GIS road networks between A and B'
+          `No continuous ${modeLabel.toLowerCase()} path on enabled GIS road layers between A and B`
         );
       } else {
         const gisCount = collected.filter((r) => r.source === 'gis-network').length;
         onTriggerToast(
           gisCount
-            ? `Found ${gisCount} GIS network alternative(s)` +
+            ? `Found ${gisCount} ${modeLabel} alternative(s)` +
                 (collected.length > gisCount
                   ? ` + ${collected.length - gisCount} OSM reference`
                   : '')
-            : `Found ${collected.length} OSM reference route(s) (GIS network did not connect A–B)`
+            : `Found ${collected.length} OSM reference route(s) (${modeLabel} GIS network did not connect A–B)`
         );
         setSelectedRouteId(collected[0].id);
       }
     } finally {
-      setBusy(false);
+      if (routeGenRef.current === gen) setBusy(false);
+    }
+  }, [
+    pointA,
+    pointB,
+    savedLayers,
+    osmFallbackEnabled,
+    layerName,
+    onTriggerToast,
+  ]);
+
+  const selectTravelMode = (mode: RoutingTravelMode) => {
+    if (mode === travelMode) return;
+    travelModeRef.current = mode;
+    setTravelMode(mode);
+    // Drop previous-mode routes from the map immediately, then recalculate if A/B exist.
+    setRoutes([]);
+    setSelectedRouteId(null);
+    setRouteFit(null);
+    if (pointA && pointB) {
+      void findRoutes();
     }
   };
 
@@ -451,49 +591,33 @@ export const RoadsRoutingWorkspace: React.FC<RoadsRoutingWorkspaceProps> = ({
 
   const mapHint = (() => {
     if (!placing || !pickedState) {
-      return pointA || pointB
-        ? 'Click a state to zoom in before placing points'
-        : 'Click a state to zoom in. Pins are placed only after that zoom.';
+      return points.length
+        ? 'Enter coordinates below, or click a state to zoom in before pinning on the map'
+        : 'Click Add Point to create Point A, or click a state to zoom in and pin on the map.';
     }
-    if (pinStep === 'a') return `Point placement in ${pickedState.name} — click the map for Point A`;
-    if (pinStep === 'b') return 'Click the map for Point B (destination)';
-    return 'A and B set — Find Routes (saved layers stay hidden until you Eye-on)';
+    const nextEmpty = points.find((p) => pointLonLat(p) == null);
+    if (nextEmpty) {
+      return `Point placement in ${pickedState.name} — click the map for Point ${nextEmpty.label}`;
+    }
+    if (pointA && pointB) {
+      return 'Points set — Find Routes uses Point A → Point B (saved layers stay hidden until Eye-on)';
+    }
+    return `Point placement in ${pickedState.name} — click the map to add the next point`;
   })();
 
-  const markers = useMemo(() => {
-    const list: Array<{
-      id: string;
-      lat: number;
-      lon: number;
-      kind: 'hq' | 'station';
-      label: string;
-      badge: string;
-      selected?: boolean;
-    }> = [];
-    if (pointA) {
-      list.push({
-        id: 'roads-route-a',
-        lat: pointA.lat,
-        lon: pointA.lon,
-        kind: 'hq',
-        label: 'Point A (Origin)',
-        badge: 'A',
+  const markers = useMemo(
+    () =>
+      resolvedPoints.map((p, i) => ({
+        id: p.id,
+        lat: p.lat,
+        lon: p.lon,
+        kind: MARKER_KINDS[i % MARKER_KINDS.length],
+        label: `Point ${p.label} (${p.lat.toFixed(4)}, ${p.lon.toFixed(4)})`,
+        badge: p.label,
         selected: true,
-      });
-    }
-    if (pointB) {
-      list.push({
-        id: 'roads-route-b',
-        lat: pointB.lat,
-        lon: pointB.lon,
-        kind: 'station',
-        label: 'Point B (Destination)',
-        badge: 'B',
-        selected: true,
-      });
-    }
-    return list;
-  }, [pointA, pointB]);
+      })),
+    [resolvedPoints]
+  );
 
   const overlayRoutes = useMemo(
     () =>
@@ -513,8 +637,12 @@ export const RoadsRoutingWorkspace: React.FC<RoadsRoutingWorkspaceProps> = ({
   const savedCount = savedLayers.length;
 
   return (
-    <div className="h-full min-h-0 flex flex-col lg:flex-row overflow-hidden bg-[#e8eef4]">
-      <aside className="w-full lg:w-[340px] shrink-0 border-b lg:border-b-0 lg:border-r border-outline-variant/40 bg-surface-container-lowest flex flex-col max-h-[42vh] lg:max-h-none overflow-hidden">
+    <div className="h-full min-h-0 overflow-hidden bg-[#e8eef4] flex flex-col">
+      <WorkspaceSidebarSplit
+        testId="roads-routing-split"
+        asideClassName="w-full lg:w-[340px] shrink-0 border-b lg:border-b-0 lg:border-r border-outline-variant/40 bg-surface-container-lowest flex flex-col max-h-[42vh] lg:max-h-none overflow-hidden"
+        sidebar={
+          <>
         <div className="p-3 border-b border-outline-variant/35 space-y-2">
           <div className="flex items-center gap-2">
             <Navigation className="w-4 h-4 text-secondary" />
@@ -523,60 +651,22 @@ export const RoadsRoutingWorkspace: React.FC<RoadsRoutingWorkspaceProps> = ({
           <div className="flex flex-wrap gap-1.5">
             <button
               type="button"
-              className={`h-7 px-2 rounded border text-[10px] font-semibold cursor-pointer ${
-                placing && pinStep === 'a'
+              className={`h-7 px-2 rounded border text-[10px] font-semibold cursor-pointer inline-flex items-center gap-1 ${
+                placing
                   ? 'border-secondary bg-secondary/15 text-secondary'
                   : 'border-outline-variant/50'
               }`}
-              onClick={() => {
-                if (!pickedState) {
-                  onTriggerToast('Click a state on the map to zoom in before placing points');
-                  return;
-                }
-                setPlacing(true);
-                setPinStep('a');
-                onTriggerToast(`Click the map inside ${pickedState.name} to set Point A`);
-              }}
+              onClick={addPoint}
             >
-              Set A
-            </button>
-            <button
-              type="button"
-              className={`h-7 px-2 rounded border text-[10px] font-semibold cursor-pointer ${
-                placing && pinStep === 'b'
-                  ? 'border-secondary bg-secondary/15 text-secondary'
-                  : 'border-outline-variant/50'
-              }`}
-              onClick={() => {
-                if (!pickedState) {
-                  onTriggerToast('Click a state on the map to zoom in before placing points');
-                  return;
-                }
-                if (!pointA) {
-                  onTriggerToast('Set Point A first');
-                  return;
-                }
-                setPlacing(true);
-                setPinStep('b');
-                onTriggerToast('Click the map to set Point B');
-              }}
-            >
-              Set B
-            </button>
-            <button
-              type="button"
-              className="h-7 px-2 rounded border border-outline-variant/50 text-[10px] font-semibold cursor-pointer inline-flex items-center gap-1"
-              onClick={clearPoints}
-            >
-              <Trash2 className="w-3 h-3" /> Clear pins
+              <Plus className="w-3 h-3" />
+              Add Point
             </button>
             <button
               type="button"
               className="h-7 px-2 rounded border border-outline-variant/50 text-[10px] font-semibold cursor-pointer"
-              onClick={clearAllLayers}
-              title="Remove every saved layer from this map"
+              onClick={clearPoints}
             >
-              Clear all layers
+              Clear pins
             </button>
             <button
               type="button"
@@ -586,33 +676,100 @@ export const RoadsRoutingWorkspace: React.FC<RoadsRoutingWorkspaceProps> = ({
             >
               Fit India
             </button>
+            <button
+              type="button"
+              className="h-7 px-2 rounded border border-outline-variant/50 text-[10px] font-semibold cursor-pointer"
+              onClick={clearAllLayers}
+              title="Remove every saved layer from this map"
+            >
+              Clear all layers
+            </button>
           </div>
-          <div className="text-[10px] font-mono text-on-surface-variant space-y-0.5">
-            <div className="flex items-center gap-1">
-              <MapPin className="w-3 h-3 text-blue-700" />
-              A:{' '}
-              {pointA
-                ? `${pointA.lat.toFixed(4)}, ${pointA.lon.toFixed(4)}`
-                : 'not set'}
-            </div>
-            <div className="flex items-center gap-1">
-              <MapPin className="w-3 h-3 text-teal-700" />
-              B:{' '}
-              {pointB
-                ? `${pointB.lat.toFixed(4)}, ${pointB.lon.toFixed(4)}`
-                : 'not set'}
-            </div>
+          <div className="rounded border border-outline-variant/40 bg-white/80 max-h-40 overflow-y-auto">
+            {!points.length ? (
+              <p className="px-2 py-1.5 text-[10px] text-on-surface-variant">No points yet</p>
+            ) : (
+              <ul className="divide-y divide-outline-variant/25">
+                {points.map((p) => (
+                  <li key={p.id} className="px-2 py-1.5 space-y-1">
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-[10px] font-bold text-primary shrink-0">
+                        Point {p.label}
+                      </span>
+                      <button
+                        type="button"
+                        className="ml-auto cursor-pointer text-error p-0.5"
+                        title={`Remove Point ${p.label}`}
+                        onClick={() => removePoint(p.id)}
+                      >
+                        <X className="w-3 h-3" />
+                      </button>
+                    </div>
+                    <div className="grid grid-cols-2 gap-1.5">
+                      <label className="block">
+                        <span className="text-[9px] font-semibold text-on-surface-variant">
+                          Latitude
+                        </span>
+                        <input
+                          type="text"
+                          inputMode="decimal"
+                          value={p.latText}
+                          placeholder="e.g. 17.3850"
+                          aria-label={`Point ${p.label} latitude`}
+                          onChange={(e) => updatePointCoord(p.id, 'latText', e.target.value)}
+                          className="mt-0.5 w-full h-7 rounded border border-outline-variant/50 bg-white px-1.5 text-[10px] font-mono"
+                        />
+                      </label>
+                      <label className="block">
+                        <span className="text-[9px] font-semibold text-on-surface-variant">
+                          Longitude
+                        </span>
+                        <input
+                          type="text"
+                          inputMode="decimal"
+                          value={p.lonText}
+                          placeholder="e.g. 78.4867"
+                          aria-label={`Point ${p.label} longitude`}
+                          onChange={(e) => updatePointCoord(p.id, 'lonText', e.target.value)}
+                          className="mt-0.5 w-full h-7 rounded border border-outline-variant/50 bg-white px-1.5 text-[10px] font-mono"
+                        />
+                      </label>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            )}
           </div>
-          <button
-            type="button"
-            data-testid="roads-routing-find"
-            disabled={busy || !pointA || !pointB}
-            onClick={() => void findRoutes()}
-            className="w-full h-9 rounded bg-primary text-on-primary text-xs font-bold cursor-pointer disabled:opacity-40 inline-flex items-center justify-center gap-2"
-          >
-            <Route className="w-3.5 h-3.5" />
-            {busy ? 'Calculating…' : 'Find Routes'}
-          </button>
+          <div className="flex gap-1.5">
+            <button
+              type="button"
+              data-testid="roads-routing-find"
+              disabled={busy || !pointA || !pointB}
+              onClick={() => void findRoutes()}
+              className="flex-1 h-9 rounded bg-primary text-on-primary text-xs font-bold cursor-pointer disabled:opacity-40 inline-flex items-center justify-center gap-2"
+            >
+              <Route className="w-3.5 h-3.5" />
+              {busy ? 'Calculating…' : 'Find Routes'}
+            </button>
+            <button
+              type="button"
+              data-testid="roads-routing-osm-toggle"
+              aria-pressed={osmFallbackEnabled}
+              title={
+                osmFallbackEnabled
+                  ? 'OSM fallback on: use OpenStreetMap if saved GIS layers cannot connect A–B'
+                  : 'OSM fallback off: routes use only saved GIS road layers'
+              }
+              onClick={() => setOsmFallbackEnabled((v) => !v)}
+              className={`shrink-0 h-9 px-2.5 rounded text-[11px] font-bold cursor-pointer border transition-colors ${
+                osmFallbackEnabled
+                  ? 'bg-blue-900 text-white border-blue-900'
+                  : 'bg-white text-on-surface border-outline-variant/60'
+              }`}
+            >
+              {osmFallbackEnabled ? 'OSM : On' : 'OSM : Off'}
+            </button>
+          </div>
           <div className="flex flex-wrap gap-1">
             {(
               [
@@ -702,12 +859,42 @@ export const RoadsRoutingWorkspace: React.FC<RoadsRoutingWorkspaceProps> = ({
           </section>
 
           <section>
-            <h2 className="text-[10px] font-bold uppercase tracking-wider text-on-surface-variant mb-1.5">
-              Route alternatives ({routes.length})
-            </h2>
+            <div className="flex items-center gap-2 mb-1.5">
+              <h2 className="text-[10px] font-bold uppercase tracking-wider text-on-surface-variant flex-1">
+                Route alternatives ({routes.length})
+              </h2>
+              <div
+                className="inline-flex items-center gap-0.5 rounded border border-outline-variant/50 bg-white p-0.5"
+                role="group"
+                aria-label="Travel mode"
+              >
+                {TRAVEL_MODE_OPTIONS.map(({ id, label, Icon }) => {
+                  const selected = travelMode === id;
+                  return (
+                    <button
+                      key={id}
+                      type="button"
+                      title={label}
+                      aria-label={label}
+                      aria-pressed={selected}
+                      data-testid={`roads-routing-travel-mode-${id}`}
+                      disabled={busy}
+                      onClick={() => selectTravelMode(id)}
+                      className={`h-7 w-7 rounded inline-flex items-center justify-center cursor-pointer disabled:opacity-50 ${
+                        selected
+                          ? 'bg-primary text-on-primary'
+                          : 'text-on-surface-variant hover:bg-surface-container'
+                      }`}
+                    >
+                      <Icon className="w-3.5 h-3.5" />
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
             {!routes.length ? (
               <p className="text-[11px] text-on-surface-variant">
-                Routes appear here after Find Routes.
+                Routes appear here after Find Routes ({ROUTING_TRAVEL_MODE_LABEL[travelMode]}).
               </p>
             ) : (
               <ul className="space-y-1.5">
@@ -846,59 +1033,90 @@ export const RoadsRoutingWorkspace: React.FC<RoadsRoutingWorkspaceProps> = ({
             </section>
           )}
         </div>
-      </aside>
-
-      <div className="flex-1 min-h-0 min-w-0 relative">
-        <ApLeafletMap
-          className="h-full w-full"
-          basemap="satellite"
-          fitToState
-          interactive
-          clickMode={placing ? 'inspect' : 'pan'}
-          onMapClick={handleMapClick}
-          indiaStatePick={placing ? 'pass' : 'pick'}
-          onIndiaStatePick={handleStatePick}
-          selectedIndiaStateName={pickedState?.name ?? null}
-          boundsView={boundsView}
-          viewTarget={viewTarget}
-          initialCenter={INDIA_CENTER}
-          initialZoom={INDIA_DEFAULT_ZOOM}
-          markers={markers}
-          overlayRoutes={overlayRoutes}
-          showStateBorder={false}
-          showDistricts={false}
-          showHighways={mapFlags.showHighways}
-          roadNetworkAlwaysOn
-          showApRoadsFull={mapFlags.showApRoadsFull}
-          showOpsVspRoads={mapFlags.showOpsVspRoads}
-          showApRoadsMajor={mapFlags.showApRoadsMajor}
-          showOpsMainRoads={mapFlags.showOpsMainRoads}
-          showOpsInternalRoads={mapFlags.showOpsInternalRoads}
-          showTrails={mapFlags.showTrails}
-          showRailways={mapFlags.showRailways}
-          showAgencyRoutes={mapFlags.showAgencyRoutes}
-          showPoliceStations={mapFlags.showPoliceStations}
-          policeStationOpacity={mapFlags.policeStationOpacity}
-          // Border PS stay off — many are mislabeled (e.g. Warangal as AP).
-          showBorderPs={false}
-          showCheckPosts={mapFlags.showCheckPosts}
-          showTollPlazas={mapFlags.showTollPlazas}
-          showEntryExit={mapFlags.showEntryExit}
-          showStockPoints={mapFlags.showStockPoints}
-          showDdacs={mapFlags.showDdacs}
-          showPharmaHubs={mapFlags.showPharmaHubs}
-          showHotspots={mapFlags.showHotspots}
-          showGanjaSeized={mapFlags.showGanjaSeized}
-          showAsrBoundary={mapFlags.showAsrBoundary}
-          layoutRevision={`roads-routing:${savedCount}:${routes.length}`}
-        />
-        <div
-          data-testid="roads-routing-map-hint"
-          className="absolute top-2 left-2 z-[500] pointer-events-none rounded bg-white/90 border border-outline-variant/40 px-2 py-1 text-[10px] font-semibold text-primary shadow-sm"
-        >
-          {mapHint}
+          </>
+        }
+      >
+        <div className="flex-1 min-h-0 min-w-0 relative">
+          <ApLeafletMap
+            className="h-full w-full"
+            basemap="satellite"
+            fitToState
+            interactive
+            clickMode={placing ? 'inspect' : 'pan'}
+            onMapClick={handleMapClick}
+            indiaStatePick={placing ? 'pass' : 'pick'}
+            onIndiaStatePick={handleStatePick}
+            selectedIndiaStateName={pickedState?.name ?? null}
+            boundsView={boundsView}
+            viewTarget={viewTarget}
+            initialCenter={INDIA_CENTER}
+            initialZoom={INDIA_DEFAULT_ZOOM}
+            markers={markers}
+            overlayRoutes={overlayRoutes}
+            apOnlyPermanentStateLabels
+            showStateBorder={mapFlags.showStateBorder}
+            stateOpacity={mapFlags.stateOpacity}
+            showDistricts={mapFlags.showDistricts}
+            districtOpacity={mapFlags.districtOpacity}
+            showMandals={mapFlags.showMandals}
+            showVillages={mapFlags.showVillages}
+            mandalOpacity={mapFlags.mandalOpacity}
+            villageOpacity={mapFlags.villageOpacity}
+            showDistrictsGisHist={mapFlags.showDistrictsGisHist}
+            showStateGisHist={mapFlags.showStateGisHist}
+            showHighways={mapFlags.showHighways}
+            roadNetworkAlwaysOn
+            showApRoadsFull={mapFlags.showApRoadsFull}
+            showApRoadsMajor={mapFlags.showApRoadsMajor}
+            showOpsMainRoads={mapFlags.showOpsMainRoads}
+            showOpsInternalRoads={mapFlags.showOpsInternalRoads}
+            showGanjaTransportRoutes={mapFlags.showGanjaTransportRoutes}
+            showRoadsAsrClassified={mapFlags.showRoadsAsrClassified}
+            showAsrRoadNetwork={mapFlags.showAsrRoadNetwork}
+            showRouteModeling={mapFlags.showRouteModeling}
+            showTrails={mapFlags.showTrails}
+            showRailways={mapFlags.showRailways}
+            showRivers={mapFlags.showRivers}
+            showAgencyRoutes={mapFlags.showAgencyRoutes}
+            showPoliceStations={mapFlags.showPoliceStations}
+            policeStationOpacity={mapFlags.policeStationOpacity}
+            // Border PS stay off — many are mislabeled (e.g. Warangal as AP).
+            showBorderPs={false}
+            showProposedAnpr={mapFlags.showProposedAnpr}
+            showApNeighborStates={mapFlags.showApNeighborStates}
+            showAobDists={mapFlags.showAobDists}
+            showKmzVillages={mapFlags.showKmzVillages}
+            showPsBorderArea={mapFlags.showPsBorderArea}
+            showAtlasMapData={mapFlags.showAtlasMapData}
+            showTalukGis={mapFlags.showTalukGis}
+            showVspVillagePts={mapFlags.showVspVillagePts}
+            showPlaces={mapFlags.showPlaces}
+            showCheckPosts={mapFlags.showCheckPosts}
+            showTollPlazas={mapFlags.showTollPlazas}
+            showEntryExit={mapFlags.showEntryExit}
+            showStockPoints={mapFlags.showStockPoints}
+            showDdacs={mapFlags.showDdacs}
+            showPharmaHubs={mapFlags.showPharmaHubs}
+            showHotspots={mapFlags.showHotspots}
+            showGanjaSeized={mapFlags.showGanjaSeized}
+            showAsrBoundary={mapFlags.showAsrBoundary}
+            showSoiTopo={mapFlags.showSoiTopo}
+            layoutRevision={`roads-routing:${savedLayers
+              .filter((l) => l.enabled)
+              .map((l) => l.id)
+              .sort()
+              .join(',')}:${routes.length}:pts:${resolvedPoints
+              .map((p) => `${p.id}:${p.lat.toFixed(5)},${p.lon.toFixed(5)}`)
+              .join('|')}`}
+          />
+          <div
+            data-testid="roads-routing-map-hint"
+            className="absolute top-2 left-7 z-[500] pointer-events-none rounded bg-white/90 border border-outline-variant/40 px-2 py-1 text-[10px] font-semibold text-primary shadow-sm"
+          >
+            {mapHint}
+          </div>
         </div>
-      </div>
+      </WorkspaceSidebarSplit>
     </div>
   );
 };

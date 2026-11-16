@@ -3,22 +3,30 @@ export type WorkspaceId =
   // M1 Situation Awareness
   | 'ndps-spatial-dashboard'
   | 'ndps-analytics'
+  | 'reports-seizure-analytics'
   // M2 Layers & Data
   | 'administrative-layers'
   | 'operational-layers'
   | 'road-network-layers'
   | 'roads-routing'
   | 'roads-routing-new'
-  | 'raster-imagery'
   // M3 Products & Field
   | 'atlas'
-  | 'reports-seizure-analytics'
   | 'mobile-locus-export'
+  | 'raster-imagery'
   // M4 System & Governance
   | 'users-audit-trail'
 ;
 
-export type RasterBasemapId = 'vector' | 'topo' | 'satellite' | 'hybrid';
+export type RasterBasemapId =
+  | 'vector'
+  | 'topo'
+  | 'satellite'
+  | 'hybrid'
+  /** Esri World Topographic — Atlas View 3 (opt-in; other modules unchanged). */
+  | 'esri-topo'
+  /** Esri World Street Map — Atlas View 4 (opt-in). */
+  | 'esri-street';
 export type BasemapId = RasterBasemapId | 'maplibre';
 export type MapViewMode = '2d' | '3d';
 

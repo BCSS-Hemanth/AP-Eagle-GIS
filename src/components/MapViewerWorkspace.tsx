@@ -961,7 +961,7 @@ export const MapViewerWorkspace: React.FC<MapViewerWorkspaceProps> = ({
               <option value="maplibre">OSM Vector (MapLibre GL)</option>
               <option value="vector">OSM Raster (Leaflet)</option>
               <option value="topo">SOI Toposheet mosaic (GIS-Source)</option>
-              <option value="satellite">GIS-Source Satellite (sat + AOB + NT_CG)</option>
+              <option value="satellite">Satellite (Esri World Imagery)</option>
               <option value="hybrid">Hybrid imagery + labels</option>
             </select>
           </div>
@@ -1388,8 +1388,6 @@ export const MapViewerWorkspace: React.FC<MapViewerWorkspaceProps> = ({
               showAgencyRoutes={isLayerOn('lyr-drug-routes')}
               showRailways={isLayerOn('lyr-railways')}
               showRivers={isLayerOn('lyr-rivers')}
-              showWaterbodies={isLayerOn('lyr-waterbodies')}
-              showHillshade={isLayerOn('lyr-hillshade')}
               showTrails={isLayerOn('lyr-forest-trails')}
               showMandals={isLayerOn('lyr-mandals')}
               showVillages={isLayerOn('lyr-villages')}
@@ -1398,7 +1396,6 @@ export const MapViewerWorkspace: React.FC<MapViewerWorkspaceProps> = ({
               villageOpacity={getLayerOpacity('lyr-villages')}
               policeStationOpacity={getLayerOpacity('lyr-pss')}
               selectedPoliceStationId={selectedPsId ?? undefined}
-              showImageryOverlay={isLayerOn('lyr-cartosat')}
               markers={mapMarkers}
               route={drivingRoute}
               measurePoints={measurePoints}
@@ -1520,17 +1517,19 @@ export const MapViewerWorkspace: React.FC<MapViewerWorkspaceProps> = ({
               stateOpacity={getLayerOpacity('lyr-state-border')}
               showHighways={isLayerOn('lyr-highways')}
               showApRoadsFull={isLayerOn('lyr-ap-roads-full')}
-              showOpsVspRoads={isLayerOn('lyr-ops-vsp-roads')}
               showApRoadsMajor={isLayerOn('lyr-ap-roads-major')}
               showAgencyRoutes={isLayerOn('lyr-drug-routes')}
               showRailways={isLayerOn('lyr-railways')}
-              showGraticule={isLayerOn('lyr-soi-grid')}
               showBorderPs={isLayerOn('lyr-border-ps')}
+              showProposedAnpr={isLayerOn('lyr-proposed-anpr')}
+              showApNeighborStates={isLayerOn('lyr-ap-neighbor-states')}
+              showAobDists={isLayerOn('lyr-aob-dists')}
+              showKmzVillages={isLayerOn('lyr-kmz-villages')}
+              showPsBorderArea={isLayerOn('lyr-ps-border-area')}
+              showAtlasMapData={isLayerOn('lyr-atlas-map-data')}
               showTalukGis={isLayerOn('lyr-taluk-gis')}
               showVspVillagePts={isLayerOn('lyr-vsp-village-pts')}
               showRivers={isLayerOn('lyr-rivers')}
-              showWaterbodies={isLayerOn('lyr-waterbodies')}
-              showHillshade={isLayerOn('lyr-hillshade')}
               showTrails={isLayerOn('lyr-forest-trails')}
               showPlaces={isLayerOn('lyr-mandals') || isLayerOn('lyr-villages')}
               showMandals={isLayerOn('lyr-mandals')}
@@ -1540,8 +1539,6 @@ export const MapViewerWorkspace: React.FC<MapViewerWorkspaceProps> = ({
               villageOpacity={getLayerOpacity('lyr-villages')}
               policeStationOpacity={getLayerOpacity('lyr-pss')}
               selectedPoliceStationId={selectedPsId ?? undefined}
-              showImageryOverlay={isLayerOn('lyr-cartosat')}
-              showGoogleRoadmap={isLayerOn('lyr-google-roadmap')}
               showSoiTopo={isLayerOn('lyr-soi-topo')}
               showDistrictsGisHist={isLayerOn('lyr-districts-gis-hist')}
               showStateGisHist={isLayerOn('lyr-state-gis-hist')}
@@ -1556,6 +1553,10 @@ export const MapViewerWorkspace: React.FC<MapViewerWorkspaceProps> = ({
               showStockPoints={isLayerOn('lyr-stock-points')}
               showOpsMainRoads={isLayerOn('lyr-ops-main-roads')}
               showOpsInternalRoads={isLayerOn('lyr-ops-internal-roads')}
+              showGanjaTransportRoutes={isLayerOn('lyr-ganja-transport-routes')}
+              showRoadsAsrClassified={isLayerOn('lyr-roads-asr-classified')}
+              showAsrRoadNetwork={isLayerOn('lyr-asr-road-network')}
+              showRouteModeling={isLayerOn('lyr-route-modeling')}
               markers={mapMarkers}
               digitizedFeatures={digitizedFeatures}
               ingestedLayers={ingestedLayers}
@@ -1722,21 +1723,6 @@ export const MapViewerWorkspace: React.FC<MapViewerWorkspaceProps> = ({
                 className="w-8 h-8 flex items-center justify-center text-on-surface hover:bg-surface-container transition-colors border-b border-outline-variant/25 cursor-pointer"
               >
                 <Home className="w-4 h-4" />
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  onToggleLayer('lyr-soi-grid');
-                  onTriggerToast('Toggled SOI 1:50K Index Grid (GIS-Source)');
-                }}
-                title="Toggle SOI 50K Topo Grid"
-                className={`w-8 h-8 flex items-center justify-center transition-colors cursor-pointer ${
-                  isLayerOn('lyr-soi-grid')
-                    ? 'bg-secondary-container/40 text-secondary'
-                    : 'text-on-surface hover:bg-surface-container'
-                }`}
-              >
-                <Grid className="w-4 h-4" />
               </button>
             </div>
 

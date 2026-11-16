@@ -2,19 +2,16 @@ import React, { useState, useRef, useEffect } from 'react';
 import {
   Bell,
   Menu,
-  Search,
   UserCheck,
   AlertTriangle,
-  MapPin,
 } from 'lucide-react';
-import { InspectableFeature, TacticalAlert, WorkspaceId } from '../types/gis';
+import { TacticalAlert, WorkspaceId } from '../types/gis';
 import { EagleCrest } from './EagleCrest';
 
 interface TopCommandHeaderProps {
   alerts: TacticalAlert[];
   onAcknowledgeAlert: (id: string) => void;
   onSelectFeatureAndFly: (featureId: string) => void;
-  allFeatures: InspectableFeature[];
   sidebarCollapsed: boolean;
   onToggleSidebar: () => void;
   onSwitchWorkspace: (ws: WorkspaceId) => void;
@@ -28,7 +25,6 @@ export const TopCommandHeader: React.FC<TopCommandHeaderProps> = ({
   alerts,
   onAcknowledgeAlert,
   onSelectFeatureAndFly,
-  allFeatures,
   sidebarCollapsed,
   onToggleSidebar,
   onSwitchWorkspace,
@@ -37,8 +33,6 @@ export const TopCommandHeader: React.FC<TopCommandHeaderProps> = ({
   userUnit = 'Amaravati HQ (Full Jurisdiction)',
   onLogout,
 }) => {
-  const [globalQuery, setGlobalQuery] = useState('');
-  const [searchOpen, setSearchOpen] = useState(false);
   const [alertsMenuOpen, setAlertsMenuOpen] = useState(false);
 
   const headerRef = useRef<HTMLDivElement>(null);
@@ -46,25 +40,12 @@ export const TopCommandHeader: React.FC<TopCommandHeaderProps> = ({
   useEffect(() => {
     const handleOutside = (e: MouseEvent) => {
       if (headerRef.current && !headerRef.current.contains(e.target as Node)) {
-        setSearchOpen(false);
         setAlertsMenuOpen(false);
       }
     };
     document.addEventListener('mousedown', handleOutside);
     return () => document.removeEventListener('mousedown', handleOutside);
   }, []);
-
-  const filteredTargets = globalQuery.trim()
-    ? allFeatures.filter((f) => {
-        const q = globalQuery.toLowerCase();
-        return (
-          f.name.toLowerCase().includes(q) ||
-          f.code.toLowerCase().includes(q) ||
-          f.district.toLowerCase().includes(q) ||
-          f.roadClassification.toLowerCase().includes(q)
-        );
-      })
-    : allFeatures.slice(0, 5);
 
   const unreadAlertsCount = alerts.filter((a) => !a.acknowledged).length;
 
@@ -101,65 +82,8 @@ export const TopCommandHeader: React.FC<TopCommandHeaderProps> = ({
         </button>
       </div>
 
-      {/* Zone 2: Global Search */}
-      <div className="hidden lg:flex items-center gap-2 flex-1 max-w-2xl mx-2">
-        {/* Global Spatial Quick-Jump Search */}
-        <div className="relative flex-1 min-w-[180px]">
-          <Search className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-on-surface-variant pointer-events-none" />
-          <input
-            type="text"
-            value={globalQuery}
-            onFocus={() => setSearchOpen(true)}
-            onChange={(e) => {
-              setGlobalQuery(e.target.value);
-              setSearchOpen(true);
-            }}
-            data-testid="header-search"
-            placeholder="Search district, mandal, PS, route, coordinate..."
-            className="w-full h-8 pl-8 pr-3 bg-surface-container-low border border-outline-variant/45 rounded text-[12px] text-on-surface placeholder:text-on-surface-variant focus:outline-none focus:border-primary focus:bg-surface-container-lowest transition-colors"
-          />
-          {searchOpen && (filteredTargets.length > 0 || globalQuery.trim()) && (
-            <div className="absolute left-0 right-0 mt-1 bg-surface-container-lowest rounded-md shadow-xl border border-outline-variant/50 overflow-hidden z-50">
-              <div className="max-h-60 overflow-y-auto divide-y divide-outline-variant/20">
-                {filteredTargets.length === 0 ? (
-                  <div className="px-3 py-3 text-xs text-on-surface-variant">
-                    No matching vector target for &ldquo;{globalQuery}&rdquo;
-                  </div>
-                ) : (
-                  filteredTargets.map((item) => (
-                    <button
-                      key={item.id}
-                      type="button"
-                      onClick={() => {
-                        onSelectFeatureAndFly(item.id);
-                        setGlobalQuery('');
-                        setSearchOpen(false);
-                      }}
-                      className="w-full px-2.5 py-1.5 text-left hover:bg-surface-container-low flex items-center justify-between gap-2 cursor-pointer"
-                    >
-                      <div className="min-w-0">
-                        <div className="text-xs font-semibold text-primary truncate flex items-center gap-1.5">
-                          <MapPin className="w-3 h-3 text-secondary shrink-0" />
-                          <span>{item.name}</span>
-                        </div>
-                        <div className="text-[10px] text-on-surface-variant truncate">
-                          {item.code} • {item.district} • {item.roadClassification}
-                        </div>
-                      </div>
-                      <span className="font-mono text-[10px] text-secondary shrink-0 tabular-coord">
-                        {item.lat.toFixed(2)}°N
-                      </span>
-                    </button>
-                  ))
-                )}
-              </div>
-            </div>
-          )}
-        </div>
-      </div>
-
-      {/* Zone 3: Notifications & Analyst Badge */}
-      <div className="flex items-center gap-2.5 shrink-0">
+      {/* Zone 2: Notifications & Analyst Badge */}
+      <div className="flex items-center gap-2.5 shrink-0 ml-auto">
         {/* Tactical Alerts Bell */}
         <div className="relative">
           <button

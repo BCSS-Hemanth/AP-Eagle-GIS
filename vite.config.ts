@@ -1,11 +1,17 @@
 import tailwindcss from '@tailwindcss/vite';
 import react from '@vitejs/plugin-react';
 import path from 'path';
-import {defineConfig} from 'vite';
+import {defineConfig, loadEnv} from 'vite';
+import {geoFromDbPlugin} from './server/gis-catalog/viteGeoDbPlugin';
 
-export default defineConfig(() => {
+export default defineConfig(({mode}) => {
+  // Load PG / roads API env for the geo-from-DB middleware target.
+  const env = loadEnv(mode, process.cwd(), '');
+  if (env.ROADS_API_PORT) process.env.ROADS_API_PORT = env.ROADS_API_PORT;
+  if (env.ROADS_API_HOST) process.env.ROADS_API_HOST = env.ROADS_API_HOST;
+
   return {
-    plugins: [react(), tailwindcss()],
+    plugins: [react(), tailwindcss(), geoFromDbPlugin()],
     resolve: {
       alias: {
         '@': path.resolve(__dirname, '.'),

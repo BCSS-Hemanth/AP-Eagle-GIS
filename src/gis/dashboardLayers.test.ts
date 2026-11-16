@@ -38,15 +38,14 @@ describe('dashboard layer catalog save', () => {
     expect(flags.showDistricts).toBe(false);
     expect(flags.showPoliceStations).toBe(false);
     expect(flags.showHighways).toBe(false);
-    expect(flags.showWaterbodies).toBe(false);
-    expect(flags.showHillshade).toBe(false);
+    expect(flags.showRivers).toBe(false);
   });
 
   it('applies a catalog snapshot onto dashboard flags including opacity', () => {
     const catalog = INITIAL_GIS_LAYERS.map((layer) =>
       layer.id === 'lyr-highways'
         ? { ...layer, enabled: true }
-        : layer.id === 'lyr-waterbodies' || layer.id === 'lyr-hillshade'
+        : layer.id === 'lyr-rivers'
           ? { ...layer, enabled: true }
         : layer.id === 'lyr-pss'
           ? { ...layer, enabled: true, opacity: 40 }
@@ -56,8 +55,7 @@ describe('dashboard layer catalog save', () => {
     const applied = applyLayerConfig(INITIAL_GIS_LAYERS, saved);
     const flags = leafletFlagsFromLayers(applied);
     expect(flags.showHighways).toBe(true);
-    expect(flags.showWaterbodies).toBe(true);
-    expect(flags.showHillshade).toBe(true);
+    expect(flags.showRivers).toBe(true);
     expect(flags.showPoliceStations).toBe(true);
     expect(flags.policeStationOpacity).toBeCloseTo(0.4);
     expect(countEnabledLayers(applied)).toBeGreaterThan(countEnabledLayers(applyLayerConfig(INITIAL_GIS_LAYERS, defaultDashboardLayerConfig())));
@@ -192,5 +190,30 @@ describe('dashboard layer catalog save', () => {
     expect(flags.showTollPlazas).toBe(true);
     expect(flags.showDdacs).toBe(true);
     expect(flags.showOpsMainRoads).toBe(true);
+  });
+
+  it('maps partial-match KMZ catalog ids onto dashboard leaflet flags', () => {
+    const selected = new Set([
+      'lyr-state-border',
+      'lyr-kmz-villages',
+      'lyr-ps-border-area',
+      'lyr-ap-neighbor-states',
+      'lyr-aob-dists',
+      'lyr-atlas-map-data',
+      'lyr-roads-asr-classified',
+      'lyr-asr-road-network',
+      'lyr-route-modeling',
+    ]);
+    const snapshot = destinationConfigFromSelection(INITIAL_GIS_LAYERS, selected, 'snapshot');
+    const flags = leafletFlagsFromLayers(applyLayerConfig(INITIAL_GIS_LAYERS, snapshot));
+    expect(flags.showKmzVillages).toBe(true);
+    expect(flags.showPsBorderArea).toBe(true);
+    expect(flags.showApNeighborStates).toBe(true);
+    expect(flags.showAobDists).toBe(true);
+    expect(flags.showAtlasMapData).toBe(true);
+    expect(flags.showRoadsAsrClassified).toBe(true);
+    expect(flags.showAsrRoadNetwork).toBe(true);
+    expect(flags.showRouteModeling).toBe(true);
+    expect(flags.showHighways).toBe(false);
   });
 });

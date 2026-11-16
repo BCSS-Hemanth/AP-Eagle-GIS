@@ -36,39 +36,21 @@ describe('OSM / OSRM network overlays', () => {
     expect(lat).toBeGreaterThan(12);
   });
 
-  it('stores named OSM lakes and reservoirs including Srisailam and Pulicat', () => {
-    const data = JSON.parse(
-      readFileSync(resolve(root, 'public/geo/ap-waterbodies.geojson'), 'utf8')
-    ) as GeoJSON.FeatureCollection;
-    expect(data.features.length).toBe(353);
-    const names = data.features.map((f) => String(f.properties?.name ?? '').toLowerCase());
-    expect(names.some((n) => n.includes('srisailam'))).toBe(true);
-    expect(names.some((n) => n.includes('pulicat'))).toBe(true);
-    expect(names.some((n) => n.includes('nagarjuna'))).toBe(true);
-    expect(names.some((n) => n.includes('somasila'))).toBe(true);
-    for (const feature of data.features.slice(0, 40)) {
-      const [lon, lat] = lonLatFromGeometry(feature.geometry);
-      expect(lon).toBeGreaterThan(76.4);
-      expect(lon).toBeLessThan(85.1);
-      expect(lat).toBeGreaterThan(12.3);
-      expect(lat).toBeLessThan(19.6);
-      expect(['Polygon', 'MultiPolygon']).toContain(feature.geometry.type);
-    }
-  });
 });
 
 describe('layer catalog and QGIS-aligned sources', () => {
-  it('lists rivers, water bodies, and hillshade against real files', () => {
+  it('lists rivers and remaining GIS-Source rasters against real files', () => {
     const byId = Object.fromEntries(INITIAL_GIS_LAYERS.map((layer) => [layer.id, layer]));
     expect(byId['lyr-rivers']?.featureCount).toBe(127);
     expect(byId['lyr-rivers']?.sourceTable).toBe('public/geo/ap-rivers.geojson');
-    expect(byId['lyr-waterbodies']?.featureCount).toBe(353);
+    expect(byId['lyr-waterbodies']).toBeUndefined();
     expect(byId['lyr-highways']?.featureCount).toBe(2487);
     expect(byId['lyr-highways']?.sourceTable).toContain('layer=nh');
     expect(byId['lyr-ap-roads-full']?.featureCount).toBe(153655);
-    expect(byId['lyr-ops-vsp-roads']?.featureCount).toBe(12021);
-    expect(byId['lyr-hillshade']?.sourceTable).toContain('gis-source/raster/google_terrain');
-    expect(byId['lyr-cartosat']?.sourceTable).toContain('gis-source/raster');
+    expect(byId['lyr-ops-vsp-roads']).toBeUndefined();
+    expect(byId['lyr-hillshade']).toBeUndefined();
+    expect(byId['lyr-google-roadmap']).toBeUndefined();
+    expect(byId['lyr-cartosat']).toBeUndefined();
     expect(byId['lyr-soi-topo']?.sourceTable).toContain('soi_topo');
   });
 
@@ -77,7 +59,7 @@ describe('layer catalog and QGIS-aligned sources', () => {
       expect(source.apiKey).toBe(false);
       expect(source.cost).toBe('free');
     }
-    expect(QGIS_ALIGNED_SOURCES.some((s) => s.id === 'gis-source-terrain' && s.status === 'live')).toBe(
+    expect(QGIS_ALIGNED_SOURCES.some((s) => s.id === 'gis-source-soi-topo' && s.status === 'live')).toBe(
       true
     );
     expect(QGIS_ALIGNED_SOURCES.some((s) => s.id === 'bhuvan-cartosat' && s.status === 'not connected')).toBe(

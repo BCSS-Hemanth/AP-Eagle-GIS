@@ -16,8 +16,9 @@ import {
   type RoadLayerId,
   withClient,
 } from './db';
+import { mountGisCatalogRoutes } from '../gis-catalog/serveCatalog';
 
-const LAYERS = new Set<RoadLayerId>(['full', 'vsp', 'nh']);
+const LAYERS = new Set<RoadLayerId>(['full', 'nh']);
 let storageMode: 'postgis' | 'bbox' = 'bbox';
 
 function parseLayer(raw: string): RoadLayerId | null {
@@ -43,20 +44,34 @@ async function main() {
   const app = express();
   app.disable('x-powered-by');
 
+  const catalogMode = await mountGisCatalogRoutes(app);
+
   app.get('/api/health', async (_req, res) => {
     try {
       const counts = await getPool().query(`
         SELECT
           count(*) FILTER (WHERE source = 'ap_full')::int AS full,
-          count(*) FILTER (WHERE source = 'ap_full' AND rd_sub_typ = 'National Highway')::int AS nh,
-          count(*) FILTER (WHERE source = 'vsp')::int AS vsp
+          count(*) FILTER (WHERE source = 'ap_full' AND rd_sub_typ = 'National Highway')::int AS nh
         FROM gis_road_segments
       `);
+      let catalog: unknown = null;
+      try {
+        const c = await getPool().query(`
+          SELECT
+            (SELECT count(*)::int FROM gis_vector_layers) AS layers,
+            (SELECT count(*)::int FROM gis_vector_features) AS features,
+            (SELECT count(*)::int FROM gis_vector_documents) AS documents
+        `);
+        catalog = { mode: catalogMode, counts: c.rows[0] };
+      } catch {
+        catalog = { mode: catalogMode, counts: null };
+      }
       res.json({
         ok: true,
         mode: storageMode,
         postgis: storageMode === 'postgis',
         counts: counts.rows[0],
+        catalog,
       });
     } catch (err) {
       res.status(503).json({ ok: false, error: (err as Error).message });
@@ -74,7 +89,6 @@ async function main() {
           replaces: 'public/geo/ap-highways.geojson (OSRM sketch)',
         },
         { id: 'full', name: 'AP roads full (~153k)', filter: "source=ap_full" },
-        { id: 'vsp', name: 'OPS VSP roads (reprojected WGS84)', filter: "source=vsp" },
       ],
     });
   });
@@ -82,7 +96,7 @@ async function main() {
   app.get('/api/gis-roads/geojson', async (req, res) => {
     const layer = parseLayer(String(req.query.layer ?? ''));
     if (!layer) {
-      res.status(400).json({ error: 'layer must be full | vsp | nh' });
+      res.status(400).json({ error: 'layer must be full | nh' });
       return;
     }
     const bbox = parseBbox(req.query.bbox);
@@ -162,6 +176,17 @@ async function main() {
         }
       }
 
+      // Prefer highways inside the LIMIT so dense village tracks don't crowd out NH/SH.
+      sql += `
+            ORDER BY CASE
+              WHEN rd_sub_typ ILIKE '%National Highway%' THEN 0
+              WHEN rd_type ILIKE '%NH%' THEN 0
+              WHEN rd_sub_typ ILIKE '%State Highway%' THEN 1
+              WHEN rd_type ILIKE '%SH%' THEN 1
+              WHEN rd_sub_typ ILIKE '%District%' THEN 2
+              ELSE 4
+            END ASC, id ASC
+      `;
       params.push(limit);
       sql += ` LIMIT $${params.length}
         ) q
@@ -185,7 +210,7 @@ async function main() {
     }
     const layer = parseLayer(req.params.layer);
     if (!layer) {
-      res.status(400).send('layer must be full | vsp | nh');
+      res.status(400).send('layer must be full | nh');
       return;
     }
     const z = Number(req.params.z);
@@ -198,10 +223,13 @@ async function main() {
 
     const where = layerWhere(layer);
     try {
+      // Filter in 4326 first (GiST on geom), then transform for MVT packing.
       const result = await getPool().query(
         `
         WITH bounds AS (
-          SELECT ST_TileEnvelope($1, $2, $3) AS geom
+          SELECT
+            ST_TileEnvelope($1, $2, $3) AS geom3857,
+            ST_Transform(ST_TileEnvelope($1, $2, $3), 4326) AS geom4326
         ),
         mvtgeom AS (
           SELECT
@@ -211,14 +239,14 @@ async function main() {
             rd_sub_typ,
             ST_AsMVTGeom(
               ST_Transform(r.geom, 3857),
-              bounds.geom,
+              bounds.geom3857,
               4096,
               64,
               true
             ) AS geom
           FROM gis_road_segments r, bounds
           WHERE ${where.sql}
-            AND ST_Transform(r.geom, 3857) && bounds.geom
+            AND r.geom && bounds.geom4326
         )
         SELECT ST_AsMVT(mvtgeom, 'roads', 4096, 'geom') AS tile
         FROM mvtgeom
@@ -239,7 +267,9 @@ async function main() {
   app.listen(port, host, () => {
     console.log(`Roads API http://${host}:${port}  mode=${storageMode}`);
     console.log(`  GET /api/health`);
-    console.log(`  GET /api/gis-roads/geojson?layer=nh|vsp|full&bbox=w,s,e,n`);
+    console.log(`  GET /api/gis-roads/geojson?layer=nh|full&bbox=w,s,e,n`);
+    console.log(`  GET /geo/*.geojson  (catalog DB, mode=${catalogMode})`);
+    console.log(`  GET /api/gis-catalog/health`);
     if (storageMode === 'postgis') {
       console.log(`  GET /api/gis-roads/mvt/:layer/:z/:x/:y`);
     }

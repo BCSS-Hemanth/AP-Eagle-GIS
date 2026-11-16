@@ -9,8 +9,8 @@ export const HEAVY_ROAD_MIN_ZOOM = 8;
 export const HEAVY_ROAD_MAX_BBOX_SPAN_DEG = 3.5;
 /** Soft cap — keep the most useful roads; never blank the whole layer. */
 export const HEAVY_ROAD_MAX_FEATURES = 5000;
-/** Max vertices kept on a displayed route polyline. */
-export const ROUTE_POLYLINE_MAX_POINTS = 600;
+/** Max vertices kept on a displayed route polyline (shape-preserving RDP when over). */
+export const ROUTE_POLYLINE_MAX_POINTS = 2500;
 
 /** Prefer NH → SH → district → other when capping dense extracts. */
 export function prioritizeClassifiedRoadFeatures(
@@ -184,14 +184,80 @@ export function preparePostgisFullNetworkFc(
   return prepareClassifiedRoadFc(clipped, maxFeatures);
 }
 
+function perpendicularDistM<T extends { lat: number; lon: number }>(
+  p: T,
+  a: T,
+  b: T
+): number {
+  const lat0 = ((a.lat + b.lat + p.lat) / 3) * (Math.PI / 180);
+  const mx = Math.cos(lat0) * 111320;
+  const my = 110540;
+  const ax = a.lon * mx;
+  const ay = a.lat * my;
+  const bx = b.lon * mx;
+  const by = b.lat * my;
+  const px = p.lon * mx;
+  const py = p.lat * my;
+  const abx = bx - ax;
+  const aby = by - ay;
+  const ab2 = abx * abx + aby * aby;
+  if (ab2 < 1e-12) {
+    return Math.hypot(px - ax, py - ay);
+  }
+  const t = Math.max(0, Math.min(1, ((px - ax) * abx + (py - ay) * aby) / ab2));
+  return Math.hypot(px - (ax + abx * t), py - (ay + aby * t));
+}
+
+/** Ramer–Douglas–Peucker; keeps bends so route overlays stay on the road network. */
+function rdpKeep<T extends { lat: number; lon: number }>(
+  pts: T[],
+  epsilonM: number
+): T[] {
+  if (pts.length <= 2) return pts;
+  let maxDist = 0;
+  let maxIdx = 0;
+  const first = pts[0];
+  const last = pts[pts.length - 1];
+  for (let i = 1; i < pts.length - 1; i++) {
+    const d = perpendicularDistM(pts[i], first, last);
+    if (d > maxDist) {
+      maxDist = d;
+      maxIdx = i;
+    }
+  }
+  if (maxDist <= epsilonM) return [first, last];
+  const left = rdpKeep(pts.slice(0, maxIdx + 1), epsilonM);
+  const right = rdpKeep(pts.slice(maxIdx), epsilonM);
+  return left.slice(0, -1).concat(right);
+}
+
+/**
+ * Cap route vertex count without chord-cutting.
+ * Uses RDP so overlays still hug mapped LineStrings (any layer, anywhere on the map).
+ */
 export function decimateRoutePoints<T extends { lat: number; lon: number }>(
   pts: T[],
   maxPts = ROUTE_POLYLINE_MAX_POINTS
 ): T[] {
   if (pts.length <= maxPts) return pts;
-  const step = Math.ceil(pts.length / maxPts);
-  const out = pts.filter((_, i) => i % step === 0);
-  const last = pts[pts.length - 1];
+  // Binary-search epsilon (metres) until under maxPts while keeping shape.
+  let lo = 0.5;
+  let hi = 200;
+  let best = pts;
+  for (let iter = 0; iter < 14; iter++) {
+    const mid = (lo + hi) / 2;
+    const simplified = rdpKeep(pts, mid);
+    if (simplified.length > maxPts) lo = mid;
+    else {
+      best = simplified;
+      hi = mid;
+    }
+  }
+  if (best.length <= maxPts) return best;
+  // Extreme fallback: still prefer denser uniform sample over aggressive step chords.
+  const step = Math.ceil(best.length / maxPts);
+  const out = best.filter((_, i) => i % step === 0);
+  const last = best[best.length - 1];
   if (out[out.length - 1] !== last) out.push(last);
   return out;
 }

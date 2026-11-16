@@ -82,9 +82,7 @@
       "source": "Tole Plazas.kmz"
     }
   ],
-  "deferred": [
-    "vsp road/VSP.shp \u2014 LCC projected; not independent KMZ"
-  ],
+  "deferred": [],
   "conflictPolicy": {
     "d_routes": "Replaces public/geo/ap-agency-route.geojson for lyr-drug-routes",
     "foot_tracks": "Replaces Waymarked Trails OSM tiles for lyr-forest-trails",

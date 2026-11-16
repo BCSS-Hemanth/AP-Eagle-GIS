@@ -1,8 +1,9 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Maximize2, Minimize2 } from 'lucide-react';
+import { Maximize2, Minimize2, X } from 'lucide-react';
 import { GisLayer, WorkspaceId } from '../../types/gis';
 import { ApLeafletMap, ApLeafletMapHandle } from '../gis/ApLeafletMap';
 import { AdminDrillBar } from '../gis/AdminDrillBar';
+import { MapFullscreenFrame } from '../gis/MapFullscreenFrame';
 import {
   type AdminDrill,
   AP_STATE_FOCUS_DRILL,
@@ -77,12 +78,9 @@ export const NdpsHeatMapDashboard: React.FC<NdpsHeatMapDashboardProps> = ({
         policeStationOpacity={mapFlags.policeStationOpacity}
         showHighways={mapFlags.showHighways}
         showApRoadsFull={mapFlags.showApRoadsFull}
-        showOpsVspRoads={mapFlags.showOpsVspRoads}
         showApRoadsMajor={mapFlags.showApRoadsMajor}
         showAgencyRoutes={mapFlags.showAgencyRoutes}
         showRivers={mapFlags.showRivers}
-        showWaterbodies={mapFlags.showWaterbodies}
-        showHillshade={mapFlags.showHillshade}
         showRailways={mapFlags.showRailways}
         showTrails={mapFlags.showTrails}
         showPlaces={mapFlags.showPlaces}
@@ -98,12 +96,19 @@ export const NdpsHeatMapDashboard: React.FC<NdpsHeatMapDashboardProps> = ({
         showStockPoints={mapFlags.showStockPoints}
         showOpsMainRoads={mapFlags.showOpsMainRoads}
         showOpsInternalRoads={mapFlags.showOpsInternalRoads}
-        showGraticule={mapFlags.showGraticule}
+        showGanjaTransportRoutes={mapFlags.showGanjaTransportRoutes}
         showBorderPs={mapFlags.showBorderPs}
+        showProposedAnpr={mapFlags.showProposedAnpr}
+        showApNeighborStates={mapFlags.showApNeighborStates}
+        showAobDists={mapFlags.showAobDists}
+        showKmzVillages={mapFlags.showKmzVillages}
+        showPsBorderArea={mapFlags.showPsBorderArea}
+        showAtlasMapData={mapFlags.showAtlasMapData}
+        showRoadsAsrClassified={mapFlags.showRoadsAsrClassified}
+        showAsrRoadNetwork={mapFlags.showAsrRoadNetwork}
+        showRouteModeling={mapFlags.showRouteModeling}
         showTalukGis={mapFlags.showTalukGis}
         showVspVillagePts={mapFlags.showVspVillagePts}
-        showImageryOverlay={mapFlags.showImageryOverlay}
-        showGoogleRoadmap={mapFlags.showGoogleRoadmap}
         showSoiTopo={mapFlags.showSoiTopo}
         showDistrictsGisHist={mapFlags.showDistrictsGisHist}
         showStateGisHist={mapFlags.showStateGisHist}
@@ -188,18 +193,28 @@ export const NdpsHeatMapDashboard: React.FC<NdpsHeatMapDashboardProps> = ({
 
   if (mapExpanded) {
     return (
-      <div
-        className="fixed inset-0 z-[90] bg-[#0b1c30] flex flex-col"
-        data-testid="dashboard-map-fullscreen"
+      <MapFullscreenFrame
+        testId="dashboard-map-fullscreen"
+        exitTestId="dashboard-fullscreen-toggle"
+        onExit={() => onMapExpandedChange?.(false)}
+        topCenter={<AdminDrillBar drill={adminDrill} onChange={onDrillChange} />}
+        topCenterBelow={
+          !indiaOverview ? (
+            <button
+              type="button"
+              data-testid="dashboard-fullscreen-clear-drill"
+              aria-label="Back to India overview"
+              title="Back to India overview"
+              onClick={() => onDrillChange(STATE_ADMIN_DRILL)}
+              className="h-7 w-7 rounded-full bg-[#334155] text-white shadow-md inline-flex items-center justify-center hover:bg-[#1e293b] cursor-pointer"
+            >
+              <X className="w-3.5 h-3.5" strokeWidth={2.5} />
+            </button>
+          ) : null
+        }
       >
-        <div className="shrink-0 relative flex justify-center items-center py-0.5 px-2 bg-[#0b1c30]">
-          <AdminDrillBar drill={adminDrill} onChange={onDrillChange} />
-          <div className="absolute right-3 top-1/2 -translate-y-1/2 z-[100]">
-            {dashboardButton}
-          </div>
-        </div>
-        <div className="flex-1 min-h-0">{mapBlock}</div>
-      </div>
+        {mapBlock}
+      </MapFullscreenFrame>
     );
   }
 

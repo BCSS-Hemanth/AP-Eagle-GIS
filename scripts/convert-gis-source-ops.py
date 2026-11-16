@@ -258,7 +258,7 @@ def main() -> None:
                 "generatedAt": datetime.now(timezone.utc).isoformat(),
                 "sourceRoot": str(SRC),
                 "layers": manifest_layers,
-                "deferred": ["vsp road/VSP.shp — LCC projected; not independent KMZ"],
+                "deferred": [],
                 "conflictPolicy": {
                     "d_routes": "Replaces public/geo/ap-agency-route.geojson for lyr-drug-routes",
                     "foot_tracks": "Replaces Waymarked Trails OSM tiles for lyr-forest-trails",

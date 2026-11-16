@@ -11,6 +11,7 @@ import {
   Trash2,
 } from 'lucide-react';
 import { ApLeafletMap, type ApLeafletMapHandle } from '../gis/ApLeafletMap';
+import { WorkspaceSidebarSplit } from '../gis/WorkspaceSidebarSplit';
 import {
   featureBbox,
   STATE_ADMIN_DRILL,
@@ -54,9 +55,15 @@ const CATEGORIES: LocusLayerCategory[] = [
 
 interface LocusWorkspaceProps {
   onTriggerToast: (msg: string) => void;
+  mapExpanded?: boolean;
+  onMapExpandedChange?: (expanded: boolean) => void;
 }
 
-export const LocusWorkspace: React.FC<LocusWorkspaceProps> = ({ onTriggerToast }) => {
+export const LocusWorkspace: React.FC<LocusWorkspaceProps> = ({
+  onTriggerToast,
+  mapExpanded = false,
+  onMapExpandedChange,
+}) => {
   const { can } = useAuth();
   const mapRef = useRef<ApLeafletMapHandle>(null);
 
@@ -66,7 +73,7 @@ export const LocusWorkspace: React.FC<LocusWorkspaceProps> = ({ onTriggerToast }
   const [loadingDistrict, setLoadingDistrict] = useState(false);
   const [displaying, setDisplaying] = useState(false);
   const [fitToken, setFitToken] = useState(0);
-  const [mapExpanded, setMapExpanded] = useState(false);
+  const setMapExpanded = (expanded: boolean) => onMapExpandedChange?.(expanded);
   const [openCats, setOpenCats] = useState<Record<LocusLayerCategory, boolean>>({
     administrative: false,
     operational: false,
@@ -375,7 +382,7 @@ export const LocusWorkspace: React.FC<LocusWorkspaceProps> = ({ onTriggerToast }
   }, [mapExpanded]);
 
   const mapStage = (
-    <div className="flex-1 min-h-0 min-w-0 relative" data-testid="locus-map-host">
+    <div className="flex-1 h-full min-h-0 min-w-0 relative" data-testid="locus-map-host">
       <ApLeafletMap
         ref={mapRef}
         className="h-full w-full"
@@ -398,21 +405,28 @@ export const LocusWorkspace: React.FC<LocusWorkspaceProps> = ({ onTriggerToast }
         showPoliceStations={mapFlags.showPoliceStations}
         policeStationOpacity={mapFlags.policeStationOpacity}
         showBorderPs={mapFlags.showBorderPs}
+        showProposedAnpr={mapFlags.showProposedAnpr}
+        showApNeighborStates={mapFlags.showApNeighborStates}
+        showAobDists={mapFlags.showAobDists}
+        showKmzVillages={mapFlags.showKmzVillages}
+        showPsBorderArea={mapFlags.showPsBorderArea}
+        showAtlasMapData={mapFlags.showAtlasMapData}
         showTalukGis={mapFlags.showTalukGis}
         showVspVillagePts={mapFlags.showVspVillagePts}
         showDistrictsGisHist={mapFlags.showDistrictsGisHist}
         showStateGisHist={mapFlags.showStateGisHist}
-        showGraticule={mapFlags.showGraticule}
         showHighways={mapFlags.showHighways}
         showApRoadsFull={mapFlags.showApRoadsFull}
-        showOpsVspRoads={mapFlags.showOpsVspRoads}
         showApRoadsMajor={mapFlags.showApRoadsMajor}
         showTrails={mapFlags.showTrails}
         showOpsMainRoads={mapFlags.showOpsMainRoads}
         showOpsInternalRoads={mapFlags.showOpsInternalRoads}
+        showGanjaTransportRoutes={mapFlags.showGanjaTransportRoutes}
+        showRoadsAsrClassified={mapFlags.showRoadsAsrClassified}
+        showAsrRoadNetwork={mapFlags.showAsrRoadNetwork}
+        showRouteModeling={mapFlags.showRouteModeling}
         showRailways={mapFlags.showRailways}
         showRivers={mapFlags.showRivers}
-        showWaterbodies={mapFlags.showWaterbodies}
         showAgencyRoutes={mapFlags.showAgencyRoutes}
         showAsrBoundary={mapFlags.showAsrBoundary}
         showCheckPosts={mapFlags.showCheckPosts}
@@ -442,80 +456,82 @@ export const LocusWorkspace: React.FC<LocusWorkspaceProps> = ({ onTriggerToast }
     </div>
   );
 
-  if (mapExpanded) {
-    return (
-      <div
-        className="fixed inset-0 z-[100] bg-[#0b1c30] flex flex-col"
-        data-testid="locus-workspace-fullscreen"
-      >
-        <div className="shrink-0 flex items-center justify-between gap-2 px-3 py-1.5 bg-[#0b1c30] border-b border-white/10">
-          <div className="text-[11px] font-semibold text-white/90 truncate">
+  return (
+    <div
+      className={
+        mapExpanded
+          ? 'fixed inset-0 z-[900] bg-white flex flex-col'
+          : 'h-full min-h-0 flex flex-col'
+      }
+      data-testid={mapExpanded ? 'locus-workspace-fullscreen' : 'locus-workspace'}
+    >
+      {!mapExpanded ? (
+        <header className="shrink-0 flex flex-wrap items-center justify-between gap-2 px-3 py-2 border-b border-outline-variant/40 bg-surface-container-lowest">
+          <div className="min-w-0">
+            <div className="text-[10px] font-bold uppercase tracking-wider text-secondary">
+              M3 · Locus
+            </div>
+            <h1 className="text-base font-bold text-primary truncate">
+              Locus
+              {meta ? (
+                <span className="text-on-surface-variant font-semibold"> — {meta.name}</span>
+              ) : null}
+            </h1>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              className="h-8 px-2.5 rounded border border-outline-variant/50 text-[11px] font-semibold inline-flex items-center gap-1"
+              onClick={handleClear}
+              disabled={!districtId}
+            >
+              <RotateCcw className="w-3.5 h-3.5" />
+              Clear
+            </button>
+            <button
+              type="button"
+              className="h-8 px-2.5 rounded border border-outline-variant/50 text-[11px] font-semibold inline-flex items-center gap-1"
+              onClick={() => setMapExpanded(true)}
+            >
+              <Maximize2 className="w-3.5 h-3.5" />
+              Full map
+            </button>
+            <button
+              type="button"
+              data-testid="locus-download-kmz"
+              className="h-8 px-3 rounded bg-primary text-on-primary text-[11px] font-bold inline-flex items-center gap-1.5 disabled:opacity-50"
+              disabled={!compositionActive || !districtCfg.appliedLayerIds.length}
+              onClick={() => setExportOpen(true)}
+            >
+              <Download className="w-3.5 h-3.5" />
+              Download KMZ
+            </button>
+          </div>
+        </header>
+      ) : (
+        <>
+          <div className="absolute top-2 left-1/2 -translate-x-1/2 z-[910] rounded bg-white/95 border border-outline-variant/40 shadow-sm px-2.5 py-1 text-[11px] font-semibold text-on-surface truncate max-w-[min(90vw,28rem)]">
             Locus{meta ? ` — ${meta.name}` : ''}
             {compositionActive ? ` · ${visibleIds.size} visible` : ''}
           </div>
           <button
             type="button"
             data-testid="locus-exit-fullscreen"
-            className="h-8 px-3 rounded bg-white text-[#0b1c30] text-[11px] font-bold inline-flex items-center gap-1.5"
             onClick={() => setMapExpanded(false)}
             title="Exit full screen (Esc)"
+            className="absolute top-2 right-3 z-[910] inline-flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-bold cursor-pointer bg-white text-[#0b3d7a] border border-[#0b3d7a]/30 shadow-md hover:bg-sky-50"
           >
             <Minimize2 className="w-3.5 h-3.5" />
             Exit full screen
           </button>
-        </div>
-        {mapStage}
-      </div>
-    );
-  }
+        </>
+      )}
 
-  return (
-    <div className="h-full min-h-0 flex flex-col" data-testid="locus-workspace">
-      <header className="shrink-0 flex flex-wrap items-center justify-between gap-2 px-3 py-2 border-b border-outline-variant/40 bg-surface-container-lowest">
-        <div className="min-w-0">
-          <div className="text-[10px] font-bold uppercase tracking-wider text-secondary">
-            M3 · Locus
-          </div>
-          <h1 className="text-base font-bold text-primary truncate">
-            Locus
-            {meta ? (
-              <span className="text-on-surface-variant font-semibold"> — {meta.name}</span>
-            ) : null}
-          </h1>
-        </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <button
-            type="button"
-            className="h-8 px-2.5 rounded border border-outline-variant/50 text-[11px] font-semibold inline-flex items-center gap-1"
-            onClick={handleClear}
-            disabled={!districtId}
-          >
-            <RotateCcw className="w-3.5 h-3.5" />
-            Clear
-          </button>
-          <button
-            type="button"
-            className="h-8 px-2.5 rounded border border-outline-variant/50 text-[11px] font-semibold inline-flex items-center gap-1"
-            onClick={() => setMapExpanded(true)}
-          >
-            <Maximize2 className="w-3.5 h-3.5" />
-            Full map
-          </button>
-          <button
-            type="button"
-            data-testid="locus-download-kmz"
-            className="h-8 px-3 rounded bg-primary text-on-primary text-[11px] font-bold inline-flex items-center gap-1.5 disabled:opacity-50"
-            disabled={!compositionActive || !districtCfg.appliedLayerIds.length}
-            onClick={() => setExportOpen(true)}
-          >
-            <Download className="w-3.5 h-3.5" />
-            Download KMZ
-          </button>
-        </div>
-      </header>
-
-      <div className="flex-1 min-h-0 flex flex-col lg:flex-row">
-        <aside className="w-full lg:w-[340px] shrink-0 border-b lg:border-b-0 lg:border-r border-outline-variant/40 bg-surface-container-low overflow-y-auto max-h-[42vh] lg:max-h-none">
+      <WorkspaceSidebarSplit
+        testId="locus-sidebar-split"
+        hideSidebar={mapExpanded}
+        sidebar={
+          <>
           <div className="p-3 space-y-3">
             <label className="block">
               <span className="text-[10.5px] font-bold uppercase tracking-wide text-on-surface-variant">
@@ -677,10 +693,11 @@ export const LocusWorkspace: React.FC<LocusWorkspaceProps> = ({ onTriggerToast }
               </>
             )}
           </div>
-        </aside>
-
+          </>
+        }
+      >
         <div className="flex-1 min-h-0 min-w-0 flex flex-col">{mapStage}</div>
-      </div>
+      </WorkspaceSidebarSplit>
 
       {exportOpen && (
         <div

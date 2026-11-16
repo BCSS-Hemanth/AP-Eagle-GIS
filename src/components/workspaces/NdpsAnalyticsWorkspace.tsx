@@ -199,6 +199,12 @@ const HeatMapPanel: React.FC = () => {
         }
       : AP_STATE_FOCUS_DRILL;
 
+  /** Exit district isolation and re-fit the same AP bounds frame as first load. */
+  const resetToApDefaultView = () => {
+    setGunturIsolated(false);
+    setApViewToken((n) => n + 1);
+  };
+
   return (
     <div className="relative rounded-lg border border-slate-300 overflow-hidden bg-[#e8eef2] h-full min-h-0 shadow-sm">
       <div className="absolute top-2 left-2 z-[500] px-2 py-0.5 rounded-md bg-[#0b1c30]/92 text-[10px] font-bold text-white shadow">
@@ -208,10 +214,7 @@ const HeatMapPanel: React.FC = () => {
         <button
           type="button"
           className="absolute top-2 right-2 z-[500] px-2 py-0.5 rounded-md bg-white text-[10px] font-bold text-slate-800 shadow border border-slate-200 cursor-pointer"
-          onClick={() => {
-            setGunturIsolated(false);
-            setApViewToken((n) => n + 1);
-          }}
+          onClick={resetToApDefaultView}
         >
           Andhra Pradesh
         </button>
@@ -228,6 +231,7 @@ const HeatMapPanel: React.FC = () => {
           highlightApFill={false}
           maskOutsideAp
           hideApStateLabel
+          hideNeighborStateLabels
           labelFreeBasemap
           showScale={false}
           showAttribution={false}

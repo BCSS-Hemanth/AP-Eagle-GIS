@@ -161,6 +161,7 @@ def main():
             ("lyr-border-ps", "Border Police Stations", ROOT / "public/geo/gis-source/admin/border_ps.geojson"),
             ("lyr-taluk-gis", "Taluks / Mandals (GIS-Source)", ROOT / "public/geo/gis-source/admin/ap_taluk_gis_source.geojson"),
             ("lyr-vsp-village-pts", "VSP / AOB Village Points", ROOT / "public/geo/gis-source/admin/vsp_villages_pts.geojson"),
+            ("lyr-asr-agency", "ASR Dist-Admin Boundary", ROOT / "public/geo/gis-source/ops/asr_boundary.geojson"),
             ("lyr-railways", "Indian Railway (Admin extra)", ROOT / "public/geo/gis-source/admin/rail_nt.geojson"),
             ("lyr-soi-grid", "SOI 1:50K Map-No Points", ROOT / "public/geo/gis-source/admin/soi_50k_grid.geojson"),
         ],
@@ -170,7 +171,6 @@ def main():
             ("lyr-checkposts", "Check Posts", ROOT / "public/geo/gis-source/ops/check_posts.geojson"),
             ("lyr-toll-plazas", "Toll Plazas", ROOT / "public/geo/gis-source/ops/toll_plazas.geojson"),
             ("lyr-seizure-polys", "Ganja Seized Points", ROOT / "public/geo/gis-source/ops/ganja_seized.geojson"),
-            ("lyr-asr-agency", "ASR Dist-Admin Boundary", ROOT / "public/geo/gis-source/ops/asr_boundary.geojson"),
             ("lyr-pharma-hubs", "Chemical / Pharma Hubs", ROOT / "public/geo/gis-source/ops/pharma_hubs.geojson"),
             ("lyr-ddacs", "DDACs", ROOT / "public/geo/gis-source/ops/ddacs.geojson"),
             ("lyr-entry-exit", "Entry & Exit Points", ROOT / "public/geo/gis-source/ops/entry_exit.geojson"),
@@ -181,7 +181,6 @@ def main():
             ("lyr-ops-internal-roads", "OPS Internal Roads", ROOT / "public/geo/gis-source/ops/internal_roads.geojson"),
             ("lyr-ap-roads-major", "AP Major Roads NH/SH/MDR", ROOT / "public/geo/gis-source/admin/ap_roads_major.geojson"),
             ("lyr-rivers", "Major Rivers", ROOT / "public/geo/ap-rivers.geojson"),
-            ("lyr-waterbodies", "Lakes & reservoirs", ROOT / "public/geo/ap-waterbodies.geojson"),
             ("lyr-forest-trails", "Foot Tracks", ROOT / "public/geo/gis-source/ops/foot_tracks.geojson"),
             ("lyr-railways", "Indian Railway", ROOT / "public/geo/gis-source/admin/rail_nt.geojson"),
         ],
@@ -215,7 +214,6 @@ def main():
     for lid, name, layer in [
         ("lyr-highways", "National Highways", "nh"),
         ("lyr-ap-roads-full", "AP Roads Full Network", "full"),
-        ("lyr-ops-vsp-roads", "OPS VSP Roads", "vsp"),
     ]:
         res, err = count_api_roads(layer, asr_geom.bounds, asr_prep)
         if err:

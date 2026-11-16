@@ -33,9 +33,9 @@ export type CatalogScope = {
   /** null = full catalog (unused; theme catalogs set group filters). */
   groups: Array<GisLayer['groupId']> | null;
   /**
-   * Extra layer ids shown/saved with this catalog even when groupId differs
-   * (e.g. Admin includes SOI grid; Road Network includes OPS/highway products).
-   */
+ * Extra layer ids shown/saved with this catalog even when groupId differs
+ * (e.g. Road Network includes OPS/highway products).
+ */
   extraLayerIds?: readonly string[];
 };
 
@@ -43,7 +43,7 @@ export type CatalogScope = {
  * Layers stored outside grp-admin that still belong on the Administrative catalog.
  * Indian Railway (lyr-railways) lives under Road Network (grp-transport) only.
  */
-export const ADMIN_CATALOG_EXTRA_LAYER_IDS = ['lyr-soi-grid'] as const;
+export const ADMIN_CATALOG_EXTRA_LAYER_IDS = [] as const;
 
 /** Road layers whose group is not grp-transport, plus the statewide highway products. */
 export const ROAD_NETWORK_CATALOG_EXTRA_LAYER_IDS = [

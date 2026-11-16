@@ -7,7 +7,7 @@ import {
   BookOpen,
   Compass,
   FileBarChart2,
-  Grid,
+  Grid3X3,
   Layers,
   Activity,
   LayoutDashboard,
@@ -46,6 +46,11 @@ export const APP_NAV_SECTIONS: AppNavSection[] = [
         label: 'NDPS Analytics',
         icon: Activity,
       },
+      {
+        id: 'reports-seizure-analytics',
+        label: 'Reports & Seizure Analytics',
+        icon: FileBarChart2,
+      },
     ],
   },
   {
@@ -57,7 +62,6 @@ export const APP_NAV_SECTIONS: AppNavSection[] = [
       { id: 'road-network-layers', label: 'Road Network Layers', icon: Compass },
       { id: 'roads-routing', label: 'Roads Routing', icon: Navigation2 },
       { id: 'roads-routing-new', label: 'Roads Routing New', icon: Satellite },
-      { id: 'raster-imagery', label: 'Raster & Imagery', icon: Grid },
     ],
   },
   {
@@ -65,8 +69,8 @@ export const APP_NAV_SECTIONS: AppNavSection[] = [
     title: 'Products & Field',
     items: [
       { id: 'atlas', label: 'Atlas', icon: BookOpen },
-      { id: 'reports-seizure-analytics', label: 'Reports & Seizure Analytics', icon: FileBarChart2 },
       { id: 'mobile-locus-export', label: 'Locus', icon: Share2 },
+      { id: 'raster-imagery', label: 'Raster', icon: Grid3X3 },
     ],
   },
   {

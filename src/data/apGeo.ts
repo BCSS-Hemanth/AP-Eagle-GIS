@@ -6,9 +6,9 @@ export const AP_BOUNDS: [[number, number], [number, number]] = [
   [19.22, 84.78],
 ];
 
-/** WGS84 envelope of India (GIS-Source IND_adm1 outline + padding). Leaflet [[south,west],[north,east]]. */
+/** WGS84 envelope of India (DataMeet states + ocean margin for Lakshadweep). Leaflet [[south,west],[north,east]]. */
 export const INDIA_BOUNDS: [[number, number], [number, number]] = [
-  [6.4, 67.8],
+  [6.4, 66.6],
   [37.2, 97.6],
 ];
 
@@ -69,6 +69,20 @@ export const BASEMAP_TILES: Record<
     labelsUrl:
       'https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}',
   },
+  /** Esri World Topographic Map — terrain + roads (Atlas opt-in). */
+  'esri-topo': {
+    url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Topo_Map/MapServer/tile/{z}/{y}/{x}',
+    attribution:
+      'Tiles &copy; Esri &mdash; Esri, HERE, Garmin, FAO, NOAA, USGS, &copy; OpenStreetMap contributors',
+    maxZoom: 19,
+  },
+  /** Esri World Street Map — detailed streets (Atlas opt-in). */
+  'esri-street': {
+    url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}',
+    attribution:
+      'Tiles &copy; Esri &mdash; Esri, HERE, Garmin, USGS, Intermap, INCREMENT P, NRCan, Esri Japan, METI, Esri China (Hong Kong), Esri Korea, Esri (Thailand), NGCC, &copy; OpenStreetMap contributors',
+    maxZoom: 19,
+  },
 };
 
 /** Statewide imagery gap-fill under GIS-Source sat AOIs (drill / auto overlay on vector/topo). */
@@ -99,12 +113,12 @@ export const ESRI_PLACES_TILES = {
 };
 
 /**
- * @deprecated Removed from map rendering — GIS-Source google_terrain replaces this.
- * Kept only so older imports fail loudly at call sites that still reference tiles.
+ * @deprecated Not used as a basemap — terrain/roadmap catalog overlays were removed.
+ * Kept empty so accidental imports do not paint Esri World Hillshade.
  */
 export const ESRI_HILLSHADE_TILES = {
   url: '',
-  attribution: 'Replaced by GIS-Source google_terrain',
+  attribution: 'Terrain / Google roadmap overlays removed',
   maxZoom: 0,
 };
 

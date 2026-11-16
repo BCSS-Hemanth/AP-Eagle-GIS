@@ -8,6 +8,12 @@ import L from 'leaflet';
 const SIZE = 22;
 const SIZE_SEL = 26;
 
+export {
+  opsDrugRouteLineWeightForZoom,
+  opsDrugRoutePointRadiusForZoom,
+  opsHotspotRadiusForZoom,
+} from './opsPointZoom';
+
 function makeIcon(svg: string, className: string, size: number): L.DivIcon {
   return L.divIcon({
     className: `ap-ops-point ${className}`,

@@ -13,6 +13,8 @@
     "test:e2e": "playwright test",
     "db:ensure": "tsx server/roads/ensureDb.ts",
     "db:load-roads": "tsx server/roads/loadGisRoads.ts",
+    "db:seed-geo": "tsx server/gis-catalog/seedGeojson.ts",
+    "db:seed-all": "npm run db:ensure && npm run db:load-roads && npm run db:seed-geo",
     "server:roads": "tsx server/roads/roadsApi.ts"
   },
   "dependencies": {

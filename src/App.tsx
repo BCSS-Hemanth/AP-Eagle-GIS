@@ -63,12 +63,14 @@ import { RoadsRoutingWorkspace } from './components/workspaces/RoadsRoutingWorks
 import { RoadsRoutingNewWorkspace } from './components/workspaces/RoadsRoutingNewWorkspace';
 import { AtlasWorkspace } from './components/workspaces/AtlasWorkspace';
 import { LocusWorkspace } from './components/workspaces/LocusWorkspace';
+import { RasterWorkspace } from './components/workspaces/RasterWorkspace';
 
 function AppShell() {
   const { user, canOpen, can, logout } = useAuth();
   const [activeWorkspace, setActiveWorkspace] = useState<WorkspaceId>('ndps-spatial-dashboard');
   const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(true);
-  const [dashboardMapExpanded, setDashboardMapExpanded] = useState(false);
+  /** Hides header + left nav so Full Screen / Full map fills the viewport (all modules). */
+  const [mapFullscreen, setMapFullscreen] = useState(false);
   const kmzStations = usePoliceStations(true);
   const kmzRows = useMemo(() => policeStationsToRows(kmzStations), [kmzStations]);
   const searchTargets = useMemo(
@@ -92,7 +94,10 @@ function AppShell() {
   const [roadsRoutingNewConfig, setRoadsRoutingNewConfig] = useState<RoadsRoutingNewLayerConfig>(
     () => ({})
   );
-  /** Independent sticky labels after each Save click (not cleared by hover remove / new ticks). */
+  /**
+   * Sticky “Saved to …” labels after each Save click.
+   * Cleared when any catalog Visible layer is selected/deselected (all three buttons).
+   */
   const [catalogSaveAck, setCatalogSaveAck] = useState({
     dashboard: false,
     roadsRouting: false,
@@ -174,6 +179,12 @@ function AppShell() {
     );
     // Catalog Visible changes reset hover opt-outs so a fresh tick shows on all three buttons.
     setCatalogHoverExclusions((prev) => clearLayerHoverExclusions(prev, layerId));
+    // Any select/deselect returns Save buttons to “Save to …” (Admin / OPS / Road Network).
+    setCatalogSaveAck({
+      dashboard: false,
+      roadsRouting: false,
+      roadsRoutingNew: false,
+    });
     if (target) {
       appendAudit(target.enabled ? 'DISABLE_LAYER' : 'ENABLE_LAYER', target.sourceTable);
     }
@@ -381,10 +392,42 @@ function AppShell() {
   }, [user, activeWorkspace, canOpen]);
 
   useEffect(() => {
-    if (activeWorkspace !== 'ndps-spatial-dashboard' && dashboardMapExpanded) {
-      setDashboardMapExpanded(false);
-    }
-  }, [activeWorkspace, dashboardMapExpanded]);
+    setMapFullscreen(false);
+  }, [activeWorkspace]);
+
+  /** Enter/exit browser fullscreen so tabs + address bar hide with Full Screen / Full map. */
+  useEffect(() => {
+    const root = document.documentElement;
+    const isFs = () => Boolean(document.fullscreenElement);
+
+    const enter = async () => {
+      if (isFs()) return;
+      try {
+        await root.requestFullscreen?.();
+      } catch {
+        /* user gesture / permission denied — app chrome still expands */
+      }
+    };
+    const exit = async () => {
+      if (!isFs()) return;
+      try {
+        await document.exitFullscreen?.();
+      } catch {
+        /* already exited */
+      }
+    };
+
+    if (mapFullscreen) void enter();
+    else void exit();
+
+    const onFsChange = () => {
+      if (!document.fullscreenElement) setMapFullscreen(false);
+    };
+    document.addEventListener('fullscreenchange', onFsChange);
+    return () => {
+      document.removeEventListener('fullscreenchange', onFsChange);
+    };
+  }, [mapFullscreen]);
 
   if (!user) return <LoginScreen />;
 
@@ -393,7 +436,7 @@ function AppShell() {
       triggerToast('Access denied for your RBAC clearance');
       return;
     }
-    setDashboardMapExpanded(false);
+    setMapFullscreen(false);
     setActiveWorkspace(ws);
   };
 
@@ -403,16 +446,16 @@ function AppShell() {
     activeWorkspace === 'roads-routing' ||
     activeWorkspace === 'roads-routing-new' ||
     activeWorkspace === 'atlas' ||
-    activeWorkspace === 'mobile-locus-export';
+    activeWorkspace === 'mobile-locus-export' ||
+    activeWorkspace === 'raster-imagery';
 
   return (
     <div className="h-dvh max-h-dvh min-h-0 bg-background text-on-surface flex flex-col overflow-hidden">
-      {!dashboardMapExpanded && (
+      {!mapFullscreen && (
         <TopCommandHeader
           alerts={alerts}
           onAcknowledgeAlert={handleAcknowledgeAlert}
           onSelectFeatureAndFly={handleSelectFeatureAndFly}
-          allFeatures={searchTargets}
           sidebarCollapsed={sidebarCollapsed}
           onToggleSidebar={() => setSidebarCollapsed((c) => !c)}
           onSwitchWorkspace={handleSelectWorkspace}
@@ -423,7 +466,7 @@ function AppShell() {
         />
       )}
 
-      {!dashboardMapExpanded && (
+      {!mapFullscreen && (
         <LeftNavigationRail
           activeWorkspace={activeWorkspace}
           onSelectWorkspace={handleSelectWorkspace}
@@ -435,7 +478,7 @@ function AppShell() {
       {/* Main Content Shell */}
       <main
         className={
-          dashboardMapExpanded
+          mapFullscreen
             ? 'flex-1 min-h-0 min-w-0 overflow-hidden p-0'
             : fillViewportWorkspace
               ? `pt-14 flex-1 min-h-0 min-w-0 overflow-hidden transition-[padding] duration-200 ${
@@ -447,9 +490,9 @@ function AppShell() {
         }
       >
         <MapLayoutProvider
-          token={`${sidebarCollapsed ? 'rail-sm' : 'rail-lg'}:${activeWorkspace}:${dashboardMapExpanded ? 'full' : 'shell'}`}
+          token={`${sidebarCollapsed ? 'rail-sm' : 'rail-lg'}:${activeWorkspace}:${mapFullscreen ? 'full' : 'shell'}`}
         >
-        <div className={fillViewportWorkspace || dashboardMapExpanded ? 'h-full min-h-0' : undefined}>
+        <div className={fillViewportWorkspace || mapFullscreen ? 'h-full min-h-0' : undefined}>
         <WorkspaceErrorBoundary workspaceLabel={activeWorkspace}>
         {activeWorkspace === 'ndps-spatial-dashboard' && (
           <CoreOpsWorkspaces
@@ -459,8 +502,8 @@ function AppShell() {
             onFlyToLocation={handleFlyToLocation}
             onSwitchWorkspace={handleSelectWorkspace}
             onTriggerToast={triggerToast}
-            dashboardMapExpanded={dashboardMapExpanded}
-            onDashboardMapExpandedChange={setDashboardMapExpanded}
+            dashboardMapExpanded={mapFullscreen}
+            onDashboardMapExpandedChange={setMapFullscreen}
           />
         )}
 
@@ -558,17 +601,32 @@ function AppShell() {
         )}
 
         {activeWorkspace === 'atlas' && (
-          <AtlasWorkspace onTriggerToast={triggerToast} />
+          <AtlasWorkspace
+            onTriggerToast={triggerToast}
+            mapExpanded={mapFullscreen}
+            onMapExpandedChange={setMapFullscreen}
+          />
         )}
 
         {activeWorkspace === 'mobile-locus-export' && (
-          <LocusWorkspace onTriggerToast={triggerToast} />
+          <LocusWorkspace
+            onTriggerToast={triggerToast}
+            mapExpanded={mapFullscreen}
+            onMapExpandedChange={setMapFullscreen}
+          />
+        )}
+
+        {activeWorkspace === 'raster-imagery' && (
+          <RasterWorkspace
+            onTriggerToast={triggerToast}
+            mapExpanded={mapFullscreen}
+            onMapExpandedChange={setMapFullscreen}
+          />
         )}
 
         {(activeWorkspace === 'administrative-layers' ||
           activeWorkspace === 'operational-layers' ||
-          activeWorkspace === 'road-network-layers' ||
-          activeWorkspace === 'raster-imagery') && (
+          activeWorkspace === 'road-network-layers') && (
           <DataLayerWorkspaces
             workspace={activeWorkspace}
             layers={layers}

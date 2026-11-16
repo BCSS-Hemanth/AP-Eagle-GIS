@@ -1,17 +1,32 @@
 import { downloadBlob } from '../../utils/geoMath';
 import { captureDomToCanvas } from '../captureDomCanvas';
 import { captureSheetCanvas } from '../mapFormatExport';
+import {
+  DEFAULT_ATLAS_EXPORT_DECORATIONS,
+  paintAtlasExportDecorations,
+  type AtlasExportDecorationFlags,
+  type AtlasExportLegendItem,
+} from './atlasExportDecorations';
 
 export type AtlasExportFormat = 'png' | 'jpeg';
 export type AtlasExportResolution = 'standard' | 'high';
+
+export type {
+  AtlasExportDecorationFlags,
+  AtlasExportLegendItem,
+};
+export { DEFAULT_ATLAS_EXPORT_DECORATIONS };
 
 export async function exportAtlasMapImage(options: {
   mapEl: HTMLElement;
   format: AtlasExportFormat;
   resolution: AtlasExportResolution;
   fileBaseName: string;
+  decorations?: AtlasExportDecorationFlags;
+  legendItems?: AtlasExportLegendItem[];
 }): Promise<{ fileName: string }> {
   const scale = options.resolution === 'high' ? 3 : 2;
+  const decorations = options.decorations ?? DEFAULT_ATLAS_EXPORT_DECORATIONS;
 
   // Prefer the Leaflet map pane (tiles + vectors) so app chrome CSS is excluded.
   const captureTarget =
@@ -25,6 +40,11 @@ export async function exportAtlasMapImage(options: {
   if (canvas.width < 32 || canvas.height < 32) {
     throw new Error('Export canvas is empty — wait for the map and layers to finish loading');
   }
+
+  paintAtlasExportDecorations(canvas, {
+    decorations,
+    legendItems: options.legendItems ?? [],
+  });
 
   const mime = options.format === 'jpeg' ? 'image/jpeg' : 'image/png';
   const quality = options.format === 'jpeg' ? 0.92 : undefined;

@@ -36,6 +36,21 @@ export async function hasPostgis(client: pg.PoolClient): Promise<boolean> {
 export async function ensureRoadsSchema(client: pg.PoolClient): Promise<{ mode: 'postgis' | 'bbox' }> {
   const usePostgis = await hasPostgis(client);
 
+  // Old bbox/jsonb table cannot host PostGIS geom (and vice versa) — recreate when mismatched.
+  const cols = await client.query(`
+    SELECT column_name
+    FROM information_schema.columns
+    WHERE table_schema = 'public' AND table_name = 'gis_road_segments'
+  `);
+  const names = new Set(cols.rows.map((r) => String(r.column_name)));
+  if (names.size > 0) {
+    const wrongForPostgis = usePostgis && !names.has('geom');
+    const wrongForBbox = !usePostgis && !names.has('geom_json');
+    if (wrongForPostgis || wrongForBbox) {
+      await client.query('DROP TABLE IF EXISTS gis_road_segments CASCADE');
+    }
+  }
+
   if (usePostgis) {
     await client.query(`
       CREATE TABLE IF NOT EXISTS gis_road_segments (
@@ -85,11 +100,10 @@ export async function ensureRoadsSchema(client: pg.PoolClient): Promise<{ mode: 
   return { mode: usePostgis ? 'postgis' : 'bbox' };
 }
 
-export type RoadLayerId = 'full' | 'vsp' | 'nh';
+export type RoadLayerId = 'full' | 'nh';
 
 export function layerWhere(layer: RoadLayerId): { sql: string; params: unknown[] } {
   if (layer === 'full') return { sql: `source = 'ap_full'`, params: [] };
-  if (layer === 'vsp') return { sql: `source = 'vsp'`, params: [] };
   return {
     sql: `source = 'ap_full' AND rd_sub_typ = 'National Highway'`,
     params: [],

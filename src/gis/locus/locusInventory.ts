@@ -27,6 +27,43 @@ const ASR_LAYERS: LocusInventoryLayer[] = [
     featureCount: 14,
   },
   {
+    layerId: 'lyr-proposed-anpr',
+    category: 'administrative',
+    name: 'Proposed ANPR Locations',
+    featureCount: 38,
+    countNote: 'Points and route lines intersecting ASR',
+  },
+  {
+    layerId: 'lyr-ap-neighbor-states',
+    category: 'administrative',
+    name: 'AP & Neighboring States (KMZ)',
+    featureCount: 4,
+  },
+  {
+    layerId: 'lyr-aob-dists',
+    category: 'administrative',
+    name: 'AOB Districts (KMZ)',
+    featureCount: 13,
+  },
+  {
+    layerId: 'lyr-kmz-villages',
+    category: 'administrative',
+    name: 'Major Towns & Villages (KMZ)',
+    featureCount: 182,
+  },
+  {
+    layerId: 'lyr-ps-border-area',
+    category: 'administrative',
+    name: 'Police Stations — Border Area (KMZ)',
+    featureCount: 22,
+  },
+  {
+    layerId: 'lyr-atlas-map-data',
+    category: 'administrative',
+    name: 'Atlas Map Data Bundle (KMZ)',
+    featureCount: 707,
+  },
+  {
     layerId: 'lyr-vsp-village-pts',
     category: 'administrative',
     name: 'VSP / AOB Village Points',
@@ -37,12 +74,6 @@ const ASR_LAYERS: LocusInventoryLayer[] = [
     category: 'administrative',
     name: 'Taluks / Mandals (GIS-Source)',
     featureCount: 6,
-  },
-  {
-    layerId: 'lyr-soi-grid',
-    category: 'administrative',
-    name: 'SOI 1:50K Map-No Points',
-    featureCount: 17,
   },
   {
     layerId: 'lyr-state-border',
@@ -66,7 +97,7 @@ const ASR_LAYERS: LocusInventoryLayer[] = [
   },
   {
     layerId: 'lyr-asr-agency',
-    category: 'operational',
+    category: 'administrative',
     name: 'ASR Dist-Admin Boundary',
     featureCount: 1,
   },
@@ -102,6 +133,31 @@ const ASR_LAYERS: LocusInventoryLayer[] = [
     featureCount: 34,
   },
   {
+    layerId: 'lyr-ganja-transport-routes',
+    category: 'road-network',
+    name: 'D - Routes (Ganja Transport)',
+    featureCount: 157,
+    countNote: 'Lines, points, and polygons intersecting ASR',
+  },
+  {
+    layerId: 'lyr-roads-asr-classified',
+    category: 'road-network',
+    name: 'ASR Roads — Main / Metal / Cart / Foot (KMZ)',
+    featureCount: 182,
+  },
+  {
+    layerId: 'lyr-asr-road-network',
+    category: 'road-network',
+    name: 'ASR Road Network (KMZ)',
+    featureCount: 5611,
+  },
+  {
+    layerId: 'lyr-route-modeling',
+    category: 'road-network',
+    name: 'Route Modeling (KMZ)',
+    featureCount: 5644,
+  },
+  {
     layerId: 'lyr-forest-trails',
     category: 'road-network',
     name: 'Foot Tracks',
@@ -127,20 +183,7 @@ const ASR_LAYERS: LocusInventoryLayer[] = [
     featureCount: 10577,
     countNote: 'Approx · PostGIS bbox',
   },
-  {
-    layerId: 'lyr-ops-vsp-roads',
-    category: 'road-network',
-    name: 'OPS VSP Roads',
-    featureCount: 7094,
-    countNote: 'Approx · PostGIS bbox',
-  },
   { layerId: 'lyr-rivers', category: 'road-network', name: 'Major Rivers', featureCount: 9 },
-  {
-    layerId: 'lyr-waterbodies',
-    category: 'road-network',
-    name: 'Lakes & Reservoirs',
-    featureCount: 13,
-  },
 ];
 
 const INVENTORIES: Record<string, LocusDistrictInventory> = {

@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Eye, EyeOff, Navigation2, Plus, Satellite, Trash2, X } from 'lucide-react';
 import type { GisLayer, WorkspaceId } from '../../types/gis';
 import { ApLeafletMap } from '../gis/ApLeafletMap';
+import { WorkspaceSidebarSplit } from '../gis/WorkspaceSidebarSplit';
 import { GIS_SOURCE_ADMIN_LAYERS, GIS_SOURCE_OPS_LAYERS } from '../../gis/gisSourceCatalog';
 import { groupLayersByCatalogModule } from '../../gis/catalogWorkspaces';
 import { INDIA_CENTER, INDIA_DEFAULT_ZOOM } from '../../data/apGeo';
@@ -27,7 +28,6 @@ import {
 const LAYER_FC_URL: Record<string, string> = {
   'lyr-highways': '/api/gis-roads/geojson?layer=nh',
   'lyr-ap-roads-full': '/api/gis-roads/geojson?layer=full',
-  'lyr-ops-vsp-roads': '/api/gis-roads/geojson?layer=vsp',
   'lyr-ap-roads-major': GIS_SOURCE_ADMIN_LAYERS.roadsMajor,
   'lyr-ops-main-roads': GIS_SOURCE_OPS_LAYERS.mainRoads,
   'lyr-ops-internal-roads': GIS_SOURCE_OPS_LAYERS.internalRoads,
@@ -65,14 +65,20 @@ async function loadFc(url: string): Promise<GeoJSON.FeatureCollection> {
   throw new Error('Not a FeatureCollection');
 }
 
-function apiLayerKey(layerId: string): 'nh' | 'full' | 'vsp' | null {
+function apiLayerKey(layerId: string): 'nh' | 'full' | null {
   if (layerId === 'lyr-highways') return 'nh';
   if (layerId === 'lyr-ap-roads-full') return 'full';
-  if (layerId === 'lyr-ops-vsp-roads') return 'vsp';
   return null;
 }
 
-function nextPoiId(existing: PoiRef[]): string {
+interface PoiEntry {
+  id: string;
+  label: string;
+  latText: string;
+  lonText: string;
+}
+
+function nextPoiId(existing: { id: string }[]): string {
   let n = existing.length + 1;
   const ids = new Set(existing.map((p) => p.id));
   while (ids.has(`poi-${n}`)) n += 1;
@@ -81,6 +87,25 @@ function nextPoiId(existing: PoiRef[]): string {
 
 function poiLabel(index: number): string {
   return index >= 0 && index < 26 ? String.fromCharCode(65 + index) : String(index + 1);
+}
+
+function parseCoord(text: string): number | null {
+  const t = text.trim();
+  if (!t || t === '-' || t === '.' || t === '-.') return null;
+  const n = Number(t);
+  return Number.isFinite(n) ? n : null;
+}
+
+function entryLonLat(p: PoiEntry): { lat: number; lon: number } | null {
+  const lat = parseCoord(p.latText);
+  const lon = parseCoord(p.lonText);
+  if (lat == null || lon == null) return null;
+  if (lat < -90 || lat > 90 || lon < -180 || lon > 180) return null;
+  return { lat, lon };
+}
+
+function relabelPois(pois: PoiEntry[]): PoiEntry[] {
+  return pois.map((p, i) => ({ ...p, label: poiLabel(i) }));
 }
 
 const EMPTY_ROUTING_NEW_CONFIG: RoadsRoutingNewLayerConfig = {};
@@ -112,7 +137,7 @@ export const RoadsRoutingNewWorkspace: React.FC<RoadsRoutingNewWorkspaceProps> =
     }
   }, [dropSaved, routingNewConfig]);
 
-  const [pois, setPois] = useState<PoiRef[]>([]);
+  const [poiEntries, setPoiEntries] = useState<PoiEntry[]>([]);
   const [placing, setPlacing] = useState(false);
   const [pickedState, setPickedState] = useState<{
     name: string;
@@ -127,6 +152,52 @@ export const RoadsRoutingNewWorkspace: React.FC<RoadsRoutingNewWorkspaceProps> =
   const [hasDisplayed, setHasDisplayed] = useState(false);
   const fcCacheRef = useRef<Map<string, GeoJSON.FeatureCollection>>(new Map());
 
+  const pois = useMemo((): PoiRef[] => {
+    return poiEntries
+      .map((p) => {
+        const ll = entryLonLat(p);
+        return ll ? { id: p.id, label: p.label, lat: ll.lat, lon: ll.lon } : null;
+      })
+      .filter((p): p is PoiRef => p != null);
+  }, [poiEntries]);
+
+  const invalidateNetworks = () => {
+    setFetchStates({});
+    setHasDisplayed(false);
+  };
+
+  const addPoint = () => {
+    const label = poiLabel(poiEntries.length);
+    setPoiEntries((prev) =>
+      relabelPois([
+        ...prev,
+        {
+          id: nextPoiId(prev),
+          label: poiLabel(prev.length),
+          latText: '',
+          lonText: '',
+        },
+      ])
+    );
+    if (pickedState) {
+      setPlacing(true);
+      onTriggerToast(
+        `Point ${label} added — enter coordinates or click the map inside ${pickedState.name}`
+      );
+    } else {
+      onTriggerToast(
+        `Point ${label} added — enter latitude/longitude, or click a state to pin on the map`
+      );
+    }
+  };
+
+  const updatePoiCoord = (id: string, field: 'latText' | 'lonText', value: string) => {
+    setPoiEntries((prev) =>
+      prev.map((p) => (p.id === id ? { ...p, [field]: value } : p))
+    );
+    invalidateNetworks();
+  };
+
   const handleStatePick = (feature: GeoJSON.Feature, name: string) => {
     if (placing) return;
     const bbox = featureBbox(feature);
@@ -139,7 +210,7 @@ export const RoadsRoutingNewWorkspace: React.FC<RoadsRoutingNewWorkspaceProps> =
     setBoundsToken((t) => t + 1);
     setPlacing(true);
     onTriggerToast(
-      `${name} zoomed in. Neighbouring states stay visible — click the map to place POIs.`
+      `${name} zoomed in. Neighbouring states stay visible — click Add Point or the map to place POIs.`
     );
   };
 
@@ -149,31 +220,46 @@ export const RoadsRoutingNewWorkspace: React.FC<RoadsRoutingNewWorkspaceProps> =
       return;
     }
     if (!placing) return;
-    setPois((prev) => {
-      const id = nextPoiId(prev);
-      const label = poiLabel(prev.length);
-      const next = [...prev, { id, label, lat, lon }];
+    const latText = lat.toFixed(6);
+    const lonText = lon.toFixed(6);
+    setPoiEntries((prev) => {
+      const emptyIdx = prev.findIndex((p) => entryLonLat(p) == null);
+      if (emptyIdx >= 0) {
+        const next = prev.map((p, i) =>
+          i === emptyIdx ? { ...p, latText, lonText } : p
+        );
+        onTriggerToast(
+          `Point ${next[emptyIdx].label} set (${lat.toFixed(4)}, ${lon.toFixed(4)}) — add more points or Display Road Networks`
+        );
+        return next;
+      }
+      const next = relabelPois([
+        ...prev,
+        {
+          id: nextPoiId(prev),
+          label: poiLabel(prev.length),
+          latText,
+          lonText,
+        },
+      ]);
+      const created = next[next.length - 1];
       onTriggerToast(
-        `${label} set (${lat.toFixed(4)}, ${lon.toFixed(4)}) — add more points or Display Road Networks`
+        `Point ${created.label} set (${lat.toFixed(4)}, ${lon.toFixed(4)}) — add more points or Display Road Networks`
       );
       return next;
     });
-    setFetchStates({});
-    setHasDisplayed(false);
+    invalidateNetworks();
   };
 
   const removePoi = (id: string) => {
-    setPois((prev) => {
-      const filtered = prev.filter((p) => p.id !== id);
-      return filtered.map((p, i) => ({ ...p, label: poiLabel(i) }));
-    });
-    setFetchStates({});
-    setHasDisplayed(false);
+    setPoiEntries((prev) => relabelPois(prev.filter((p) => p.id !== id)));
+    invalidateNetworks();
   };
 
   const clearPoints = () => {
-    setPois([]);
+    setPoiEntries([]);
     setPlacing(false);
+    invalidateNetworks();
     onTriggerToast('Cleared pins');
   };
 
@@ -268,7 +354,7 @@ export const RoadsRoutingNewWorkspace: React.FC<RoadsRoutingNewWorkspaceProps> =
             const parts = await Promise.all(
               pois.map(async (poi) => {
                 const box = radiusQueryBbox(poi, POI_CORRIDOR_HALF_WIDTH_KM);
-                const fetchUrl = `/api/gis-roads/geojson?layer=${apiLayer}&bbox=${box.west},${box.south},${box.east},${box.north}&limit=25000`;
+                const fetchUrl = `/api/gis-roads/geojson?layer=${apiLayer}&bbox=${box.west},${box.south},${box.east},${box.north}&limit=8000`;
                 const cached = fcCacheRef.current.get(fetchUrl);
                 if (cached) return cached;
                 const fc = await loadFc(fetchUrl);
@@ -358,8 +444,10 @@ export const RoadsRoutingNewWorkspace: React.FC<RoadsRoutingNewWorkspaceProps> =
   );
 
   const filterMapLayers = useCallback(
-    (fc: GeoJSON.FeatureCollection) => {
-      if (!poiLonLats.length) return { type: 'FeatureCollection', features: [] };
+    (fc: GeoJSON.FeatureCollection): GeoJSON.FeatureCollection => {
+      if (!poiLonLats.length) {
+        return { type: 'FeatureCollection', features: [] };
+      }
       return filterCollectionToPoiAoi(fc, poiLonLats, POI_CORRIDOR_HALF_WIDTH_KM);
     },
     [poiLonLats]
@@ -397,7 +485,7 @@ export const RoadsRoutingNewWorkspace: React.FC<RoadsRoutingNewWorkspaceProps> =
       lon: p.lon,
       kind: MARKER_KINDS[i % MARKER_KINDS.length],
       badge: p.label,
-      label: `${p.label} (${p.lat.toFixed(4)}, ${p.lon.toFixed(4)})`,
+      label: `Point ${p.label} (${p.lat.toFixed(4)}, ${p.lon.toFixed(4)})`,
       selected: true,
     }));
   }, [pois]);
@@ -480,9 +568,11 @@ export const RoadsRoutingNewWorkspace: React.FC<RoadsRoutingNewWorkspaceProps> =
   const mapHint = (() => {
     if (loadingAny) return 'Loading road networks…';
     if (placing && pickedState) {
-      return pois.length
-        ? `Point placement — click the map to add ${poiLabel(pois.length)}`
-        : `Point placement in ${pickedState.name} — click the map to place ${poiLabel(0)}`;
+      const nextEmpty = poiEntries.find((p) => entryLonLat(p) == null);
+      if (nextEmpty) {
+        return `Point placement in ${pickedState.name} — click the map for Point ${nextEmpty.label}`;
+      }
+      return `Point placement — click the map to add Point ${poiLabel(poiEntries.length)}`;
     }
     if (pois.length && hasDisplayed) {
       return 'Pin corridor active — Eye-on layers show road networks between the pins';
@@ -490,12 +580,19 @@ export const RoadsRoutingNewWorkspace: React.FC<RoadsRoutingNewWorkspaceProps> =
     if (pois.length) {
       return 'Pins set — Display Road Networks, then Eye-on layers (corridor between pins only)';
     }
-    return 'Click a state to zoom in. Pins are placed only after that zoom.';
+    if (poiEntries.length) {
+      return 'Enter coordinates below, or click a state to zoom in before pinning on the map';
+    }
+    return 'Click Add Point to create Point A, or click a state to zoom in and pin on the map.';
   })();
 
   return (
-    <div className="h-full min-h-0 flex flex-col lg:flex-row overflow-hidden bg-[#1a1f24]">
-      <aside className="w-full lg:w-[340px] shrink-0 border-b lg:border-b-0 lg:border-r border-outline-variant/40 bg-surface-container-lowest flex flex-col max-h-[46vh] lg:max-h-none overflow-hidden">
+    <div className="h-full min-h-0 overflow-hidden bg-[#1a1f24] flex flex-col">
+      <WorkspaceSidebarSplit
+        testId="roads-routing-new-split"
+        asideClassName="w-full lg:w-[340px] shrink-0 border-b lg:border-b-0 lg:border-r border-outline-variant/40 bg-surface-container-lowest flex flex-col max-h-[46vh] lg:max-h-none overflow-hidden"
+        sidebar={
+          <>
         <div className="p-3 border-b border-outline-variant/35 space-y-2">
           <div className="flex items-center gap-2">
             <Satellite className="w-4 h-4 text-secondary" />
@@ -509,14 +606,7 @@ export const RoadsRoutingNewWorkspace: React.FC<RoadsRoutingNewWorkspaceProps> =
                   ? 'border-secondary bg-secondary/15 text-secondary'
                   : 'border-outline-variant/50'
               }`}
-              onClick={() => {
-                if (!pickedState) {
-                  onTriggerToast('Click a state on the map to zoom in before placing points');
-                  return;
-                }
-                setPlacing(true);
-                onTriggerToast(`Click the map inside ${pickedState.name} to add a POI`);
-              }}
+              onClick={addPoint}
             >
               <Plus className="w-3 h-3" />
               Add Point
@@ -546,28 +636,56 @@ export const RoadsRoutingNewWorkspace: React.FC<RoadsRoutingNewWorkspaceProps> =
             </button>
           </div>
 
-          <div className="rounded border border-outline-variant/40 bg-white/80 max-h-28 overflow-y-auto">
-            {!pois.length ? (
-              <p className="px-2 py-1.5 text-[10px] text-on-surface-variant">No POIs yet</p>
+          <div className="rounded border border-outline-variant/40 bg-white/80 max-h-40 overflow-y-auto">
+            {!poiEntries.length ? (
+              <p className="px-2 py-1.5 text-[10px] text-on-surface-variant">No points yet</p>
             ) : (
               <ul className="divide-y divide-outline-variant/25">
-                {pois.map((p) => (
-                  <li
-                    key={p.id}
-                    className="flex items-center gap-1.5 px-2 py-1 text-[10px] font-mono"
-                  >
-                    <span className="font-bold text-primary shrink-0 w-6">{p.label}</span>
-                    <span className="flex-1 truncate text-on-surface-variant">
-                      {p.lat.toFixed(4)}, {p.lon.toFixed(4)}
-                    </span>
-                    <button
-                      type="button"
-                      className="cursor-pointer text-error p-0.5"
-                      title={`Remove ${p.label}`}
-                      onClick={() => removePoi(p.id)}
-                    >
-                      <X className="w-3 h-3" />
-                    </button>
+                {poiEntries.map((p) => (
+                  <li key={p.id} className="px-2 py-1.5 space-y-1">
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-[10px] font-bold text-primary shrink-0">
+                        Point {p.label}
+                      </span>
+                      <button
+                        type="button"
+                        className="ml-auto cursor-pointer text-error p-0.5"
+                        title={`Remove Point ${p.label}`}
+                        onClick={() => removePoi(p.id)}
+                      >
+                        <X className="w-3 h-3" />
+                      </button>
+                    </div>
+                    <div className="grid grid-cols-2 gap-1.5">
+                      <label className="block">
+                        <span className="text-[9px] font-semibold text-on-surface-variant">
+                          Latitude
+                        </span>
+                        <input
+                          type="text"
+                          inputMode="decimal"
+                          value={p.latText}
+                          placeholder="e.g. 17.3850"
+                          aria-label={`Point ${p.label} latitude`}
+                          onChange={(e) => updatePoiCoord(p.id, 'latText', e.target.value)}
+                          className="mt-0.5 w-full h-7 rounded border border-outline-variant/50 bg-white px-1.5 text-[10px] font-mono"
+                        />
+                      </label>
+                      <label className="block">
+                        <span className="text-[9px] font-semibold text-on-surface-variant">
+                          Longitude
+                        </span>
+                        <input
+                          type="text"
+                          inputMode="decimal"
+                          value={p.lonText}
+                          placeholder="e.g. 78.4867"
+                          aria-label={`Point ${p.label} longitude`}
+                          onChange={(e) => updatePoiCoord(p.id, 'lonText', e.target.value)}
+                          className="mt-0.5 w-full h-7 rounded border border-outline-variant/50 bg-white px-1.5 text-[10px] font-mono"
+                        />
+                      </label>
+                    </div>
                   </li>
                 ))}
               </ul>
@@ -755,47 +873,56 @@ export const RoadsRoutingNewWorkspace: React.FC<RoadsRoutingNewWorkspaceProps> =
             )}
           </section>
         </div>
-      </aside>
-
-      <div className="flex-1 min-h-0 min-w-0 relative">
-        <ApLeafletMap
-          className="h-full w-full"
-          basemap="satellite"
-          fitToState
-          interactive
-          clickMode={placing ? 'inspect' : 'pan'}
-          onMapClick={handleMapClick}
-          indiaStatePick={placing ? 'pass' : 'pick'}
-          onIndiaStatePick={handleStatePick}
-          selectedIndiaStateName={pickedState?.name ?? null}
-          boundsView={boundsView}
-          markers={markers}
-          geoJsonOverlays={geoJsonOverlays}
-          filterMapLayers={poiLonLats.length ? filterMapLayers : undefined}
-          layerClipFeature={corridorClipFeature}
-          suppressUnclippedRoadTiles={poiLonLats.length > 0}
-          showStateBorder={mapOn('lyr-state-border')}
-          showDistricts={mapOn('lyr-districts')}
-          showMandals={mapOn('lyr-mandals')}
-          showVillages={mapOn('lyr-villages')}
-          showPoliceStations={mapOn('lyr-pss')}
-          showBorderPs={mapOn('lyr-border-ps')}
-          showTalukGis={mapOn('lyr-taluk-gis')}
+          </>
+        }
+      >
+        <div className="flex-1 min-h-0 min-w-0 relative">
+          <ApLeafletMap
+            className="h-full w-full"
+            basemap="satellite"
+            fitToState
+            interactive
+            clickMode={placing ? 'inspect' : 'pan'}
+            onMapClick={handleMapClick}
+            indiaStatePick={placing ? 'pass' : 'pick'}
+            onIndiaStatePick={handleStatePick}
+            selectedIndiaStateName={pickedState?.name ?? null}
+            boundsView={boundsView}
+            markers={markers}
+            geoJsonOverlays={geoJsonOverlays}
+            filterMapLayers={poiLonLats.length ? filterMapLayers : undefined}
+            layerClipFeature={corridorClipFeature}
+            suppressUnclippedRoadTiles={poiLonLats.length > 0}
+            apOnlyPermanentStateLabels
+            showStateBorder={mapOn('lyr-state-border')}
+            showDistricts={mapOn('lyr-districts')}
+            showMandals={mapOn('lyr-mandals')}
+            showVillages={mapOn('lyr-villages')}
+            showPoliceStations={mapOn('lyr-pss')}
+            showBorderPs={mapOn('lyr-border-ps')}
+            showProposedAnpr={mapOn('lyr-proposed-anpr')}
+            showApNeighborStates={mapOn('lyr-ap-neighbor-states')}
+            showAobDists={mapOn('lyr-aob-dists')}
+            showKmzVillages={mapOn('lyr-kmz-villages')}
+            showPsBorderArea={mapOn('lyr-ps-border-area')}
+            showAtlasMapData={mapOn('lyr-atlas-map-data')}
+            showTalukGis={mapOn('lyr-taluk-gis')}
           showVspVillagePts={mapOn('lyr-vsp-village-pts')}
           showDistrictsGisHist={mapOn('lyr-districts-gis-hist')}
           showStateGisHist={mapOn('lyr-state-gis-hist')}
-          showGraticule={mapOn('lyr-soi-grid')}
           showHighways={mapOn('lyr-highways')}
           showTrails={mapOn('lyr-forest-trails')}
           roadNetworkAlwaysOn
           showOpsMainRoads={mapOn('lyr-ops-main-roads')}
           showOpsInternalRoads={mapOn('lyr-ops-internal-roads')}
+          showGanjaTransportRoutes={mapOn('lyr-ganja-transport-routes')}
+          showRoadsAsrClassified={mapOn('lyr-roads-asr-classified')}
+          showAsrRoadNetwork={mapOn('lyr-asr-road-network')}
+          showRouteModeling={mapOn('lyr-route-modeling')}
           showApRoadsMajor={mapOn('lyr-ap-roads-major')}
           showApRoadsFull={mapOn('lyr-ap-roads-full')}
-          showOpsVspRoads={mapOn('lyr-ops-vsp-roads')}
           showRailways={mapOn('lyr-railways')}
           showRivers={mapOn('lyr-rivers')}
-          showWaterbodies={mapOn('lyr-waterbodies')}
           showAgencyRoutes={mapOn('lyr-drug-routes')}
           showAsrBoundary={mapOn('lyr-asr-agency')}
           showCheckPosts={mapOn('lyr-checkposts')}
@@ -809,20 +936,23 @@ export const RoadsRoutingNewWorkspace: React.FC<RoadsRoutingNewWorkspaceProps> =
           initialCenter={INDIA_CENTER}
           initialZoom={INDIA_DEFAULT_ZOOM}
           viewTarget={viewTarget}
-          layoutRevision={`roads-routing-new:npoi:${pois.length}:${savedLayers.map((l) => `${l.id}:${l.enabled ? 1 : 0}`).join(',')}:${totalFeatures}:${pickedState?.name ?? ''}:${placing ? 'place' : 'browse'}:corridor`}
-        />
-        <div
-          data-testid="roads-routing-new-map-hint"
-          className="absolute top-2 left-2 z-[500] pointer-events-none rounded bg-black/70 text-white px-2 py-1 text-[10px] font-semibold shadow-sm"
-        >
-          {mapHint}
-        </div>
-        {loadingAny && (
-          <div className="absolute bottom-3 left-1/2 -translate-x-1/2 z-[500] rounded bg-black/75 text-white px-3 py-1.5 text-[11px] font-semibold">
-            Spatially matching road geometries to POIs…
+            layoutRevision={`roads-routing-new:npoi:${pois.length}:${poiEntries.length}:${savedLayers.map((l) => `${l.id}:${l.enabled ? 1 : 0}`).join(',')}:${totalFeatures}:${pickedState?.name ?? ''}:${placing ? 'place' : 'browse'}:corridor:${pois
+              .map((p) => `${p.id}:${p.lat.toFixed(5)},${p.lon.toFixed(5)}`)
+              .join('|')}`}
+          />
+          <div
+            data-testid="roads-routing-new-map-hint"
+            className="absolute top-2 left-7 z-[500] pointer-events-none rounded bg-black/70 text-white px-2 py-1 text-[10px] font-semibold shadow-sm"
+          >
+            {mapHint}
           </div>
-        )}
-      </div>
+          {loadingAny && (
+            <div className="absolute bottom-3 left-1/2 -translate-x-1/2 z-[500] rounded bg-black/75 text-white px-3 py-1.5 text-[11px] font-semibold">
+              Spatially matching road geometries to POIs…
+            </div>
+          )}
+        </div>
+      </WorkspaceSidebarSplit>
     </div>
   );
 };

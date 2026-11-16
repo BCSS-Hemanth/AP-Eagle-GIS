@@ -7,6 +7,7 @@ import {
   shouldShowPermanentStateLabel,
   stateLabelLatLng,
   stateMapLabel,
+  tinyIslandCalloutLatLngs,
 } from './useIndiaStates';
 
 describe('India states overview assets', () => {
@@ -94,5 +95,19 @@ describe('India states overview assets', () => {
     expect(stateLabelLatLng(mk('Assam', 90.761, 26.0544))).toEqual([26.32, 92.9]);
     expect(stateLabelLatLng(mk('Gujarat', 72.0125, 22.4163))).toEqual([22.9, 71.7]);
     expect(stateLabelLatLng(mk('West Bengal', 88.0977, 24.3894))).toEqual([23.4, 87.9]);
+  });
+
+  it('places Lakshadweep label west of the chain and emits overview callout dots', () => {
+    const lak = JSON.parse(
+      readFileSync(resolve(process.cwd(), 'public/geo/india-states.geojson'), 'utf8')
+    ).features.find(
+      (f: GeoJSON.Feature) =>
+        (f.properties as { state_name?: string }).state_name === 'Lakshadweep'
+    ) as GeoJSON.Feature;
+    expect(lak).toBeTruthy();
+    expect(stateLabelLatLng(lak)).toEqual([10.55, 71.85]);
+    const dots = tinyIslandCalloutLatLngs(lak, 8);
+    expect(dots.length).toBeGreaterThan(3);
+    expect(dots.every(([lat, lon]) => lat > 8 && lat < 12 && lon > 72 && lon < 74)).toBe(true);
   });
 });

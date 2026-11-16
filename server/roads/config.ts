@@ -32,10 +32,6 @@ export function apRoadsShpPath(): string {
   return path.join(gisSourceRoot(), 'Admin', 'Admin', 'ap_road network', 'ap_roads.shp');
 }
 
-export function vspRoadsShpPath(): string {
-  return path.join(gisSourceRoot(), 'ops_lyrs', 'ops_lyrs', 'vsp road', 'VSP.shp');
-}
-
 export function roadsApiPort(): number {
   return Number(process.env.ROADS_API_PORT ?? 8787);
 }
@@ -47,7 +43,3 @@ export function roadsApiHost(): string {
 export function geojsonFeatureLimit(): number {
   return Number(process.env.ROADS_GEOJSON_FEATURE_LIMIT ?? 25000);
 }
-
-/** APSAC / SOI Lambert for OPS VSP.shp */
-export const VSP_LCC_PROJ4 =
-  '+proj=lcc +lat_1=13.75 +lat_2=18.75 +lat_0=16.25543305555556 +lon_0=80.875 +x_0=1000000 +y_0=1000000 +datum=WGS84 +units=m +no_defs';

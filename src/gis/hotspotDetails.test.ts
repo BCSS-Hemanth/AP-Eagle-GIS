@@ -3,6 +3,8 @@ import {
   HOTSPOT_POPUP,
   hotspotDetailsFromFeature,
   hotspotDetailsHtml,
+  hotspotTooltipClampDelta,
+  hotspotTooltipMaxHeightPx,
   resolveHotspotAdminContext,
 } from './hotspotDetails';
 
@@ -113,6 +115,42 @@ describe('hotspotDetailsFromFeature', () => {
     expect(d.district).toBe('Alluri Sitharama Raju');
     expect(d.mandal).toBe('Ananthagiri');
     expect(d.state).toBe('AP');
+  });
+});
+
+describe('hotspotTooltipClampDelta', () => {
+  it('pushes a top-clipped card down into the map', () => {
+    const { dx, dy } = hotspotTooltipClampDelta(
+      { top: 40, left: 200, right: 420, bottom: 460 },
+      { top: 100, left: 0, right: 900, bottom: 700 },
+      8
+    );
+    expect(dx).toBe(0);
+    expect(dy).toBe(68);
+  });
+
+  it('keeps an in-bounds card unmoved', () => {
+    expect(
+      hotspotTooltipClampDelta(
+        { top: 200, left: 200, right: 420, bottom: 500 },
+        { top: 100, left: 0, right: 900, bottom: 700 },
+        8
+      )
+    ).toEqual({ dx: 0, dy: 0 });
+  });
+
+  it('top-aligns when the card is taller than the map', () => {
+    const { dy } = hotspotTooltipClampDelta(
+      { top: 50, left: 200, right: 420, bottom: 900 },
+      { top: 100, left: 0, right: 900, bottom: 700 },
+      8
+    );
+    expect(dy).toBe(58);
+  });
+
+  it('sizes max height from the map pane', () => {
+    expect(hotspotTooltipMaxHeightPx(500, 8)).toBe(484);
+    expect(hotspotTooltipMaxHeightPx(100, 8)).toBe(HOTSPOT_POPUP.minVisiblePx);
   });
 });
 

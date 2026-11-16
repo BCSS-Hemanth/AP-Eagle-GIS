@@ -3,7 +3,6 @@ import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { ADMIN_GIS_SOURCE_SAFETY, assertAdminReplaceAllowed } from './adminGisSourceSafety';
 import { INITIAL_GIS_LAYERS } from '../data/apGisData';
-import { GIS_SOURCE_ADMIN_LAYERS } from './gisSourceCatalog';
 
 describe('Admin GIS-Source safety gates', () => {
   it('blocks replacing primary district drill and India overview with undivided source', () => {
@@ -32,13 +31,6 @@ describe('Admin GIS-Source safety gates', () => {
     expect(byId['lyr-districts-gis-hist']?.sourceTable).toContain('ap_districts_gis_source');
     expect(byId['lyr-districts-gis-hist']?.featureCount).toBe(25);
     expect(byId['lyr-state-gis-hist']?.sourceTable).toContain('ap_state_gis_source');
-    expect(byId['lyr-soi-grid']?.geometryType).toBe('Point');
-    const disk = resolve(
-      process.cwd(),
-      'public',
-      GIS_SOURCE_ADMIN_LAYERS.soi50k.replace(/^\//, '')
-    );
-    const soi = JSON.parse(readFileSync(disk, 'utf8'));
-    expect(soi.features[0]?.geometry?.type).toBe('Point');
+    expect(byId['lyr-soi-grid']).toBeUndefined();
   });
 });

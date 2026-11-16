@@ -18,10 +18,13 @@ export type RoadsRoutingNewLayerConfig = RoadsRoutingLayerConfig;
 export const ROADS_ROUTING_NEW_VISUAL_LAYER_IDS = [
   'lyr-highways',
   'lyr-ap-roads-full',
-  'lyr-ops-vsp-roads',
   'lyr-ap-roads-major',
   'lyr-ops-main-roads',
   'lyr-ops-internal-roads',
+  'lyr-ganja-transport-routes',
+  'lyr-roads-asr-classified',
+  'lyr-asr-road-network',
+  'lyr-route-modeling',
   'lyr-forest-trails',
 ] as const;
 
@@ -29,10 +32,13 @@ export const ROADS_ROUTING_NEW_VISUAL_LAYER_IDS = [
 export const ROADS_ROUTING_NEW_LAYER_COLORS: Record<string, string> = {
   'lyr-highways': '#ef4444',
   'lyr-ap-roads-full': '#a78bfa',
-  'lyr-ops-vsp-roads': '#a78bfa',
   'lyr-ap-roads-major': '#4ade80',
   'lyr-ops-main-roads': '#fb923c',
   'lyr-ops-internal-roads': '#c4b5fd',
+  'lyr-ganja-transport-routes': '#fb7185',
+  'lyr-roads-asr-classified': '#ff1f8f',
+  'lyr-asr-road-network': '#00e8ff',
+  'lyr-route-modeling': '#7c3aed',
   'lyr-forest-trails': '#a3e635',
 };
 
@@ -50,7 +56,6 @@ export type RoadRouteStroke = { color: string; weight: number };
 
 const CLASSIFIED_NETWORK_LAYER_IDS = new Set([
   'lyr-ap-roads-full',
-  'lyr-ops-vsp-roads',
   'lyr-ap-roads-major',
   'lyr-highways',
 ]);
@@ -76,7 +81,7 @@ export function routeStrokeForProperties(
 }
 
 /**
- * Full and VSP extracts include every cart track. Keep NH, SH, and district roads
+ * Full extract includes every cart track. Keep NH, SH, and district roads
  * and draw the whole segment so the line reads as a route.
  * Other layers stay radius-clipped.
  */
@@ -84,7 +89,7 @@ export function displayRoadsForLayer(
   layerId: string,
   fc: GeoJSON.FeatureCollection
 ): { fc: GeoJSON.FeatureCollection; clip: boolean } {
-  if (layerId === 'lyr-ap-roads-full' || layerId === 'lyr-ops-vsp-roads') {
+  if (layerId === 'lyr-ap-roads-full') {
     return {
       fc: {
         type: 'FeatureCollection',
@@ -103,7 +108,7 @@ export function routingNewLegendEntries(
   if (layerId === 'lyr-highways') {
     return [{ label: ROAD_ROUTE_CLASS_STROKES.national.label, color: ROAD_ROUTE_CLASS_STROKES.national.color }];
   }
-  if (layerId === 'lyr-ap-roads-full' || layerId === 'lyr-ops-vsp-roads' || layerId === 'lyr-ap-roads-major') {
+  if (layerId === 'lyr-ap-roads-full' || layerId === 'lyr-ap-roads-major') {
     return [
       { label: ROAD_ROUTE_CLASS_STROKES.national.label, color: ROAD_ROUTE_CLASS_STROKES.national.color },
       { label: ROAD_ROUTE_CLASS_STROKES.state.label, color: ROAD_ROUTE_CLASS_STROKES.state.color },
@@ -129,7 +134,7 @@ export function isRoadsRoutingNewCatalogLayer(layer: GisLayer): boolean {
 
 /**
  * Drawn from the live map when the Eye is on (same path as Roads Routing).
- * Includes PostGIS bbox layers (full / VSP) so Eye-on shows the network without
+ * Includes PostGIS bbox layers (full) so Eye-on shows the network without
  * waiting on POI radius overlays.
  */
 const ROUTING_NEW_MAP_FLAG_LAYER_IDS = new Set([
@@ -137,9 +142,12 @@ const ROUTING_NEW_MAP_FLAG_LAYER_IDS = new Set([
   'lyr-forest-trails',
   'lyr-ops-main-roads',
   'lyr-ops-internal-roads',
+  'lyr-ganja-transport-routes',
+  'lyr-roads-asr-classified',
+  'lyr-asr-road-network',
+  'lyr-route-modeling',
   'lyr-ap-roads-major',
   'lyr-ap-roads-full',
-  'lyr-ops-vsp-roads',
 ]);
 
 /**

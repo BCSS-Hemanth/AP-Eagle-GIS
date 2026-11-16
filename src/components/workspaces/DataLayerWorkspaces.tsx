@@ -1,11 +1,9 @@
 import React, { useState } from 'react';
-import { Grid, Save } from 'lucide-react';
+import { Save } from 'lucide-react';
 import { DigitizedFeature, GisLayer, WorkspaceId } from '../../types/gis';
 import type { IngestedLayer } from '../../gis/ingest';
-import { ApLeafletMap } from '../gis/ApLeafletMap';
 import {
   CATALOG_SCOPE,
-  CATALOG_WORKSPACE_IDS,
   canSaveToRoadsModules,
   layersInCatalogScope,
   type CatalogWorkspaceId,
@@ -18,10 +16,8 @@ import {
 import { isRoadsRoutingNewVisualLayer } from '../../gis/roadsRoutingNewLayers';
 import { SavedLayersHoverMenu } from '../gis/SavedLayersHoverMenu';
 
-type DataLayerWorkspaceId = CatalogWorkspaceId | 'raster-imagery';
-
 interface DataLayerProps {
-  workspace: DataLayerWorkspaceId;
+  workspace: CatalogWorkspaceId;
   layers: GisLayer[];
   onToggleLayer: (id: string) => void;
   onChangeLayerOpacity: (id: string, opacity: number) => void;
@@ -84,24 +80,43 @@ export const DataLayerWorkspaces: React.FC<DataLayerProps> = ({
   // Catalog filter
   const [catalogSearch, setCatalogSearch] = useState('');
 
-  if ((CATALOG_WORKSPACE_IDS as readonly string[]).includes(workspace)) {
-    const catalogId = workspace as CatalogWorkspaceId;
-    const meta = CATALOG_SCOPE[catalogId];
-    const scoped = layersInCatalogScope(catalogId, layers);
-    const filtered = scoped
-      .filter(
-        (l) =>
-          l.name.toLowerCase().includes(catalogSearch.toLowerCase()) ||
-          l.sourceTable.toLowerCase().includes(catalogSearch.toLowerCase())
-      )
-      // Road line layers for Roads Routing New first so they are easy to tick before Save.
-      .slice()
-      .sort((a, b) => {
-        const ar = isRoadsRoutingNewVisualLayer(a.id) ? 0 : 1;
-        const br = isRoadsRoutingNewVisualLayer(b.id) ? 0 : 1;
-        return ar - br;
-      });
-    const showRoadsSave = canSaveToRoadsModules(catalogId);
+  const catalogId = workspace;
+  const meta = CATALOG_SCOPE[catalogId];
+  const scoped = layersInCatalogScope(catalogId, layers);
+  const allScopedSelected =
+    scoped.length > 0 && scoped.every((layer) => layer.enabled);
+  const filtered = scoped
+    .filter(
+      (l) =>
+        l.name.toLowerCase().includes(catalogSearch.toLowerCase()) ||
+        l.sourceTable.toLowerCase().includes(catalogSearch.toLowerCase())
+    )
+    // Road line layers for Roads Routing New first so they are easy to tick before Save.
+    .slice()
+    .sort((a, b) => {
+      const ar = isRoadsRoutingNewVisualLayer(a.id) ? 0 : 1;
+      const br = isRoadsRoutingNewVisualLayer(b.id) ? 0 : 1;
+      return ar - br;
+    });
+  const showRoadsSave = canSaveToRoadsModules(catalogId);
+
+  const handleSelectAllToggle = () => {
+    if (!scoped.length) {
+      onTriggerToast('No layers available in this module');
+      return;
+    }
+    if (allScopedSelected) {
+      for (const layer of scoped) {
+        if (layer.enabled) onToggleLayer(layer.id);
+      }
+      onTriggerToast(`Unselected all ${scoped.length} layer(s) in ${meta.title}`);
+      return;
+    }
+    for (const layer of scoped) {
+      if (!layer.enabled) onToggleLayer(layer.id);
+    }
+    onTriggerToast(`Selected all ${scoped.length} layer(s) in ${meta.title}`);
+  };
     // Each Save button has an independent hover list (Visible minus that button's exclusions).
     const dashboardHoverLayers = layersForCatalogHover(
       layers,
@@ -133,13 +148,24 @@ export const DataLayerWorkspaces: React.FC<DataLayerProps> = ({
                 <p className="text-[11px] text-on-surface-variant mt-1">{meta.blurb}</p>
               ) : null}
             </div>
-            <input
-              type="text"
-              value={catalogSearch}
-              onChange={(e) => setCatalogSearch(e.target.value)}
-              placeholder="Filter layers or PostGIS table..."
-              className="h-8 w-64 max-w-full shrink-0 px-2.5 rounded border border-outline-variant/50 bg-surface-container-lowest text-xs"
-            />
+            <div className="flex flex-wrap items-center justify-end gap-2 shrink-0">
+              <button
+                type="button"
+                data-testid="catalog-select-all-layers"
+                onClick={handleSelectAllToggle}
+                disabled={!scoped.length}
+                className="h-8 px-3 rounded border border-sky-300 bg-sky-100 text-sky-900 text-xs font-semibold cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed hover:bg-sky-200/80"
+              >
+                {allScopedSelected ? 'Unselect All Layers' : 'Select All Layers'}
+              </button>
+              <input
+                type="text"
+                value={catalogSearch}
+                onChange={(e) => setCatalogSearch(e.target.value)}
+                placeholder="Filter layers or PostGIS table..."
+                className="h-8 w-64 max-w-full px-2.5 rounded border border-outline-variant/50 bg-surface-container-lowest text-xs"
+              />
+            </div>
           </div>
           <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2 pt-2">
             <div className="flex flex-wrap items-center gap-2">
@@ -250,13 +276,6 @@ export const DataLayerWorkspaces: React.FC<DataLayerProps> = ({
               >
                 Open Dashboard
               </button>
-              <button
-                type="button"
-                onClick={() => onSwitchWorkspace('ndps-spatial-dashboard')}
-                className="h-8 px-3 rounded bg-primary text-on-primary text-xs font-semibold cursor-pointer"
-              >
-                View Active Map
-              </button>
             </div>
           </div>
         </div>
@@ -272,9 +291,7 @@ export const DataLayerWorkspaces: React.FC<DataLayerProps> = ({
               </tr>
             </thead>
             <tbody className="divide-y divide-outline-variant/25">
-              {filtered.map((lyr) => {
-                const forRoutingNew = isRoadsRoutingNewVisualLayer(lyr.id);
-                return (
+              {filtered.map((lyr) => (
                 <tr
                   key={lyr.id}
                   role="button"
@@ -287,7 +304,7 @@ export const DataLayerWorkspaces: React.FC<DataLayerProps> = ({
                       onToggleLayer(lyr.id);
                     }
                   }}
-                  className={`cursor-pointer hover:bg-surface-container-low/50 ${forRoutingNew ? 'bg-primary/[0.03]' : ''}`}
+                  className="cursor-pointer hover:bg-surface-container-low/50"
                   title="Click row to toggle layer visibility"
                 >
                   <td className="py-2 px-3">
@@ -297,66 +314,17 @@ export const DataLayerWorkspaces: React.FC<DataLayerProps> = ({
                       readOnly
                       tabIndex={-1}
                       className="w-4 h-4 accent-primary pointer-events-none"
-                      title={
-                        forRoutingNew
-                          ? 'Road line layer — use with Save to Roads Routing New'
-                          : 'Catalog visibility (not a Roads Routing New road geometry)'
-                      }
+                      title="Toggle layer visibility"
                     />
                   </td>
-                  <td className="py-2 px-3 font-semibold text-primary">
-                    <span className="inline-flex items-center gap-1.5 flex-wrap">
-                      {lyr.name}
-                      {forRoutingNew && (
-                        <span
-                          className="text-[9px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded bg-primary/15 text-primary"
-                          title="Eligible for Save to Roads Routing New"
-                        >
-                          Road · New
-                        </span>
-                      )}
-                    </span>
-                  </td>
+                  <td className="py-2 px-3 font-semibold text-primary">{lyr.name}</td>
                   <td className="py-2 px-3 font-mono text-[11px] text-secondary">{lyr.sourceTable}</td>
                   <td className="py-2 px-3">{lyr.geometryType}</td>
                 </tr>
-                );
-              })}
+              ))}
             </tbody>
           </table>
         </div>
       </div>
     );
-  }
-
-  return (
-    <div className="p-4 pb-10 lg:p-6 lg:pb-12 space-y-4 max-w-[1440px] mx-auto">
-      <div className="border-b border-outline-variant/35 pb-3">
-        <h1 className="text-xl font-bold text-primary tracking-tight">
-          Raster Imagery &amp; SOI Toposheet Mosaic
-        </h1>
-      </div>
-
-      <div className="gis-map-host h-72 rounded border border-outline-variant/40">
-        <ApLeafletMap
-          basemap="topo"
-          showStateBorder
-          showDistricts={false}
-          showPoliceStations={false}
-          showSoiTopo={false}
-          showImageryOverlay={false}
-          initialCenter={[17.88, 82.12]}
-          initialZoom={9}
-        />
-      </div>
-
-      <div className="rounded border border-dashed border-outline-variant/50 bg-surface-container-lowest px-4 py-8 text-center">
-        <Grid className="w-6 h-6 mx-auto text-on-surface-variant/70 mb-2" />
-        <p className="text-sm font-semibold text-primary">No raster or toposheet data</p>
-        <p className="text-[11px] text-on-surface-variant mt-1">
-          Sheet inventory and imagery overlays have been cleared from this module.
-        </p>
-      </div>
-    </div>
-  );
 };
