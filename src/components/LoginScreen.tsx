@@ -6,8 +6,8 @@ import { EagleCrest } from './EagleCrest';
 
 export const LoginScreen: React.FC = () => {
   const { login } = useAuth();
-  const [username, setUsername] = useState('admin');
-  const [password, setPassword] = useState('admin123');
+  const [username, setUsername] = useState('BCSS-Garuda');
+  const [password, setPassword] = useState('garuda@123');
   const [error, setError] = useState<string | null>(null);
 
   const onSubmit = (e: React.FormEvent) => {

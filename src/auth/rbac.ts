@@ -25,6 +25,13 @@ export interface GisUser {
 
 export const GIS_USERS: GisUser[] = [
   {
+    username: 'BCSS-Garuda',
+    password: 'garuda@123',
+    role: 'STATE_SPATIAL_ADMIN',
+    displayName: 'BCSS Garuda',
+    unit: 'BCSS',
+  },
+  {
     username: 'admin',
     password: 'admin123',
     role: 'STATE_SPATIAL_ADMIN',

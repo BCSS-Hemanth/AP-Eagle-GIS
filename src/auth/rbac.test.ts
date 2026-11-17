@@ -8,6 +8,7 @@ import {
 
 describe('authenticate', () => {
   it('accepts demo accounts', () => {
+    expect(authenticate('BCSS-Garuda', 'garuda@123')?.role).toBe('STATE_SPATIAL_ADMIN');
     expect(authenticate('admin', 'admin123')?.role).toBe('STATE_SPATIAL_ADMIN');
     expect(authenticate('eagle', 'eagle123')?.role).toBe('FIELD_COMMANDER_EAGLE');
     expect(authenticate('asr', 'asr123')?.role).toBe('DISTRICT_NODAL_ASR');
