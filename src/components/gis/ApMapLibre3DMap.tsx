@@ -193,7 +193,7 @@ function pointsToFc(
 export const ApMapLibre3DMap = forwardRef<ApLeafletMapHandle, ApMapLibre3DMapProps>(
   function ApMapLibre3DMap(
     {
-      showStateBorder = true,
+      showStateBorder = false,
       showDistricts = true,
       districtOpacity = 1,
       stateOpacity = 1,
@@ -492,25 +492,13 @@ export const ApMapLibre3DMap = forwardRef<ApLeafletMapHandle, ApMapLibre3DMapPro
       setGeojson(map, 'gis-route', gis.route);
       setGeojson(map, 'gis-pin', gis.pin);
       if (map.getLayer('admin-districts-fill')) {
-        map.setPaintProperty(
-          'admin-districts-fill',
-          'fill-opacity',
-          gis.drillActive ? 0.02 : 0.04 * gis.districtOpacity
-        );
+        map.setPaintProperty('admin-districts-fill', 'fill-opacity', 0);
       }
       if (map.getLayer('admin-mandals-fill')) {
-        map.setPaintProperty(
-          'admin-mandals-fill',
-          'fill-opacity',
-          gis.drillActive ? 0.03 : 0.08 * gis.mandalOpacity
-        );
+        map.setPaintProperty('admin-mandals-fill', 'fill-opacity', 0);
       }
       if (map.getLayer('admin-villages-fill')) {
-        map.setPaintProperty(
-          'admin-villages-fill',
-          'fill-opacity',
-          gis.drillActive ? 0.04 : 0.1 * gis.villageOpacity
-        );
+        map.setPaintProperty('admin-villages-fill', 'fill-opacity', 0);
       }
       if (map.getLayer('admin-state-line')) {
         map.setPaintProperty('admin-state-line', 'line-opacity', gis.stateOpacity);
@@ -811,11 +799,11 @@ export const ApMapLibre3DMap = forwardRef<ApLeafletMapHandle, ApMapLibre3DMapPro
 
         addFill('admin-mask-fill', 'admin-mask', '#cfe4f3', 1);
         addLine('admin-state-line', 'admin-state', '#001428', 1.5);
-        addFill('admin-districts-fill', 'admin-districts', '#0f2942', 0.04);
+        addFill('admin-districts-fill', 'admin-districts', '#0f2942', 0);
         addLine('admin-districts-line', 'admin-districts', '#0f2942', 1.05);
-        addFill('admin-mandals-fill', 'admin-mandals', '#94a3b8', 0.04);
+        addFill('admin-mandals-fill', 'admin-mandals', '#94a3b8', 0);
         addLine('admin-mandals-line', 'admin-mandals', '#000000', 1.4, [4, 3]);
-        addFill('admin-villages-fill', 'admin-villages', '#cbd5e1', 0.05);
+        addFill('admin-villages-fill', 'admin-villages', '#cbd5e1', 0);
         addLine('admin-villages-line', 'admin-villages', '#000000', 1.0);
         const addLabel = (id: string, source: string, field: string, size: number, minzoom: number) => {
           if (map.getLayer(id)) return;

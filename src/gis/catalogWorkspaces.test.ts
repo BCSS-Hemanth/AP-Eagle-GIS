@@ -47,7 +47,6 @@ describe('catalogWorkspaces', () => {
     expect(admin.has('lyr-aob-dists')).toBe(true);
     expect(admin.has('lyr-kmz-villages')).toBe(true);
     expect(admin.has('lyr-ps-border-area')).toBe(true);
-    expect(admin.has('lyr-atlas-map-data')).toBe(true);
     expect(admin.has('lyr-asr-agency')).toBe(true);
     expect(ops.has('lyr-asr-agency')).toBe(false);
     expect(roadNet.has('lyr-roads-asr-classified')).toBe(true);

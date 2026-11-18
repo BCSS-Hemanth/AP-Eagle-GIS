@@ -36,6 +36,8 @@ export interface AtlasDistrictConfig {
   appliedLayerIds: string[];
   layerVisibility: Record<string, boolean>;
   layerOpacity: Record<string, number>;
+  /** Custom map colours for applied layers only (Atlas-local). */
+  layerColors: Record<string, string>;
 }
 
 export interface AtlasConfig {

@@ -4,7 +4,12 @@ import { INITIAL_GIS_LAYERS } from '../data/apGisData';
 /** Last catalog snapshot applied to the GIS Dashboard map. */
 export const DASHBOARD_LAYER_STORAGE_KEY = 'ap-eagle.dashboard-layers.v1';
 
-export type DashboardLayerEntry = { enabled: boolean; opacity: number };
+export type DashboardLayerEntry = {
+  enabled: boolean;
+  opacity: number;
+  /** Optional map stroke/fill override (Roads Routing / Roads Routing New). */
+  color?: string;
+};
 export type DashboardLayerConfig = Record<string, DashboardLayerEntry>;
 
 export type JsonStorage = {
@@ -12,8 +17,8 @@ export type JsonStorage = {
   setItem: (key: string, value: string) => void;
 };
 
-/** Dashboard defaults to India/state frame; districts appear after drill-in or catalog enable. */
-export const DASHBOARD_DEFAULT_ON = ['lyr-state-border'] as const;
+/** No layers on by default — user enables from catalog / Save to module. */
+export const DASHBOARD_DEFAULT_ON = [] as const;
 
 export function layerConfigFromGisLayers(layers: GisLayer[]): DashboardLayerConfig {
   const out: DashboardLayerConfig = {};
@@ -73,9 +78,11 @@ export function destinationConfigFromSelection(
     const selected = selectedIds.has(layer.id);
     if (mode === 'assigned' && !selected) continue;
     if (mode === 'assigned') {
+      const prev = previous?.[layer.id];
       out[layer.id] = {
         enabled: false,
-        opacity: previous?.[layer.id]?.opacity ?? layer.opacity,
+        opacity: prev?.opacity ?? layer.opacity,
+        ...(prev?.color ? { color: prev.color } : {}),
       };
       continue;
     }
@@ -156,10 +163,10 @@ export function layerOpacity(layers: GisLayer[], id: string, fallback = 1): numb
 /** Map flags the Dashboard (and catalog preview) can actually render from catalog rows. */
 export function leafletFlagsFromLayers(layers: GisLayer[]) {
   return {
-    showStateBorder: isLayerOn(layers, 'lyr-state-border', true),
-    showDistricts: isLayerOn(layers, 'lyr-districts', true),
+    showStateBorder: false,
+    showDistricts: isLayerOn(layers, 'lyr-districts'),
     districtOpacity: layerOpacity(layers, 'lyr-districts'),
-    stateOpacity: layerOpacity(layers, 'lyr-state-border'),
+    stateOpacity: 1,
     showMandals: isLayerOn(layers, 'lyr-mandals'),
     showVillages: isLayerOn(layers, 'lyr-villages'),
     mandalOpacity: layerOpacity(layers, 'lyr-mandals'),
@@ -192,7 +199,6 @@ export function leafletFlagsFromLayers(layers: GisLayer[]) {
     showAobDists: isLayerOn(layers, 'lyr-aob-dists'),
     showKmzVillages: isLayerOn(layers, 'lyr-kmz-villages'),
     showPsBorderArea: isLayerOn(layers, 'lyr-ps-border-area'),
-    showAtlasMapData: isLayerOn(layers, 'lyr-atlas-map-data'),
     showRoadsAsrClassified: isLayerOn(layers, 'lyr-roads-asr-classified'),
     showAsrRoadNetwork: isLayerOn(layers, 'lyr-asr-road-network'),
     showRouteModeling: isLayerOn(layers, 'lyr-route-modeling'),

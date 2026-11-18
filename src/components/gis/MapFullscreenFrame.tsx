@@ -63,7 +63,7 @@ export const MapFullscreenFrame: React.FC<MapFullscreenFrameProps> = ({
           data-testid={exitTestId}
           onClick={onExit}
           title="Exit full screen (Esc)"
-          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-bold cursor-pointer bg-white text-[#0b3d7a] border border-[#0b3d7a]/30 shadow-md hover:bg-sky-50"
+          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-bold cursor-pointer bg-surface-container-lowest/95 text-primary border border-outline-variant/50 shadow-[0_6px_18px_rgba(11,28,48,0.14)] hover:bg-secondary-container/35 hover:border-secondary/40 backdrop-blur-sm"
         >
           <Minimize2 className="w-3.5 h-3.5" />
           <span>Exit full screen</span>

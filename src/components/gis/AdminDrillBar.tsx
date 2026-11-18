@@ -66,7 +66,7 @@ export const AdminDrillBar: React.FC<AdminDrillBarProps> = ({ drill, onChange })
   return (
     <div
       data-testid="admin-drill-bar"
-      className="pointer-events-auto inline-flex items-center gap-0.5 min-w-0 max-w-full bg-white/90 rounded px-1 py-px shadow-sm"
+      className="pointer-events-auto inline-flex items-center gap-1 min-w-0 max-w-full bg-white/95 rounded-md px-1.5 py-1 shadow-[0_4px_14px_rgba(11,28,48,0.12)] border border-outline-variant/45 backdrop-blur-sm"
       title={ADMIN_DRILL_SOURCE_NOTE}
     >
       {!onIndia && (
@@ -74,14 +74,14 @@ export const AdminDrillBar: React.FC<AdminDrillBarProps> = ({ drill, onChange })
           type="button"
           data-testid="admin-drill-back"
           onClick={() => onChange(parent)}
-          className="shrink-0 h-6 px-1 flex items-center gap-0.5 text-on-surface hover:bg-black/5 cursor-pointer text-[11px] font-bold rounded"
+          className="shrink-0 h-7 px-1.5 flex items-center gap-0.5 text-on-surface hover:bg-surface-container-low cursor-pointer text-[11px] font-bold rounded-md"
           title={backLabel(drill)}
         >
           <ChevronLeft className="w-3.5 h-3.5" />
           {backLabel(drill)}
         </button>
       )}
-      <nav className="flex items-center gap-px min-w-0 overflow-x-auto text-[11px] font-semibold">
+      <nav className="flex items-center gap-0.5 min-w-0 overflow-x-auto text-[11px] font-semibold">
         {crumbs.map((crumb, index) => {
           const current = isCurrent(crumb);
           const key =
@@ -94,10 +94,10 @@ export const AdminDrillBar: React.FC<AdminDrillBarProps> = ({ drill, onChange })
                 data-testid={`admin-drill-${key}`}
                 disabled={current}
                 onClick={() => goCrumb(crumb)}
-                className={`shrink-0 px-1 py-px rounded cursor-pointer ${
+                className={`shrink-0 px-1.5 py-0.5 rounded-md cursor-pointer ${
                   current
-                    ? 'bg-secondary-container/50 text-secondary'
-                    : 'text-on-surface hover:bg-black/5'
+                    ? 'bg-secondary-container/70 text-secondary'
+                    : 'text-on-surface hover:bg-surface-container-low'
                 }`}
               >
                 {crumb.label}

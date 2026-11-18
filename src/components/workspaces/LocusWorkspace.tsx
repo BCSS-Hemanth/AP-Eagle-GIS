@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ChevronDown,
   Download,
@@ -7,11 +7,14 @@ import {
   Layers,
   Maximize2,
   Minimize2,
+  Pin,
   RotateCcw,
   Trash2,
 } from 'lucide-react';
 import { ApLeafletMap, type ApLeafletMapHandle } from '../gis/ApLeafletMap';
+import { SavedLayerColorPicker } from '../gis/SavedLayerColorPicker';
 import { WorkspaceSidebarSplit } from '../gis/WorkspaceSidebarSplit';
+import { normalizeLayerColorMap, normalizeLayerHexColor } from '../../gis/layerColor';
 import {
   featureBbox,
   STATE_ADMIN_DRILL,
@@ -73,12 +76,63 @@ export const LocusWorkspace: React.FC<LocusWorkspaceProps> = ({
   const [loadingDistrict, setLoadingDistrict] = useState(false);
   const [displaying, setDisplaying] = useState(false);
   const [fitToken, setFitToken] = useState(0);
+  /** World overview until the user clicks the map (then India isolation). */
+  const [indiaIsolated, setIndiaIsolated] = useState(false);
   const setMapExpanded = (expanded: boolean) => onMapExpandedChange?.(expanded);
   const [openCats, setOpenCats] = useState<Record<LocusLayerCategory, boolean>>({
     administrative: false,
     operational: false,
     'road-network': false,
   });
+  /** When pinned, category stays expanded and ignores hover mouse-out collapse. */
+  const [pinnedCats, setPinnedCats] = useState<Record<LocusLayerCategory, boolean>>({
+    administrative: false,
+    operational: false,
+    'road-network': false,
+  });
+  const pinnedCatsRef = useRef(pinnedCats);
+  pinnedCatsRef.current = pinnedCats;
+  /** Debounce hover-collapse so pin↔scrollbar moves do not flicker the section. */
+  const hoverCloseTimersRef = useRef<Partial<Record<LocusLayerCategory, number>>>({});
+
+  const clearCatHoverClose = useCallback((id: LocusLayerCategory) => {
+    const timer = hoverCloseTimersRef.current[id];
+    if (timer == null) return;
+    window.clearTimeout(timer);
+    delete hoverCloseTimersRef.current[id];
+  }, []);
+
+  const openCatOnHover = useCallback(
+    (id: LocusLayerCategory) => {
+      clearCatHoverClose(id);
+      setOpenCats((prev) => (prev[id] ? prev : { ...prev, [id]: true }));
+    },
+    [clearCatHoverClose]
+  );
+
+  const scheduleCatHoverClose = useCallback(
+    (id: LocusLayerCategory) => {
+      if (pinnedCatsRef.current[id]) return;
+      clearCatHoverClose(id);
+      hoverCloseTimersRef.current[id] = window.setTimeout(() => {
+        delete hoverCloseTimersRef.current[id];
+        if (pinnedCatsRef.current[id]) return;
+        setOpenCats((prev) => (!prev[id] ? prev : { ...prev, [id]: false }));
+      }, 280);
+    },
+    [clearCatHoverClose]
+  );
+
+  useEffect(
+    () => () => {
+      for (const timer of Object.values(hoverCloseTimersRef.current)) {
+        if (timer != null) window.clearTimeout(timer);
+      }
+      hoverCloseTimersRef.current = {};
+    },
+    []
+  );
+
   const [exportOpen, setExportOpen] = useState(false);
   const [exportScope, setExportScope] = useState<LocusExportScope>('visible');
   const [exporting, setExporting] = useState(false);
@@ -100,6 +154,10 @@ export const LocusWorkspace: React.FC<LocusWorkspaceProps> = ({
   );
   const pending = locusHasPendingChanges(districtCfg);
   const compositionActive = districtCfg.appliedLayerIds.length > 0 && Boolean(districtFeature);
+  const showWorldOverview = !indiaIsolated && !compositionActive;
+  const allAppliedVisible =
+    districtCfg.appliedLayerIds.length > 0 &&
+    districtCfg.appliedLayerIds.every((id) => districtCfg.layerVisibility[id] !== false);
 
   const visibleIds = useMemo(
     () =>
@@ -109,6 +167,10 @@ export const LocusWorkspace: React.FC<LocusWorkspaceProps> = ({
     [compositionActive, districtCfg.appliedLayerIds, districtCfg.layerVisibility]
   );
   const mapFlags = useMemo(() => locusLeafletFlags(visibleIds), [visibleIds]);
+  const layerColorOverrides = useMemo(
+    () => normalizeLayerColorMap(districtCfg.layerColors),
+    [districtCfg.layerColors]
+  );
 
   const boundsView = useMemo(() => {
     if (!compositionActive || !districtFeature) return null;
@@ -247,6 +309,22 @@ export const LocusWorkspace: React.FC<LocusWorkspaceProps> = ({
     });
   };
 
+  /** Select or clear every layer in one Locus category (independent of other sections). */
+  const setCategorySelected = (cat: LocusLayerCategory, selectAll: boolean) => {
+    if (!districtId || !inventory) return;
+    const ids = locusLayersByCategory(inventory, cat).map((row) => row.layerId);
+    if (!ids.length) return;
+    const nextSelected = new Set(districtCfg.selectedLayerIds);
+    for (const id of ids) {
+      if (selectAll) nextSelected.add(id);
+      else nextSelected.delete(id);
+    }
+    writeDistrict({
+      ...districtCfg,
+      selectedLayerIds: [...nextSelected],
+    });
+  };
+
   const handleDisplayLayers = () => {
     if (!districtId || !meta || !inventory) {
       onTriggerToast('Select a configured district first');
@@ -264,6 +342,7 @@ export const LocusWorkspace: React.FC<LocusWorkspaceProps> = ({
     try {
       const visibility: Record<string, boolean> = { ...districtCfg.layerVisibility };
       const opacity: Record<string, number> = { ...districtCfg.layerOpacity };
+      const colors: Record<string, string> = { ...districtCfg.layerColors };
       for (const id of districtCfg.selectedLayerIds) {
         if (visibility[id] === undefined) visibility[id] = true;
         if (opacity[id] === undefined) opacity[id] = 100;
@@ -271,11 +350,15 @@ export const LocusWorkspace: React.FC<LocusWorkspaceProps> = ({
       for (const id of Object.keys(visibility)) {
         if (!districtCfg.selectedLayerIds.includes(id)) delete visibility[id];
       }
+      for (const id of Object.keys(colors)) {
+        if (!districtCfg.selectedLayerIds.includes(id)) delete colors[id];
+      }
       writeDistrict({
         ...districtCfg,
         appliedLayerIds: [...districtCfg.selectedLayerIds],
         layerVisibility: visibility,
         layerOpacity: opacity,
+        layerColors: colors,
       });
       setFitToken((n) => n + 1);
       onTriggerToast(
@@ -294,20 +377,63 @@ export const LocusWorkspace: React.FC<LocusWorkspaceProps> = ({
     });
   };
 
+  const setLayerColor = (layerId: string, color: string) => {
+    if (!districtId || !applied.has(layerId)) return;
+    const normalized = normalizeLayerHexColor(color);
+    if (!normalized) return;
+    writeDistrict({
+      ...districtCfg,
+      layerColors: { ...districtCfg.layerColors, [layerId]: normalized },
+    });
+  };
+
+  /** Hide/show every Displayed (applied) layer — same as toggling each Eye. */
+  const setAllEyes = (on: boolean) => {
+    if (!districtId || !districtCfg.appliedLayerIds.length) return;
+    const layerVisibility = { ...districtCfg.layerVisibility };
+    for (const id of districtCfg.appliedLayerIds) {
+      layerVisibility[id] = on;
+    }
+    writeDistrict({
+      ...districtCfg,
+      layerVisibility,
+    });
+  };
+
+  /** Hide/show Displayed layers in one category only — does not touch other sections. */
+  const setCategoryEyes = (cat: LocusLayerCategory, on: boolean) => {
+    if (!districtId || !inventory) return;
+    const ids = locusLayersByCategory(inventory, cat)
+      .map((row) => row.layerId)
+      .filter((id) => applied.has(id));
+    if (!ids.length) return;
+    const layerVisibility = { ...districtCfg.layerVisibility };
+    for (const id of ids) {
+      layerVisibility[id] = on;
+    }
+    writeDistrict({
+      ...districtCfg,
+      layerVisibility,
+    });
+  };
+
   const removeLayer = (layerId: string) => {
     if (!districtId) return;
     const selectedLayerIds = districtCfg.selectedLayerIds.filter((id) => id !== layerId);
     const appliedLayerIds = districtCfg.appliedLayerIds.filter((id) => id !== layerId);
     const layerVisibility = { ...districtCfg.layerVisibility };
     const layerOpacity = { ...districtCfg.layerOpacity };
+    const layerColors = { ...districtCfg.layerColors };
     delete layerVisibility[layerId];
     delete layerOpacity[layerId];
+    delete layerColors[layerId];
     writeDistrict({
       ...districtCfg,
       selectedLayerIds,
       appliedLayerIds,
       layerVisibility,
       layerOpacity,
+      layerColors,
     });
   };
 
@@ -387,14 +513,17 @@ export const LocusWorkspace: React.FC<LocusWorkspaceProps> = ({
         ref={mapRef}
         className="h-full w-full"
         basemap="satellite"
-        fitToState={!compositionActive}
+        fitToState={indiaIsolated && !compositionActive}
+        unconstrainedWorldView={showWorldOverview}
+        suppressIndiaOverviewMask={showWorldOverview}
         interactive
         highlightApFill={false}
         autoSatelliteOverlay={false}
         maskOutsideDrill={false}
         autoAdminOverlays={false}
         apOnlyPermanentStateLabels
-        showStateBorder={mapFlags.showStateBorder}
+        compactApStateLabel
+        layerColorOverrides={layerColorOverrides}
         showDistricts={mapFlags.showDistricts}
         districtOpacity={mapFlags.districtOpacity}
         stateOpacity={mapFlags.stateOpacity}
@@ -410,7 +539,6 @@ export const LocusWorkspace: React.FC<LocusWorkspaceProps> = ({
         showAobDists={mapFlags.showAobDists}
         showKmzVillages={mapFlags.showKmzVillages}
         showPsBorderArea={mapFlags.showPsBorderArea}
-        showAtlasMapData={mapFlags.showAtlasMapData}
         showTalukGis={mapFlags.showTalukGis}
         showVspVillagePts={mapFlags.showVspVillagePts}
         showDistrictsGisHist={mapFlags.showDistrictsGisHist}
@@ -442,16 +570,24 @@ export const LocusWorkspace: React.FC<LocusWorkspaceProps> = ({
         adminDrill={locusAdminDrill}
         boundsView={boundsView}
         geoJsonOverlays={districtHighlightOverlays}
-        layoutRevision={`locus:${districtId ?? 'none'}:${[...visibleIds].sort().join(',')}:${compositionActive ? 'on' : 'off'}:${fitToken}:${mapExpanded ? 'full' : 'shell'}`}
+        onMapClick={() => {
+          if (!indiaIsolated) setIndiaIsolated(true);
+        }}
+        layoutRevision={`locus:${districtId ?? 'none'}:${[...visibleIds].sort().join(',')}:${compositionActive ? 'on' : 'off'}:${fitToken}:${mapExpanded ? 'full' : 'shell'}:${indiaIsolated ? 'in' : 'world'}:${Object.entries(layerColorOverrides)
+          .sort(([a], [b]) => a.localeCompare(b))
+          .map(([id, c]) => `${id}:${c}`)
+          .join('|')}`}
       />
       <div className="absolute top-2 left-2 z-[500] pointer-events-none rounded bg-black/70 text-white px-2 py-1 text-[10px] font-semibold shadow-sm">
-        {!districtId
-          ? 'Select a district to compose a Locus map'
-          : loadingDistrict
-            ? 'Loading district boundary…'
-            : !compositionActive
-              ? 'Select layers, then Display the Layers'
-              : `${meta?.name ?? 'District'} · ${visibleIds.size} visible`}
+        {showWorldOverview
+          ? 'World view — click the map to isolate India'
+          : !districtId
+            ? 'Select a district to compose a Locus map'
+            : loadingDistrict
+              ? 'Loading district boundary…'
+              : !compositionActive
+                ? 'Select layers, then Display the Layers'
+                : `${meta?.name ?? 'District'} · ${visibleIds.size} visible`}
       </div>
     </div>
   );
@@ -466,12 +602,12 @@ export const LocusWorkspace: React.FC<LocusWorkspaceProps> = ({
       data-testid={mapExpanded ? 'locus-workspace-fullscreen' : 'locus-workspace'}
     >
       {!mapExpanded ? (
-        <header className="shrink-0 flex flex-wrap items-center justify-between gap-2 px-3 py-2 border-b border-outline-variant/40 bg-surface-container-lowest">
+        <header className="ws-page-header shrink-0 flex flex-wrap items-center justify-between gap-2 px-4 py-2.5">
           <div className="min-w-0">
-            <div className="text-[10px] font-bold uppercase tracking-wider text-secondary">
+            <div className="text-[10px] font-bold uppercase tracking-[0.14em] text-secondary">
               M3 · Locus
             </div>
-            <h1 className="text-base font-bold text-primary truncate">
+            <h1 className="text-[15px] font-bold text-primary truncate leading-tight">
               Locus
               {meta ? (
                 <span className="text-on-surface-variant font-semibold"> — {meta.name}</span>
@@ -481,7 +617,7 @@ export const LocusWorkspace: React.FC<LocusWorkspaceProps> = ({
           <div className="flex flex-wrap items-center gap-2">
             <button
               type="button"
-              className="h-8 px-2.5 rounded border border-outline-variant/50 text-[11px] font-semibold inline-flex items-center gap-1"
+              className="ws-btn"
               onClick={handleClear}
               disabled={!districtId}
             >
@@ -490,7 +626,7 @@ export const LocusWorkspace: React.FC<LocusWorkspaceProps> = ({
             </button>
             <button
               type="button"
-              className="h-8 px-2.5 rounded border border-outline-variant/50 text-[11px] font-semibold inline-flex items-center gap-1"
+              className="ws-btn"
               onClick={() => setMapExpanded(true)}
             >
               <Maximize2 className="w-3.5 h-3.5" />
@@ -499,7 +635,7 @@ export const LocusWorkspace: React.FC<LocusWorkspaceProps> = ({
             <button
               type="button"
               data-testid="locus-download-kmz"
-              className="h-8 px-3 rounded bg-primary text-on-primary text-[11px] font-bold inline-flex items-center gap-1.5 disabled:opacity-50"
+              className="ws-btn ws-btn-primary"
               disabled={!compositionActive || !districtCfg.appliedLayerIds.length}
               onClick={() => setExportOpen(true)}
             >
@@ -519,7 +655,7 @@ export const LocusWorkspace: React.FC<LocusWorkspaceProps> = ({
             data-testid="locus-exit-fullscreen"
             onClick={() => setMapExpanded(false)}
             title="Exit full screen (Esc)"
-            className="absolute top-2 right-3 z-[910] inline-flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-bold cursor-pointer bg-white text-[#0b3d7a] border border-[#0b3d7a]/30 shadow-md hover:bg-sky-50"
+            className="absolute top-2 right-3 z-[910] ws-btn shadow-[0_6px_18px_rgba(11,28,48,0.14)]"
           >
             <Minimize2 className="w-3.5 h-3.5" />
             Exit full screen
@@ -530,6 +666,7 @@ export const LocusWorkspace: React.FC<LocusWorkspaceProps> = ({
       <WorkspaceSidebarSplit
         testId="locus-sidebar-split"
         hideSidebar={mapExpanded}
+        asideClassName="w-full lg:w-[340px] shrink-0 border-b lg:border-b-0 lg:border-r border-outline-variant/40 ws-aside overflow-y-auto [scrollbar-gutter:stable] max-h-[42vh] lg:max-h-none"
         sidebar={
           <>
           <div className="p-3 space-y-3">
@@ -539,7 +676,7 @@ export const LocusWorkspace: React.FC<LocusWorkspaceProps> = ({
               </span>
               <select
                 data-testid="locus-district-select"
-                className="mt-1 w-full h-9 px-2.5 rounded border border-outline-variant/50 bg-surface-container-lowest text-xs font-semibold"
+                className="mt-1 ws-field"
                 value={districtId ?? ''}
                 onChange={(e) => {
                   const v = e.target.value;
@@ -585,6 +722,26 @@ export const LocusWorkspace: React.FC<LocusWorkspaceProps> = ({
                   <Layers className="w-3.5 h-3.5" />
                   {displaying ? 'Displaying…' : 'Display the Layers'}
                 </button>
+                {districtCfg.appliedLayerIds.length > 0 && (
+                  <button
+                    type="button"
+                    data-testid="locus-hide-unhide-all"
+                    onClick={() => setAllEyes(!allAppliedVisible)}
+                    className="w-full h-8 rounded border border-sky-300 bg-sky-100 text-sky-900 text-xs font-semibold inline-flex items-center justify-center gap-1.5 hover:bg-sky-200/80"
+                  >
+                    {allAppliedVisible ? (
+                      <>
+                        <EyeOff className="w-3.5 h-3.5" />
+                        Hide All Layers
+                      </>
+                    ) : (
+                      <>
+                        <Eye className="w-3.5 h-3.5" />
+                        Unhide All Layers
+                      </>
+                    )}
+                  </button>
+                )}
                 {pending && (
                   <p className="text-[10.5px] text-tertiary font-semibold" data-testid="locus-pending-hint">
                     Pending changes — click Display the Layers to apply.
@@ -595,34 +752,110 @@ export const LocusWorkspace: React.FC<LocusWorkspaceProps> = ({
                   const rows = locusLayersByCategory(inventory, cat);
                   if (!rows.length) return null;
                   const open = openCats[cat];
+                  const pinned = pinnedCats[cat];
+                  const allSelected =
+                    rows.length > 0 && rows.every((row) => selected.has(row.layerId));
+                  const appliedInCat = rows.filter((row) => applied.has(row.layerId));
+                  const allAppliedVisibleInCat =
+                    appliedInCat.length > 0 &&
+                    appliedInCat.every(
+                      (row) => districtCfg.layerVisibility[row.layerId] !== false
+                    );
                   return (
                     <section
                       key={cat}
                       className="rounded border border-outline-variant/40 overflow-hidden"
-                      onMouseEnter={() =>
-                        setOpenCats((prev) => (prev[cat] ? prev : { ...prev, [cat]: true }))
-                      }
-                      onMouseLeave={() =>
-                        setOpenCats((prev) => (!prev[cat] ? prev : { ...prev, [cat]: false }))
-                      }
+                      onMouseEnter={() => openCatOnHover(cat)}
+                      onMouseLeave={() => scheduleCatHoverClose(cat)}
                     >
-                      <button
-                        type="button"
-                        className="w-full flex items-center justify-between px-2.5 py-2 bg-surface-container-lowest text-left"
-                        onClick={() => setOpenCats((prev) => ({ ...prev, [cat]: !prev[cat] }))}
-                      >
-                        <span className="text-[11px] font-bold text-primary">
-                          {LOCUS_CATEGORY_LABEL[cat]}
-                        </span>
-                        <span className="flex items-center gap-1 text-[10px] text-on-surface-variant">
-                          {rows.length}
-                          <ChevronDown
-                            className={`w-3.5 h-3.5 transition ${open ? 'rotate-180' : ''}`}
+                      <div className="flex items-stretch bg-surface-container-lowest">
+                        <button
+                          type="button"
+                          className="min-w-0 flex-1 flex items-center justify-between px-2.5 py-2 text-left"
+                          onClick={() => setOpenCats((prev) => ({ ...prev, [cat]: !prev[cat] }))}
+                        >
+                          <span className="text-[11px] font-bold text-primary">
+                            {LOCUS_CATEGORY_LABEL[cat]}
+                          </span>
+                          <span className="flex items-center gap-1 text-[10px] text-on-surface-variant">
+                            {rows.length}
+                            <ChevronDown
+                              className={`w-3.5 h-3.5 transition ${open ? 'rotate-180' : ''}`}
+                            />
+                          </span>
+                        </button>
+                        <button
+                          type="button"
+                          data-testid={`locus-pin-${cat}`}
+                          title={pinned ? 'Unpin section' : 'Pin section open'}
+                          aria-pressed={pinned}
+                          aria-label={
+                            pinned
+                              ? `Unpin ${LOCUS_CATEGORY_LABEL[cat]}`
+                              : `Pin ${LOCUS_CATEGORY_LABEL[cat]} open`
+                          }
+                          className="shrink-0 px-2 py-2 border-l border-outline-variant/30 hover:bg-surface-container-high"
+                          onClick={(e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            clearCatHoverClose(cat);
+                            setPinnedCats((prev) => {
+                              const nextPinned = !prev[cat];
+                              const next = { ...prev, [cat]: nextPinned };
+                              pinnedCatsRef.current = next;
+                              if (nextPinned) {
+                                setOpenCats((openPrev) =>
+                                  openPrev[cat] ? openPrev : { ...openPrev, [cat]: true }
+                                );
+                              }
+                              return next;
+                            });
+                          }}
+                        >
+                          <Pin
+                            className={`w-3.5 h-3.5 ${
+                              pinned
+                                ? 'fill-primary text-primary rotate-45'
+                                : 'text-on-surface-variant'
+                            }`}
                           />
-                        </span>
-                      </button>
+                        </button>
+                      </div>
                       {open && (
                         <ul className="divide-y divide-outline-variant/30 bg-surface">
+                          <li className="px-2.5 py-1.5 bg-surface-container-lowest/80 flex flex-wrap items-center gap-1.5">
+                            <button
+                              type="button"
+                              data-testid={`locus-select-all-${cat}`}
+                              disabled={!districtId || rows.length === 0}
+                              onClick={() => setCategorySelected(cat, !allSelected)}
+                              className="h-7 px-2.5 rounded border border-sky-300 bg-sky-100 text-sky-900 text-[10.5px] font-semibold disabled:opacity-50 disabled:cursor-not-allowed hover:bg-sky-200/80"
+                            >
+                              {allSelected ? 'Unselect All' : 'Select All'}
+                            </button>
+                            {appliedInCat.length > 0 && (
+                              <button
+                                type="button"
+                                data-testid={`locus-hide-unhide-${cat}`}
+                                onClick={() =>
+                                  setCategoryEyes(cat, !allAppliedVisibleInCat)
+                                }
+                                className="h-7 px-2.5 rounded border border-sky-300 bg-sky-100 text-sky-900 text-[10.5px] font-semibold inline-flex items-center gap-1 hover:bg-sky-200/80"
+                              >
+                                {allAppliedVisibleInCat ? (
+                                  <>
+                                    <EyeOff className="w-3 h-3" />
+                                    Hide All
+                                  </>
+                                ) : (
+                                  <>
+                                    <Eye className="w-3 h-3" />
+                                    Unhide All
+                                  </>
+                                )}
+                              </button>
+                            )}
+                          </li>
                           {rows.map((row) => {
                             const isSelected = selected.has(row.layerId);
                             const isApplied = applied.has(row.layerId);
@@ -672,6 +905,12 @@ export const LocusWorkspace: React.FC<LocusWorkspaceProps> = ({
                                         <EyeOff className="w-3.5 h-3.5 text-on-surface-variant" />
                                       )}
                                     </button>
+                                    <SavedLayerColorPicker
+                                      layerId={row.layerId}
+                                      color={districtCfg.layerColors[row.layerId]}
+                                      title={`Colour for ${row.name}`}
+                                      onChange={(color) => setLayerColor(row.layerId, color)}
+                                    />
                                     <button
                                       type="button"
                                       title="Remove from Locus"

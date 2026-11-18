@@ -27,14 +27,14 @@ function memoryStorage(seed?: Record<string, string>): JsonStorage {
 }
 
 describe('dashboard layer catalog save', () => {
-  it('defaults the dashboard to state border only (no district clutter)', () => {
+  it('defaults the dashboard with no layers selected', () => {
     const config = defaultDashboardLayerConfig();
-    expect(config['lyr-state-border']?.enabled).toBe(true);
     expect(config['lyr-districts']?.enabled).toBe(false);
     expect(config['lyr-mandals']?.enabled).toBe(false);
     expect(config['lyr-pss']?.enabled).toBe(false);
     expect(config['lyr-highways']?.enabled).toBe(false);
     const flags = leafletFlagsFromLayers(applyLayerConfig(INITIAL_GIS_LAYERS, config));
+    expect(flags.showStateBorder).toBe(false);
     expect(flags.showDistricts).toBe(false);
     expect(flags.showPoliceStations).toBe(false);
     expect(flags.showHighways).toBe(false);
@@ -81,11 +81,11 @@ describe('dashboard layer catalog save', () => {
       l.id === 'lyr-highways' || l.id === 'lyr-districts' ? { ...l, enabled: true } : l
     );
     const destination: DashboardLayerConfig = {
-      'lyr-state-border': { enabled: true, opacity: 100 },
+      'lyr-districts': { enabled: true, opacity: 100 },
       'lyr-highways': { enabled: false, opacity: 100 },
     };
     const assigned = layersEnabledInConfig(catalogOn, destination);
-    expect(assigned.map((l) => l.id)).toEqual(['lyr-state-border']);
+    expect(assigned.map((l) => l.id)).toEqual(['lyr-districts']);
     expect(layersEnabledInConfig(catalogOn, { 'lyr-highways': { enabled: false, opacity: 80 } })).toEqual(
       []
     );
@@ -102,7 +102,7 @@ describe('dashboard layer catalog save', () => {
     const snapshot = destinationConfigFromSelection(layers, selected, 'snapshot');
     expect(snapshot['lyr-districts']?.enabled).toBe(true);
     expect(snapshot['lyr-highways']?.enabled).toBe(false);
-    expect(snapshot['lyr-state-border']?.enabled).toBe(false);
+    expect(snapshot['lyr-mandals']?.enabled).toBe(false);
 
     const assigned = destinationConfigFromSelection(layers, selected, 'assigned', (layer) =>
       layer.id === 'lyr-highways' || layer.id === 'lyr-ap-roads-major' || layer.id === 'lyr-districts'
@@ -133,11 +133,11 @@ describe('dashboard layer catalog save', () => {
       l.id === 'lyr-highways' || l.id === 'lyr-ap-roads-full' ? { ...l, enabled: true } : { ...l, enabled: false }
     );
     const destination: DashboardLayerConfig = {
-      'lyr-state-border': { enabled: true, opacity: 100 },
+      'lyr-districts': { enabled: true, opacity: 100 },
     };
     const hover = hoverLayersForDestination(catalogOn, destination);
     expect(hover.map((l) => l.id).sort()).toEqual(
-      ['lyr-ap-roads-full', 'lyr-highways', 'lyr-state-border'].sort()
+      ['lyr-ap-roads-full', 'lyr-districts', 'lyr-highways'].sort()
     );
     expect(hoverLayersForDestination(catalogOn, null).map((l) => l.id).sort()).toEqual(
       ['lyr-ap-roads-full', 'lyr-highways'].sort()
@@ -194,23 +194,21 @@ describe('dashboard layer catalog save', () => {
 
   it('maps partial-match KMZ catalog ids onto dashboard leaflet flags', () => {
     const selected = new Set([
-      'lyr-state-border',
       'lyr-kmz-villages',
       'lyr-ps-border-area',
       'lyr-ap-neighbor-states',
       'lyr-aob-dists',
-      'lyr-atlas-map-data',
       'lyr-roads-asr-classified',
       'lyr-asr-road-network',
       'lyr-route-modeling',
     ]);
     const snapshot = destinationConfigFromSelection(INITIAL_GIS_LAYERS, selected, 'snapshot');
     const flags = leafletFlagsFromLayers(applyLayerConfig(INITIAL_GIS_LAYERS, snapshot));
+    expect(flags.showStateBorder).toBe(false);
     expect(flags.showKmzVillages).toBe(true);
     expect(flags.showPsBorderArea).toBe(true);
     expect(flags.showApNeighborStates).toBe(true);
     expect(flags.showAobDists).toBe(true);
-    expect(flags.showAtlasMapData).toBe(true);
     expect(flags.showRoadsAsrClassified).toBe(true);
     expect(flags.showAsrRoadNetwork).toBe(true);
     expect(flags.showRouteModeling).toBe(true);

@@ -38,6 +38,7 @@ import {
 } from './gis/dashboardLayers';
 import {
   countRoutingLayers,
+  isUnroutableDisplayRoadLayer,
   persistRoadsRoutingLayerConfig,
   type RoadsRoutingLayerConfig,
 } from './gis/roadsRoutingLayers';
@@ -251,6 +252,12 @@ function AppShell() {
     const selected = selectedIdsFor('roadsRouting');
     const beforeIds = new Set(Object.keys(roadsRoutingConfig));
     const next = destinationConfigFromSelection(layers, selected, 'assigned', undefined, roadsRoutingConfig);
+    // Unroutable road lines stay in the saved list but are never applied on the map.
+    for (const id of Object.keys(next)) {
+      if (isUnroutableDisplayRoadLayer(id)) {
+        next[id] = { ...next[id], enabled: false };
+      }
+    }
     setRoadsRoutingConfig(next);
     const persisted = persistRoadsRoutingLayerConfig(next);
     const n = countRoutingLayers(next);
@@ -514,10 +521,28 @@ function AppShell() {
             allLayers={INITIAL_GIS_LAYERS}
             routingConfig={roadsRoutingConfig}
             onChangeRoutingLayerVisibility={(layerId, enabled) => {
+              // Unroutable road lines stay off the map + disabled in the UI — ignore Eye toggles.
+              if (isUnroutableDisplayRoadLayer(layerId)) return;
               setRoadsRoutingConfig((prev) => {
                 const cur = prev[layerId];
                 if (!cur) return prev;
                 const next = { ...prev, [layerId]: { ...cur, enabled } };
+                persistRoadsRoutingLayerConfig(next);
+                return next;
+              });
+            }}
+            onSetRoutingLayersVisibility={(layerIds, enabled) => {
+              setRoadsRoutingConfig((prev) => {
+                let changed = false;
+                const next: typeof prev = { ...prev };
+                for (const id of layerIds) {
+                  if (isUnroutableDisplayRoadLayer(id)) continue;
+                  const cur = next[id];
+                  if (!cur || cur.enabled === enabled) continue;
+                  next[id] = { ...cur, enabled };
+                  changed = true;
+                }
+                if (!changed) return prev;
                 persistRoadsRoutingLayerConfig(next);
                 return next;
               });
@@ -527,6 +552,7 @@ function AppShell() {
                 let changed = false;
                 const next: typeof prev = { ...prev };
                 for (const [id, cur] of Object.entries(next)) {
+                  if (isUnroutableDisplayRoadLayer(id)) continue;
                   if (!cur.enabled) {
                     next[id] = { ...cur, enabled: true };
                     changed = true;
@@ -544,10 +570,38 @@ function AppShell() {
                 persistRoadsRoutingLayerConfig(next);
                 return next;
               });
+              // Opt out of Save→Roads Routing only; catalog Visible stays until all three destinations drop it.
+              handleExcludeFromCatalogHover('roadsRouting', [layerId]);
+            }}
+            onRemoveRoutingLayers={(layerIds) => {
+              setRoadsRoutingConfig((prev) => {
+                let changed = false;
+                const next: typeof prev = { ...prev };
+                for (const id of layerIds) {
+                  if (!(id in next)) continue;
+                  delete next[id];
+                  changed = true;
+                }
+                if (!changed) return prev;
+                persistRoadsRoutingLayerConfig(next);
+                return next;
+              });
+              handleExcludeFromCatalogHover('roadsRouting', layerIds);
+            }}
+            onChangeRoutingLayerColor={(layerId, color) => {
+              setRoadsRoutingConfig((prev) => {
+                const cur = prev[layerId];
+                if (!cur) return prev;
+                const next = { ...prev, [layerId]: { ...cur, color } };
+                persistRoadsRoutingLayerConfig(next);
+                return next;
+              });
             }}
             onClearSavedLayers={() => {
+              const ids = Object.keys(roadsRoutingConfig);
               setRoadsRoutingConfig({});
               persistRoadsRoutingLayerConfig({});
+              handleExcludeFromCatalogHover('roadsRouting', ids);
             }}
             onSwitchWorkspace={handleSelectWorkspace}
             onTriggerToast={triggerToast}
@@ -563,6 +617,21 @@ function AppShell() {
                 const cur = prev[layerId];
                 if (!cur) return prev;
                 const next = { ...prev, [layerId]: { ...cur, enabled } };
+                persistRoadsRoutingNewLayerConfig(next);
+                return next;
+              });
+            }}
+            onSetLayersVisibility={(layerIds, enabled) => {
+              setRoadsRoutingNewConfig((prev) => {
+                let changed = false;
+                const next: typeof prev = { ...prev };
+                for (const id of layerIds) {
+                  const cur = next[id];
+                  if (!cur || cur.enabled === enabled) continue;
+                  next[id] = { ...cur, enabled };
+                  changed = true;
+                }
+                if (!changed) return prev;
                 persistRoadsRoutingNewLayerConfig(next);
                 return next;
               });
@@ -586,6 +655,31 @@ function AppShell() {
               setRoadsRoutingNewConfig((prev) => {
                 const next = { ...prev };
                 delete next[layerId];
+                persistRoadsRoutingNewLayerConfig(next);
+                return next;
+              });
+              handleExcludeFromCatalogHover('roadsRoutingNew', [layerId]);
+            }}
+            onRemoveLayers={(layerIds) => {
+              setRoadsRoutingNewConfig((prev) => {
+                let changed = false;
+                const next: typeof prev = { ...prev };
+                for (const id of layerIds) {
+                  if (!(id in next)) continue;
+                  delete next[id];
+                  changed = true;
+                }
+                if (!changed) return prev;
+                persistRoadsRoutingNewLayerConfig(next);
+                return next;
+              });
+              handleExcludeFromCatalogHover('roadsRoutingNew', layerIds);
+            }}
+            onChangeLayerColor={(layerId, color) => {
+              setRoadsRoutingNewConfig((prev) => {
+                const cur = prev[layerId];
+                if (!cur) return prev;
+                const next = { ...prev, [layerId]: { ...cur, color } };
                 persistRoadsRoutingNewLayerConfig(next);
                 return next;
               });
@@ -743,12 +837,12 @@ function AppShell() {
 
       {/* Floating Tactical Toast Notification */}
       <div
-        className={`fixed bottom-10 left-1/2 -translate-x-1/2 bg-primary text-on-primary px-3.5 py-2 rounded shadow-xl border border-secondary text-xs flex items-center gap-2 pointer-events-none transition-opacity duration-200 z-50 ${
-          toastMessage ? 'opacity-100' : 'opacity-0'
+        className={`fixed bottom-10 left-1/2 -translate-x-1/2 bg-primary/95 text-on-primary px-3.5 py-2.5 rounded-lg shadow-[0_12px_32px_rgba(7,25,41,0.35)] border border-secondary/70 text-xs flex items-center gap-2 pointer-events-none transition-all duration-200 z-50 backdrop-blur-sm ${
+          toastMessage ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-2'
         }`}
       >
         <Info className="w-4 h-4 text-secondary-fixed shrink-0" />
-        <span className="font-medium whitespace-nowrap" data-testid="toast">
+        <span className="font-semibold whitespace-nowrap tracking-wide" data-testid="toast">
           {toastMessage}
         </span>
       </div>

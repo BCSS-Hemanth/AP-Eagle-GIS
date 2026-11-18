@@ -31,6 +31,8 @@ export interface LocusDistrictConfig {
   appliedLayerIds: string[];
   layerVisibility: Record<string, boolean>;
   layerOpacity: Record<string, number>;
+  /** Custom map colours for applied layers only (Locus-local). */
+  layerColors: Record<string, string>;
 }
 
 export interface LocusConfig {

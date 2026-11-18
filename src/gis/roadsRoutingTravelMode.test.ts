@@ -2,44 +2,77 @@ import { describe, expect, it } from 'vitest';
 import {
   featureEligibleForTravelMode,
   filterFcForTravelMode,
+  layerEligibleForTravelMode,
+  ROUTING_TRAVEL_MODE_LAYER_IDS,
   travelModeSpeedKmh,
 } from './roadsRoutingTravelMode';
 
 describe('roadsRoutingTravelMode', () => {
-  it('allows NH / metal classes for four and two, not foot', () => {
-    const props = { class_key: 'national' };
-    expect(featureEligibleForTravelMode('lyr-asr-road-network', props, 'four-wheeler')).toBe(true);
-    expect(featureEligibleForTravelMode('lyr-asr-road-network', props, 'two-wheeler')).toBe(true);
-    expect(featureEligibleForTravelMode('lyr-asr-road-network', props, 'on-foot')).toBe(false);
-  });
-
-  it('allows cart / track for two and foot, not four', () => {
-    const props = { folder: 'Roads / Cart Tracks ( Motorble)' };
-    expect(featureEligibleForTravelMode('lyr-roads-asr-classified', props, 'four-wheeler')).toBe(
-      false
+  it('configures Four-Wheeler with the four specified Road Network layers', () => {
+    expect([...ROUTING_TRAVEL_MODE_LAYER_IDS['four-wheeler']].sort()).toEqual(
+      [
+        'lyr-ap-roads-major',
+        'lyr-highways',
+        'lyr-ops-main-roads',
+        'lyr-roads-asr-classified',
+      ].sort()
     );
-    expect(featureEligibleForTravelMode('lyr-roads-asr-classified', props, 'two-wheeler')).toBe(
-      true
+    expect(layerEligibleForTravelMode('lyr-ops-main-roads', 'four-wheeler')).toBe(true);
+    expect(layerEligibleForTravelMode('lyr-ops-internal-roads', 'four-wheeler')).toBe(false);
+    expect(layerEligibleForTravelMode('lyr-forest-trails', 'four-wheeler')).toBe(false);
+    expect(layerEligibleForTravelMode('lyr-ap-roads-full', 'four-wheeler')).toBe(false);
+  });
+
+  it('configures Two-Wheeler with the nine specified Road Network layers', () => {
+    expect([...ROUTING_TRAVEL_MODE_LAYER_IDS['two-wheeler']].sort()).toEqual(
+      [
+        'lyr-ap-roads-full',
+        'lyr-ap-roads-major',
+        'lyr-asr-road-network',
+        'lyr-ganja-transport-routes',
+        'lyr-highways',
+        'lyr-ops-internal-roads',
+        'lyr-ops-main-roads',
+        'lyr-roads-asr-classified',
+        'lyr-route-modeling',
+      ].sort()
     );
-    expect(featureEligibleForTravelMode('lyr-roads-asr-classified', props, 'on-foot')).toBe(true);
+    expect(layerEligibleForTravelMode('lyr-ganja-transport-routes', 'two-wheeler')).toBe(true);
+    expect(layerEligibleForTravelMode('lyr-forest-trails', 'two-wheeler')).toBe(false);
   });
 
-  it('allows footpath class for on-foot only', () => {
-    const props = { class_key: 'path', road_class: 'Footpath' };
-    expect(featureEligibleForTravelMode('lyr-asr-road-network', props, 'four-wheeler')).toBe(false);
-    expect(featureEligibleForTravelMode('lyr-asr-road-network', props, 'two-wheeler')).toBe(false);
-    expect(featureEligibleForTravelMode('lyr-asr-road-network', props, 'on-foot')).toBe(true);
+  it('configures On Foot with Foot Tracks only', () => {
+    expect([...ROUTING_TRAVEL_MODE_LAYER_IDS['on-foot']]).toEqual(['lyr-forest-trails']);
+    expect(layerEligibleForTravelMode('lyr-forest-trails', 'on-foot')).toBe(true);
+    expect(layerEligibleForTravelMode('lyr-highways', 'on-foot')).toBe(false);
+    expect(layerEligibleForTravelMode('lyr-ops-main-roads', 'on-foot')).toBe(false);
   });
 
-  it('uses layer defaults for unclassed OPS / foot tracks', () => {
-    expect(featureEligibleForTravelMode('lyr-ops-main-roads', {}, 'four-wheeler')).toBe(true);
-    expect(featureEligibleForTravelMode('lyr-ops-internal-roads', {}, 'four-wheeler')).toBe(false);
-    expect(featureEligibleForTravelMode('lyr-ops-internal-roads', {}, 'two-wheeler')).toBe(true);
-    expect(featureEligibleForTravelMode('lyr-forest-trails', {}, 'on-foot')).toBe(true);
-    expect(featureEligibleForTravelMode('lyr-forest-trails', {}, 'four-wheeler')).toBe(false);
+  it('includes whole allowed layers regardless of road-class attributes', () => {
+    expect(
+      featureEligibleForTravelMode(
+        'lyr-roads-asr-classified',
+        { folder: 'Roads / Cart Tracks ( Motorble)' },
+        'four-wheeler'
+      )
+    ).toBe(true);
+    expect(
+      featureEligibleForTravelMode(
+        'lyr-asr-road-network',
+        { class_key: 'path', road_class: 'Footpath' },
+        'two-wheeler'
+      )
+    ).toBe(true);
+    expect(
+      featureEligibleForTravelMode(
+        'lyr-asr-road-network',
+        { class_key: 'national' },
+        'four-wheeler'
+      )
+    ).toBe(false);
   });
 
-  it('filters FeatureCollections by mode', () => {
+  it('filters FeatureCollections by mode layer allowlist', () => {
     const fc: GeoJSON.FeatureCollection = {
       type: 'FeatureCollection',
       features: [
@@ -67,10 +100,12 @@ describe('roadsRoutingTravelMode', () => {
         },
       ],
     };
+    expect(filterFcForTravelMode('lyr-highways', fc, 'four-wheeler').features).toHaveLength(2);
     expect(filterFcForTravelMode('lyr-asr-road-network', fc, 'four-wheeler').features).toHaveLength(
-      1
+      0
     );
-    expect(filterFcForTravelMode('lyr-asr-road-network', fc, 'on-foot').features).toHaveLength(1);
+    expect(filterFcForTravelMode('lyr-forest-trails', fc, 'on-foot').features).toHaveLength(2);
+    expect(filterFcForTravelMode('lyr-highways', fc, 'on-foot').features).toHaveLength(0);
     expect(travelModeSpeedKmh('on-foot')).toBe(5);
   });
 });

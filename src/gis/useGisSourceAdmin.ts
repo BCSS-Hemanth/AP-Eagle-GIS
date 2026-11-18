@@ -68,12 +68,11 @@ export function useGisSourceAdmin(flags: {
   showAobDists?: boolean;
   showKmzVillages?: boolean;
   showPsBorderArea?: boolean;
-  showAtlasMapData?: boolean;
   showRailVector?: boolean;
   showRoadsMajor?: boolean;
   /** Pre-2014 undivided AP+TG districts — overlay only; never drives admin drill. */
   showDistrictsHist?: boolean;
-  /** IND_adm1 undivided AP polygon — overlay only; not lyr-state-border. */
+  /** IND_adm1 undivided AP polygon — historical overlay only. */
   showStateHist?: boolean;
 }) {
   const taluk = useOptionalFc(GIS_SOURCE_ADMIN_LAYERS.taluk, Boolean(flags.showTaluk));
@@ -99,10 +98,6 @@ export function useGisSourceAdmin(flags: {
     GIS_SOURCE_ADMIN_LAYERS.psBorderArea,
     Boolean(flags.showPsBorderArea)
   );
-  const atlasMapData = useOptionalFc(
-    GIS_SOURCE_ADMIN_LAYERS.atlasMapData,
-    Boolean(flags.showAtlasMapData)
-  );
   const rail = useOptionalFc(GIS_SOURCE_ADMIN_LAYERS.rail, Boolean(flags.showRailVector));
   const roadsMajor = useOptionalFc(
     GIS_SOURCE_ADMIN_LAYERS.roadsMajor,
@@ -123,7 +118,6 @@ export function useGisSourceAdmin(flags: {
     aobDists,
     kmzVillages,
     psBorderArea,
-    atlasMapData,
     rail,
     roadsMajor,
     districtsHist,

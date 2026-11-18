@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Save } from 'lucide-react';
+import { LayoutDashboard, Navigation2, Satellite, Save } from 'lucide-react';
 import { DigitizedFeature, GisLayer, WorkspaceId } from '../../types/gis';
 import type { IngestedLayer } from '../../gis/ingest';
 import {
@@ -133,19 +133,19 @@ export const DataLayerWorkspaces: React.FC<DataLayerProps> = ({
 
     return (
       <div className="p-4 pb-10 lg:p-6 lg:pb-12 space-y-4 max-w-[1440px] mx-auto">
-        <div className="space-y-3 border-b border-outline-variant/35 pb-3">
+        <div className="ws-panel px-4 py-3.5 space-y-3">
           <div className="flex items-center justify-between gap-4">
             <div className="min-w-0">
               {meta.eyebrow ? (
-                <span className="text-[10.5px] font-bold uppercase tracking-wider text-secondary block">
+                <span className="text-[10.5px] font-bold uppercase tracking-[0.14em] text-secondary block">
                   {meta.eyebrow}
                 </span>
               ) : null}
-              <h1 className="text-xl font-bold text-primary tracking-tight">
+              <h1 className="text-xl font-bold text-primary tracking-tight leading-tight">
                 {meta.title}
               </h1>
               {meta.blurb ? (
-                <p className="text-[11px] text-on-surface-variant mt-1">{meta.blurb}</p>
+                <p className="text-[11px] text-on-surface-variant mt-1 max-w-3xl">{meta.blurb}</p>
               ) : null}
             </div>
             <div className="flex flex-wrap items-center justify-end gap-2 shrink-0">
@@ -154,7 +154,7 @@ export const DataLayerWorkspaces: React.FC<DataLayerProps> = ({
                 data-testid="catalog-select-all-layers"
                 onClick={handleSelectAllToggle}
                 disabled={!scoped.length}
-                className="h-8 px-3 rounded border border-sky-300 bg-sky-100 text-sky-900 text-xs font-semibold cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed hover:bg-sky-200/80"
+                className="ws-btn disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 {allScopedSelected ? 'Unselect All Layers' : 'Select All Layers'}
               </button>
@@ -163,7 +163,7 @@ export const DataLayerWorkspaces: React.FC<DataLayerProps> = ({
                 value={catalogSearch}
                 onChange={(e) => setCatalogSearch(e.target.value)}
                 placeholder="Filter layers or PostGIS table..."
-                className="h-8 w-64 max-w-full px-2.5 rounded border border-outline-variant/50 bg-surface-container-lowest text-xs"
+                className="ws-field !h-8 !w-64 !max-w-full !font-medium"
               />
             </div>
           </div>
@@ -268,29 +268,52 @@ export const DataLayerWorkspaces: React.FC<DataLayerProps> = ({
                 </>
               )}
             </div>
-            <div className="flex flex-wrap items-center justify-end gap-2 ml-auto">
+            <div className="flex flex-wrap items-center justify-end gap-1.5 ml-auto">
               <button
                 type="button"
+                data-testid="catalog-open-dashboard"
                 onClick={() => onSwitchWorkspace('ndps-spatial-dashboard')}
-                className="h-8 px-3 rounded border border-outline-variant/60 bg-surface-container-lowest text-xs font-semibold cursor-pointer"
+                title="Open Dashboard"
+                aria-label="Open Dashboard"
+                className="h-8 w-8 rounded border border-outline-variant/60 bg-surface-container-lowest text-on-surface-variant hover:text-primary hover:bg-surface-container-low inline-flex items-center justify-center cursor-pointer transition-colors"
               >
-                Open Dashboard
+                <LayoutDashboard className="w-4 h-4" />
+              </button>
+              <button
+                type="button"
+                data-testid="catalog-open-roads-routing"
+                onClick={() => onSwitchWorkspace('roads-routing')}
+                title="Open Roads Routing"
+                aria-label="Open Roads Routing"
+                className="h-8 w-8 rounded border border-outline-variant/60 bg-surface-container-lowest text-on-surface-variant hover:text-primary hover:bg-surface-container-low inline-flex items-center justify-center cursor-pointer transition-colors"
+              >
+                <Navigation2 className="w-4 h-4" />
+              </button>
+              <button
+                type="button"
+                data-testid="catalog-open-roads-routing-new"
+                onClick={() => onSwitchWorkspace('roads-routing-new')}
+                title="Open Roads Routing New"
+                aria-label="Open Roads Routing New"
+                className="h-8 w-8 rounded border border-outline-variant/60 bg-surface-container-lowest text-on-surface-variant hover:text-primary hover:bg-surface-container-low inline-flex items-center justify-center cursor-pointer transition-colors"
+              >
+                <Satellite className="w-4 h-4" />
               </button>
             </div>
           </div>
         </div>
 
-        <div className="bg-surface-container-lowest rounded border border-outline-variant/40 overflow-x-auto">
-          <table className="w-full text-left border-collapse text-xs tabular-coord whitespace-nowrap">
-            <thead className="bg-surface-container text-[10.5px] font-bold uppercase tracking-wider text-on-surface-variant border-b border-outline-variant/35">
+        <div className="ws-panel overflow-x-auto">
+          <table className="ws-table tabular-coord whitespace-nowrap">
+            <thead>
               <tr>
-                <th className="py-2.5 px-3">Visible</th>
-                <th className="py-2.5 px-3">Layer Name</th>
-                <th className="py-2.5 px-3">PostGIS Source Table</th>
-                <th className="py-2.5 px-3">Geometry</th>
+                <th>Visible</th>
+                <th>Layer Name</th>
+                <th>PostGIS Source Table</th>
+                <th>Geometry</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-outline-variant/25">
+            <tbody>
               {filtered.map((lyr) => (
                 <tr
                   key={lyr.id}

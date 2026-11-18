@@ -60,9 +60,9 @@ describe('locusExport', () => {
   it('defaults selection to enabled exportable layers', () => {
     const layers = [
       layer({
-        id: 'lyr-state-border',
+        id: 'lyr-districts',
         geometryType: 'MultiPolygon',
-        sourceTable: 'public/geo/ap-state.geojson',
+        sourceTable: 'public/geo/ap-districts-2022.geojson',
         enabled: true,
       }),
       layer({
@@ -73,6 +73,6 @@ describe('locusExport', () => {
       }),
     ];
     expect(locusExportableLayers(layers)).toHaveLength(2);
-    expect(defaultLocusSelection(layers)).toEqual(['lyr-state-border']);
+    expect(defaultLocusSelection(layers)).toEqual(['lyr-districts']);
   });
 });

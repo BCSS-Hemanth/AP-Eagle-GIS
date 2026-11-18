@@ -3,6 +3,7 @@ import { catalogModuleForLayer } from './catalogWorkspaces';
 import type { DashboardLayerConfig, DashboardLayerEntry, JsonStorage } from './dashboardLayers';
 import { isLayerOn, leafletFlagsFromLayers } from './dashboardLayers';
 import { INITIAL_GIS_LAYERS } from '../data/apGisData';
+import { normalizeLayerHexColor } from './layerColor';
 
 /** Persist layers explicitly saved into Roads Routing (union across catalog modules). */
 export const ROADS_ROUTING_LAYER_STORAGE_KEY = 'ap-eagle.roads-routing-layers.v1';
@@ -13,11 +14,11 @@ export type RoadsRoutingLayerConfig = DashboardLayerConfig;
  * Road Network line layers that must never enter the driving graph
  * (rail, water, intel corridors — not traversable road centerlines).
  * New road LineStrings in the Road Network catalog are routable by default.
+ * D - Routes (Ganja Transport) is routable (intel corridors that are driveable lines).
  */
 export const ROUTING_NON_ROUTABLE_LINE_IDS = [
   'lyr-railways',
   'lyr-rivers',
-  'lyr-ganja-transport-routes',
   'lyr-drug-routes',
 ] as const;
 
@@ -41,13 +42,11 @@ export const ROUTING_LOCATION_LAYER_IDS = [
 /** Non-line / non-road overlays — display only. */
 export const ROUTING_OVERLAY_ONLY_LAYER_IDS = [
   'lyr-drug-routes',
-  'lyr-ganja-transport-routes',
   'lyr-railways',
   'lyr-rivers',
   'lyr-asr-agency',
   'lyr-ap-neighbor-states',
   'lyr-aob-dists',
-  'lyr-atlas-map-data',
 ] as const;
 
 function isNonRoutableLineId(id: string): boolean {
@@ -70,6 +69,24 @@ export function isRoutableRoadLayer(layerOrId: GisLayer | string): boolean {
   if (isNonRoutableLineId(layer.id)) return false;
   if (catalogModuleForLayer(layer) !== 'road-network-layers') return false;
   return true;
+}
+
+/**
+ * Road-like layers that may appear in the Roads Routing saved list but must stay
+ * off the map and out of Find Routes (disabled / unselectable).
+ */
+export function isUnroutableDisplayRoadLayer(layerOrId: GisLayer | string): boolean {
+  const id = typeof layerOrId === 'string' ? layerOrId : layerOrId.id;
+  if (isNonRoutableLineId(id)) return true;
+  if (typeof layerOrId === 'string') {
+    const hit = INITIAL_GIS_LAYERS.find((l) => l.id === id);
+    return hit ? isUnroutableDisplayRoadLayer(hit) : false;
+  }
+  return (
+    layerOrId.geometryType === 'LineString' &&
+    catalogModuleForLayer(layerOrId) === 'road-network-layers' &&
+    !isRoutableRoadLayer(layerOrId)
+  );
 }
 
 /** Snapshot of current catalog ids that satisfy {@link isRoutableRoadLayer} (tests / diagnostics). */
@@ -117,7 +134,13 @@ export function mergeEnabledLayersIntoRoutingConfig(
   for (const layer of layers) {
     if (groupFilter && !groupFilter.includes(layer.groupId)) continue;
     if (!layer.enabled) continue;
-    next[layer.id] = { enabled: false, opacity: layer.opacity };
+    const prev = current[layer.id];
+    next[layer.id] = {
+      // Unroutable road lines stay in the list but never applied on the map.
+      enabled: false,
+      opacity: prev?.opacity ?? layer.opacity,
+      ...(prev?.color ? { color: prev.color } : {}),
+    };
   }
   return next;
 }
@@ -130,7 +153,13 @@ export function routingLayersFromConfig(
     .filter((layer) => Boolean(config[layer.id]))
     .map((layer) => {
       const saved = config[layer.id] as DashboardLayerEntry;
-      return { ...layer, enabled: Boolean(saved.enabled), opacity: saved.opacity };
+      const lockedOff = isUnroutableDisplayRoadLayer(layer);
+      return {
+        ...layer,
+        // Unroutable road lines stay listed but are never drawn / applied.
+        enabled: lockedOff ? false : Boolean(saved.enabled),
+        opacity: saved.opacity,
+      };
     });
 }
 
@@ -164,14 +193,16 @@ export function loadRoadsRoutingLayerConfig(
     const out: RoadsRoutingLayerConfig = {};
     for (const [id, value] of Object.entries(parsed as Record<string, unknown>)) {
       if (!value || typeof value !== 'object') continue;
-      const row = value as { enabled?: unknown; opacity?: unknown };
+      const row = value as { enabled?: unknown; opacity?: unknown; color?: unknown };
       if (typeof row.enabled !== 'boolean') continue;
+      const color = normalizeLayerHexColor(row.color);
       out[id] = {
         enabled: row.enabled,
         opacity:
           typeof row.opacity === 'number'
             ? Math.min(100, Math.max(15, Math.round(row.opacity)))
             : 100,
+        ...(color ? { color } : {}),
       };
     }
     return Object.keys(out).length ? out : null;
@@ -185,7 +216,7 @@ export function routingMapFlags(layers: GisLayer[]) {
   // Saved-layer lists are sparse — do not inherit Dashboard “default on” for admin borders.
   return {
     ...base,
-    showStateBorder: isLayerOn(layers, 'lyr-state-border'),
+    showStateBorder: false,
     showDistricts: isLayerOn(layers, 'lyr-districts'),
   };
 }

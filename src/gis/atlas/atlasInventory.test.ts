@@ -53,7 +53,6 @@ describe('atlasInventory', () => {
   it('lists verified partial-match KMZ overlays on district inventories', () => {
     const asr = atlasInventoryForDistrict('asr')!;
     expect(asr.layers.find((l) => l.layerId === 'lyr-ps-border-area')?.featureCount).toBe(22);
-    expect(asr.layers.find((l) => l.layerId === 'lyr-atlas-map-data')?.featureCount).toBe(707);
     expect(asr.layers.find((l) => l.layerId === 'lyr-asr-road-network')?.featureCount).toBe(5611);
     expect(asr.layers.find((l) => l.layerId === 'lyr-route-modeling')?.featureCount).toBe(5644);
     expect(atlasInventoryForDistrict('guntur')!.layers.find((l) => l.layerId === 'lyr-kmz-villages')?.featureCount).toBe(

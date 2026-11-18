@@ -1,9 +1,7 @@
 /**
- * Travel-mode eligibility for Roads Routing GIS graph edges.
- * Feature class uses Atlas classifiers (class_key / rd_sub_typ / folder / road_class).
+ * Travel-mode layer allowlists for Roads Routing (Route Alternatives).
+ * Find Routes only builds the GIS graph from Eye-on layers in the selected mode’s set.
  */
-
-import { classifyAtlasRoadProperties, type AtlasRoadClassKey } from './atlas/atlasRoadClassStyles';
 
 export type RoutingTravelMode = 'four-wheeler' | 'two-wheeler' | 'on-foot';
 
@@ -20,66 +18,87 @@ export function travelModeSpeedKmh(mode: RoutingTravelMode): number {
   return 45;
 }
 
-type ModeAllow = { four: boolean; two: boolean; foot: boolean };
-
-const CLASS_ALLOW: Record<AtlasRoadClassKey, ModeAllow> = {
-  national: { four: true, two: true, foot: false },
-  state: { four: true, two: true, foot: false },
-  major: { four: true, two: true, foot: false },
-  other: { four: true, two: true, foot: false },
-  village: { four: false, two: true, foot: false },
-  track: { four: false, two: true, foot: true },
-  path: { four: false, two: false, foot: true },
-  unclassed: { four: true, two: true, foot: false },
+/**
+ * Road Network layers that may contribute edges for each travel mode.
+ * Layers outside a mode’s set are ignored even if Eye-on.
+ */
+export const ROUTING_TRAVEL_MODE_LAYER_IDS: Record<
+  RoutingTravelMode,
+  ReadonlySet<string>
+> = {
+  'four-wheeler': new Set([
+    'lyr-ops-main-roads',
+    'lyr-highways',
+    'lyr-ap-roads-major',
+    'lyr-roads-asr-classified',
+  ]),
+  'two-wheeler': new Set([
+    'lyr-ops-main-roads',
+    'lyr-ops-internal-roads',
+    'lyr-ganja-transport-routes',
+    'lyr-roads-asr-classified',
+    'lyr-asr-road-network',
+    'lyr-route-modeling',
+    'lyr-highways',
+    'lyr-ap-roads-full',
+    'lyr-ap-roads-major',
+  ]),
+  'on-foot': new Set(['lyr-forest-trails']),
 };
 
-/** Whole-layer defaults when attributes are missing / unclassed. */
-const LAYER_DEFAULT_ALLOW: Record<string, ModeAllow> = {
-  'lyr-highways': { four: true, two: true, foot: false },
-  'lyr-ap-roads-major': { four: true, two: true, foot: false },
-  'lyr-ap-roads-full': { four: true, two: true, foot: false },
-  'lyr-ops-main-roads': { four: true, two: true, foot: false },
-  'lyr-ops-internal-roads': { four: false, two: true, foot: false },
-  'lyr-forest-trails': { four: false, two: false, foot: true },
-  'lyr-roads-asr-classified': { four: true, two: true, foot: false },
-  'lyr-asr-road-network': { four: true, two: true, foot: false },
-  'lyr-route-modeling': { four: true, two: true, foot: false },
+/** Human-readable layer names for Route Alternatives hover help. */
+export const ROUTING_TRAVEL_MODE_LAYER_LABELS: Record<
+  RoutingTravelMode,
+  readonly string[]
+> = {
+  'four-wheeler': [
+    'OPS Main Roads (161)',
+    'National Highways (2.5k)',
+    'AP Major Roads NH/SH/MDR (5,917)',
+    'ASR Roads — Main / Metal / Cart / Foot',
+  ],
+  'two-wheeler': [
+    'OPS Main Roads (161)',
+    'OPS Internal Roads (404)',
+    'D - Routes (Ganja Transport)',
+    'ASR Roads — Main / Metal / Cart / Foot',
+    'ASR Road Network (5.7k)',
+    'Route Modeling (5.8k)',
+    'National Highways (2.5k)',
+    'AP Roads Full Network (153k)',
+    'AP Major Roads NH/SH/MDR',
+  ],
+  'on-foot': ['Foot Tracks (194)'],
 };
 
-function allowForMode(allow: ModeAllow, mode: RoutingTravelMode): boolean {
-  if (mode === 'four-wheeler') return allow.four;
-  if (mode === 'two-wheeler') return allow.two;
-  return allow.foot;
+export function layerEligibleForTravelMode(
+  layerId: string,
+  mode: RoutingTravelMode
+): boolean {
+  return ROUTING_TRAVEL_MODE_LAYER_IDS[mode].has(layerId);
 }
 
 /**
  * Whether a road feature may enter the GIS graph for the selected travel mode.
- * Unknown future Road Network layers fall back to vehicle classes (four + two), not foot.
+ * Eligibility is by catalog layer allowlist for that mode (whole layer).
  */
 export function featureEligibleForTravelMode(
   layerId: string,
-  properties: GeoJSON.GeoJsonProperties,
+  _properties: GeoJSON.GeoJsonProperties,
   mode: RoutingTravelMode
 ): boolean {
-  const classified = classifyAtlasRoadProperties(properties);
-  const layerDefault = LAYER_DEFAULT_ALLOW[layerId] ?? {
-    four: true,
-    two: true,
-    foot: false,
-  };
-
-  if (classified.key === 'unclassed') {
-    return allowForMode(layerDefault, mode);
-  }
-  return allowForMode(CLASS_ALLOW[classified.key], mode);
+  return layerEligibleForTravelMode(layerId, mode);
 }
 
-/** Keep only mode-eligible LineString features from a layer FeatureCollection. */
+/** Keep only mode-eligible features from a layer FeatureCollection. */
 export function filterFcForTravelMode(
   layerId: string,
   fc: GeoJSON.FeatureCollection,
   mode: RoutingTravelMode
 ): GeoJSON.FeatureCollection {
+  if (!layerEligibleForTravelMode(layerId, mode)) {
+    return { type: 'FeatureCollection', features: [] };
+  }
   return {
     type: 'FeatureCollection',
     features: fc.features.filter((feature) =>

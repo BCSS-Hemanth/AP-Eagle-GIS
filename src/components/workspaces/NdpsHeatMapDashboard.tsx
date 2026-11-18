@@ -66,12 +66,11 @@ export const NdpsHeatMapDashboard: React.FC<NdpsHeatMapDashboardProps> = ({
         basemap="vector"
         cleanIndiaOverview
         fitToState
-        showStateBorder={mapFlags.showStateBorder}
         showDistricts={mapFlags.showDistricts}
         districtOpacity={mapFlags.districtOpacity}
-        stateOpacity={mapFlags.stateOpacity}
         showMandals={mapFlags.showMandals}
         showVillages={mapFlags.showVillages}
+        villageFetchMinZoom={0}
         mandalOpacity={mapFlags.mandalOpacity}
         villageOpacity={mapFlags.villageOpacity}
         showPoliceStations={mapFlags.showPoliceStations}
@@ -103,7 +102,6 @@ export const NdpsHeatMapDashboard: React.FC<NdpsHeatMapDashboardProps> = ({
         showAobDists={mapFlags.showAobDists}
         showKmzVillages={mapFlags.showKmzVillages}
         showPsBorderArea={mapFlags.showPsBorderArea}
-        showAtlasMapData={mapFlags.showAtlasMapData}
         showRoadsAsrClassified={mapFlags.showRoadsAsrClassified}
         showAsrRoadNetwork={mapFlags.showAsrRoadNetwork}
         showRouteModeling={mapFlags.showRouteModeling}
@@ -165,11 +163,11 @@ export const NdpsHeatMapDashboard: React.FC<NdpsHeatMapDashboardProps> = ({
       data-testid="dashboard-fullscreen-toggle"
       onClick={toggleExpanded}
       title={mapExpanded ? 'Exit full screen (Esc)' : 'Expand map to full screen'}
-      className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-bold cursor-pointer ${
+      className={
         mapExpanded
-          ? 'bg-white text-[#0b3d7a] border border-[#0b3d7a]/30 shadow-md'
-          : 'bg-[#0b3d7a] text-white hover:bg-[#0a3366]'
-      }`}
+          ? 'ws-btn'
+          : 'ws-btn ws-btn-ghost-on-dark'
+      }
     >
       {mapExpanded ? <Minimize2 className="w-3.5 h-3.5" /> : <Maximize2 className="w-3.5 h-3.5" />}
       <span>{mapExpanded ? 'Exit full screen' : 'Full screen'}</span>
@@ -219,19 +217,21 @@ export const NdpsHeatMapDashboard: React.FC<NdpsHeatMapDashboardProps> = ({
   }
 
   return (
-    <div className="h-full min-h-0 max-h-full bg-white flex flex-col overflow-hidden">
-      <header className="h-[52px] shrink-0 bg-[#0b3d7a] text-white flex items-center justify-between gap-3 px-3 border-b-[3px] border-[#f5c518]">
-        <div className="w-[7.5rem]" />
-        <h1
-          className="text-[16px] xl:text-[20px] font-bold tracking-[0.03em] uppercase text-center flex-1"
-          style={{ fontFamily: 'Oswald, Inter, sans-serif' }}
-        >
-          GIS Dashboard — Andhra Pradesh
-        </h1>
-        <div className="shrink-0">{dashboardButton}</div>
+    <div className="h-full min-h-0 max-h-full bg-surface flex flex-col overflow-hidden">
+      <header className="ws-page-header ws-page-header--command shrink-0 flex items-center justify-between gap-3 px-4 py-2.5 min-h-[52px]">
+        <div className="w-[7.5rem] shrink-0" />
+        <div className="min-w-0 flex-1 text-center">
+          <div className="text-[9.5px] font-bold uppercase tracking-[0.16em] text-secondary-fixed/85">
+            Spatial Operations
+          </div>
+          <h1 className="font-display text-[16px] xl:text-[20px] font-semibold tracking-[0.04em] uppercase truncate text-white">
+            GIS Dashboard — Andhra Pradesh
+          </h1>
+        </div>
+        <div className="shrink-0 w-[7.5rem] flex justify-end">{dashboardButton}</div>
       </header>
 
-      <div className="flex-1 min-h-0 flex flex-col gap-0 p-0 overflow-hidden bg-white">
+      <div className="flex-1 min-h-0 flex flex-col gap-0 p-0 overflow-hidden bg-surface-container-lowest">
         {drillBarRow}
         {mapBlock}
       </div>

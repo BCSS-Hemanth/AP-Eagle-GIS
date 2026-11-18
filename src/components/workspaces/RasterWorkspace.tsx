@@ -55,6 +55,8 @@ export const RasterWorkspace: React.FC<RasterWorkspaceProps> = ({
   const [loadingDistrict, setLoadingDistrict] = useState(false);
   const [displaying, setDisplaying] = useState(false);
   const [fitToken, setFitToken] = useState(0);
+  /** World overview until the user clicks the map (then India isolation, same as before). */
+  const [indiaIsolated, setIndiaIsolated] = useState(false);
   const setMapExpanded = (expanded: boolean) => onMapExpandedChange?.(expanded);
   const [layersOpen, setLayersOpen] = useState(true);
 
@@ -74,6 +76,12 @@ export const RasterWorkspace: React.FC<RasterWorkspaceProps> = ({
   );
   const pending = rasterHasPendingChanges(districtCfg);
   const compositionActive = districtCfg.appliedLayerIds.length > 0 && Boolean(districtFeature);
+  const allAppliedVisible =
+    districtCfg.appliedLayerIds.length > 0 &&
+    districtCfg.appliedLayerIds.every((id) => districtCfg.layerVisibility[id] !== false);
+  const allSelected =
+    (inventory?.layers.length ?? 0) > 0 &&
+    (inventory?.layers.every((row) => selected.has(row.layerId)) ?? false);
 
   const visibleIds = useMemo(
     () =>
@@ -83,6 +91,7 @@ export const RasterWorkspace: React.FC<RasterWorkspaceProps> = ({
     [compositionActive, districtCfg.appliedLayerIds, districtCfg.layerVisibility]
   );
   const mapFlags = useMemo(() => rasterLeafletFlags(visibleIds), [visibleIds]);
+  const showWorldOverview = !indiaIsolated && !compositionActive;
 
   /** SOI topo reads best over satellite underlay. */
   const basemap: BasemapId = 'satellite';
@@ -224,6 +233,17 @@ export const RasterWorkspace: React.FC<RasterWorkspaceProps> = ({
     });
   };
 
+  /** Select or clear every layer in the Raster & Imagery section. */
+  const setSectionSelected = (selectAll: boolean) => {
+    if (!districtId || !inventory) return;
+    const ids = inventory.layers.map((row) => row.layerId);
+    if (!ids.length) return;
+    writeDistrict({
+      ...districtCfg,
+      selectedLayerIds: selectAll ? [...ids] : [],
+    });
+  };
+
   const handleDisplayLayers = () => {
     if (!districtId || !meta || !inventory) {
       onTriggerToast('Select a configured district first');
@@ -268,6 +288,19 @@ export const RasterWorkspace: React.FC<RasterWorkspaceProps> = ({
     writeDistrict({
       ...districtCfg,
       layerVisibility: { ...districtCfg.layerVisibility, [layerId]: on },
+    });
+  };
+
+  /** Hide/show every Displayed (applied) layer — same as toggling each Eye. */
+  const setAllEyes = (on: boolean) => {
+    if (!districtId || !districtCfg.appliedLayerIds.length) return;
+    const layerVisibility = { ...districtCfg.layerVisibility };
+    for (const id of districtCfg.appliedLayerIds) {
+      layerVisibility[id] = on;
+    }
+    writeDistrict({
+      ...districtCfg,
+      layerVisibility,
     });
   };
 
@@ -316,14 +349,17 @@ export const RasterWorkspace: React.FC<RasterWorkspaceProps> = ({
         ref={mapRef}
         className="h-full w-full"
         basemap={basemap}
-        fitToState={!compositionActive}
+        fitToState={indiaIsolated && !compositionActive}
+        unconstrainedWorldView={showWorldOverview}
+        /** World overview only — after click, use Atlas/Locus India isolation (mask + bounds). */
+        suppressIndiaOverviewMask={showWorldOverview}
         interactive
         highlightApFill={false}
         autoSatelliteOverlay={false}
         maskOutsideDrill={false}
         autoAdminOverlays={false}
         apOnlyPermanentStateLabels
-        showStateBorder={false}
+        compactApStateLabel
         showDistricts={false}
         showMandals={false}
         showVillages={false}
@@ -333,16 +369,21 @@ export const RasterWorkspace: React.FC<RasterWorkspaceProps> = ({
         adminDrill={rasterAdminDrill}
         boundsView={boundsView}
         geoJsonOverlays={districtHighlightOverlays}
-        layoutRevision={`raster:${districtId ?? 'none'}:${[...visibleIds].sort().join(',')}:${compositionActive ? 'on' : 'off'}:${fitToken}:${basemap}:${mapExpanded ? 'full' : 'shell'}`}
+        onMapClick={() => {
+          if (!indiaIsolated) setIndiaIsolated(true);
+        }}
+        layoutRevision={`raster:${districtId ?? 'none'}:${[...visibleIds].sort().join(',')}:${compositionActive ? 'on' : 'off'}:${fitToken}:${basemap}:${mapExpanded ? 'full' : 'shell'}:${indiaIsolated ? 'in' : 'world'}`}
       />
       <div className="absolute top-2 left-2 z-[500] pointer-events-none rounded bg-black/70 text-white px-2 py-1 text-[10px] font-semibold shadow-sm">
-        {!districtId
-          ? 'Select a district to compose a Raster map'
-          : loadingDistrict
-            ? 'Loading district boundary…'
-            : !compositionActive
-              ? 'Select layers, then Display the Layers'
-              : `${meta?.name ?? 'District'} · ${visibleIds.size} visible · zoom for SOI LOD`}
+        {showWorldOverview
+          ? 'World view — click the map to isolate India'
+          : !districtId
+            ? 'Select a district to compose a Raster map'
+            : loadingDistrict
+              ? 'Loading district boundary…'
+              : !compositionActive
+                ? 'Select layers, then Display the Layers'
+                : `${meta?.name ?? 'District'} · ${visibleIds.size} visible · zoom for SOI LOD`}
       </div>
     </div>
   );
@@ -357,12 +398,12 @@ export const RasterWorkspace: React.FC<RasterWorkspaceProps> = ({
       data-testid={mapExpanded ? 'raster-workspace-fullscreen' : 'raster-workspace'}
     >
       {!mapExpanded ? (
-        <header className="shrink-0 flex flex-wrap items-center justify-between gap-2 px-3 py-2 border-b border-outline-variant/40 bg-surface-container-lowest">
+        <header className="ws-page-header shrink-0 flex flex-wrap items-center justify-between gap-2 px-4 py-2.5">
           <div className="min-w-0">
-            <div className="text-[10px] font-bold uppercase tracking-wider text-secondary">
+            <div className="text-[10px] font-bold uppercase tracking-[0.14em] text-secondary">
               M3 · Raster
             </div>
-            <h1 className="text-base font-bold text-primary truncate">
+            <h1 className="text-[15px] font-bold text-primary truncate leading-tight">
               Raster
               {meta ? (
                 <span className="text-on-surface-variant font-semibold"> — {meta.name}</span>
@@ -372,7 +413,7 @@ export const RasterWorkspace: React.FC<RasterWorkspaceProps> = ({
           <div className="flex flex-wrap items-center gap-2">
             <button
               type="button"
-              className="h-8 px-2.5 rounded border border-outline-variant/50 text-[11px] font-semibold inline-flex items-center gap-1"
+              className="ws-btn"
               onClick={handleClear}
               disabled={!districtId}
             >
@@ -381,7 +422,7 @@ export const RasterWorkspace: React.FC<RasterWorkspaceProps> = ({
             </button>
             <button
               type="button"
-              className="h-8 px-2.5 rounded border border-outline-variant/50 text-[11px] font-semibold inline-flex items-center gap-1"
+              className="ws-btn"
               onClick={() => setMapExpanded(true)}
             >
               <Maximize2 className="w-3.5 h-3.5" />
@@ -400,7 +441,7 @@ export const RasterWorkspace: React.FC<RasterWorkspaceProps> = ({
             data-testid="raster-exit-fullscreen"
             onClick={() => setMapExpanded(false)}
             title="Exit full screen (Esc)"
-            className="absolute top-2 right-3 z-[910] inline-flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-bold cursor-pointer bg-white text-[#0b3d7a] border border-[#0b3d7a]/30 shadow-md hover:bg-sky-50"
+            className="absolute top-2 right-3 z-[910] ws-btn shadow-[0_6px_18px_rgba(11,28,48,0.14)]"
           >
             <Minimize2 className="w-3.5 h-3.5" />
             Exit full screen
@@ -420,7 +461,7 @@ export const RasterWorkspace: React.FC<RasterWorkspaceProps> = ({
               </span>
               <select
                 data-testid="raster-district-select"
-                className="mt-1 w-full h-9 px-2.5 rounded border border-outline-variant/50 bg-surface-container-lowest text-xs font-semibold"
+                className="mt-1 ws-field"
                 value={districtId ?? ''}
                 onChange={(e) => {
                   const v = e.target.value;
@@ -467,6 +508,26 @@ export const RasterWorkspace: React.FC<RasterWorkspaceProps> = ({
                   <Layers className="w-3.5 h-3.5" />
                   {displaying ? 'Displaying…' : 'Display the Layers'}
                 </button>
+                {districtCfg.appliedLayerIds.length > 0 && (
+                  <button
+                    type="button"
+                    data-testid="raster-hide-unhide-all"
+                    onClick={() => setAllEyes(!allAppliedVisible)}
+                    className="w-full h-8 rounded border border-sky-300 bg-sky-100 text-sky-900 text-xs font-semibold inline-flex items-center justify-center gap-1.5 hover:bg-sky-200/80"
+                  >
+                    {allAppliedVisible ? (
+                      <>
+                        <EyeOff className="w-3.5 h-3.5" />
+                        Hide All Layers
+                      </>
+                    ) : (
+                      <>
+                        <Eye className="w-3.5 h-3.5" />
+                        Unhide All Layers
+                      </>
+                    )}
+                  </button>
+                )}
                 {pending && (
                   <p
                     className="text-[10.5px] text-tertiary font-semibold"
@@ -492,6 +553,37 @@ export const RasterWorkspace: React.FC<RasterWorkspaceProps> = ({
                   </button>
                   {layersOpen && (
                     <ul className="divide-y divide-outline-variant/30 bg-surface">
+                      <li className="px-2.5 py-1.5 bg-surface-container-lowest/80 flex flex-wrap items-center gap-1.5">
+                        <button
+                          type="button"
+                          data-testid="raster-select-all"
+                          disabled={!districtId || inventory.layers.length === 0}
+                          onClick={() => setSectionSelected(!allSelected)}
+                          className="h-7 px-2.5 rounded border border-sky-300 bg-sky-100 text-sky-900 text-[10.5px] font-semibold disabled:opacity-50 disabled:cursor-not-allowed hover:bg-sky-200/80"
+                        >
+                          {allSelected ? 'Unselect All' : 'Select All'}
+                        </button>
+                        {districtCfg.appliedLayerIds.length > 0 && (
+                          <button
+                            type="button"
+                            data-testid="raster-hide-unhide-section"
+                            onClick={() => setAllEyes(!allAppliedVisible)}
+                            className="h-7 px-2.5 rounded border border-sky-300 bg-sky-100 text-sky-900 text-[10.5px] font-semibold inline-flex items-center gap-1 hover:bg-sky-200/80"
+                          >
+                            {allAppliedVisible ? (
+                              <>
+                                <EyeOff className="w-3 h-3" />
+                                Hide All
+                              </>
+                            ) : (
+                              <>
+                                <Eye className="w-3 h-3" />
+                                Unhide All
+                              </>
+                            )}
+                          </button>
+                        )}
+                      </li>
                       {inventory.layers.map((row) => {
                         const isSelected = selected.has(row.layerId);
                         const isApplied = applied.has(row.layerId);

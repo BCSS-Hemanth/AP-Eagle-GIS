@@ -1,11 +1,14 @@
-import React, { useCallback, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Car,
+  ChevronDown,
   Eye,
   EyeOff,
+  Info,
   Motorbike,
   Navigation,
   PersonStanding,
+  Pin,
   Plus,
   Route,
   Trash2,
@@ -13,17 +16,23 @@ import {
 } from 'lucide-react';
 import type { GisLayer, WorkspaceId } from '../../types/gis';
 import { ApLeafletMap } from '../gis/ApLeafletMap';
+import { SavedLayerColorPicker } from '../gis/SavedLayerColorPicker';
 import { WorkspaceSidebarSplit } from '../gis/WorkspaceSidebarSplit';
+import { layerColorOverridesFromConfig } from '../../gis/layerColor';
 import {
   isRoutableRoadLayer,
   isRoutingLocationLayer,
+  isUnroutableDisplayRoadLayer,
   isPostgisRoadGeoJsonUrl,
   resolveLayerGeoJsonUrl,
   routingMapFlags,
   routingLayersFromConfig,
   type RoadsRoutingLayerConfig,
 } from '../../gis/roadsRoutingLayers';
-import { groupLayersByCatalogModule } from '../../gis/catalogWorkspaces';
+import {
+  groupLayersByCatalogModule,
+  type CatalogModuleSectionId,
+} from '../../gis/catalogWorkspaces';
 import { decimateRoutePoints } from '../../gis/mapRoadRenderSafety';
 import {
   buildRoadGraph,
@@ -36,11 +45,12 @@ import {
 import {
   filterFcForTravelMode,
   ROUTING_TRAVEL_MODE_LABEL,
+  ROUTING_TRAVEL_MODE_LAYER_LABELS,
   travelModeSpeedKmh,
   type RoutingTravelMode,
 } from '../../gis/roadsRoutingTravelMode';
 import { analyseOpsNearRoute, type OpsNearRoute } from '../../gis/roadsRoutingOps';
-import { osrmDrivingRouteAlternatives } from '../../gis/osmServices';
+import { osrmAlignRoutePolyline, osrmDrivingRouteAlternatives } from '../../gis/osmServices';
 import { featureBbox } from '../../gis/adminHierarchy';
 import { INDIA_CENTER, INDIA_DEFAULT_ZOOM } from '../../data/apGeo';
 
@@ -113,9 +123,17 @@ interface RoadsRoutingWorkspaceProps {
   allLayers: GisLayer[];
   routingConfig: RoadsRoutingLayerConfig;
   onChangeRoutingLayerVisibility: (layerId: string, enabled: boolean) => void;
+  /**
+   * Set Eye on/off for a subset of saved layers in one update
+   * (per Saved Layers section Hide All / Unhide All).
+   */
+  onSetRoutingLayersVisibility: (layerIds: string[], enabled: boolean) => void;
   /** Turn Eye on for every saved layer in one update (Find Routes / show networks). */
   onEnableAllSavedRoutingLayers: () => void;
   onRemoveRoutingLayer: (layerId: string) => void;
+  /** Remove a subset of saved layers in one update (per-section Clear All). */
+  onRemoveRoutingLayers: (layerIds: string[]) => void;
+  onChangeRoutingLayerColor: (layerId: string, color: string) => void;
   onClearSavedLayers: () => void;
   onSwitchWorkspace: (ws: WorkspaceId) => void;
   onTriggerToast: (msg: string) => void;
@@ -137,8 +155,11 @@ export const RoadsRoutingWorkspace: React.FC<RoadsRoutingWorkspaceProps> = ({
   allLayers,
   routingConfig,
   onChangeRoutingLayerVisibility,
+  onSetRoutingLayersVisibility,
   onEnableAllSavedRoutingLayers: _onEnableAllSavedRoutingLayers,
   onRemoveRoutingLayer,
+  onRemoveRoutingLayers,
+  onChangeRoutingLayerColor,
   onClearSavedLayers,
   onSwitchWorkspace,
   onTriggerToast,
@@ -148,6 +169,10 @@ export const RoadsRoutingWorkspace: React.FC<RoadsRoutingWorkspaceProps> = ({
     [allLayers, routingConfig]
   );
   const mapFlags = useMemo(() => routingMapFlags(savedLayers), [savedLayers]);
+  const layerColorOverrides = useMemo(
+    () => layerColorOverridesFromConfig(routingConfig),
+    [routingConfig]
+  );
 
   const [points, setPoints] = useState<RoutePointEntry[]>([]);
   /** Explicit opt-in: OSM/OSRM is never used unless the user turns this on. */
@@ -175,6 +200,64 @@ export const RoadsRoutingWorkspace: React.FC<RoadsRoutingWorkspaceProps> = ({
   const [busy, setBusy] = useState(false);
   const [routes, setRoutes] = useState<CalculatedRoute[]>([]);
   const [selectedRouteId, setSelectedRouteId] = useState<string | null>(null);
+  const [openCats, setOpenCats] = useState<Record<CatalogModuleSectionId, boolean>>({
+    'administrative-layers': false,
+    'operational-layers': false,
+    'road-network-layers': false,
+    other: false,
+  });
+  /** World overview until the user clicks the map (then India isolation). */
+  const [indiaIsolated, setIndiaIsolated] = useState(false);
+  const showWorldOverview = !indiaIsolated;
+  /** When pinned, section stays expanded and ignores hover mouse-out collapse. */
+  const [pinnedCats, setPinnedCats] = useState<Record<CatalogModuleSectionId, boolean>>({
+    'administrative-layers': false,
+    'operational-layers': false,
+    'road-network-layers': false,
+    other: false,
+  });
+  const pinnedCatsRef = useRef(pinnedCats);
+  pinnedCatsRef.current = pinnedCats;
+  /** Debounce hover-collapse so pin↔scrollbar moves do not flicker the section. */
+  const hoverCloseTimersRef = useRef<Partial<Record<CatalogModuleSectionId, number>>>({});
+
+  const clearCatHoverClose = useCallback((id: CatalogModuleSectionId) => {
+    const timer = hoverCloseTimersRef.current[id];
+    if (timer == null) return;
+    window.clearTimeout(timer);
+    delete hoverCloseTimersRef.current[id];
+  }, []);
+
+  const openCatOnHover = useCallback(
+    (id: CatalogModuleSectionId) => {
+      clearCatHoverClose(id);
+      setOpenCats((prev) => (prev[id] ? prev : { ...prev, [id]: true }));
+    },
+    [clearCatHoverClose]
+  );
+
+  const scheduleCatHoverClose = useCallback(
+    (id: CatalogModuleSectionId) => {
+      if (pinnedCatsRef.current[id]) return;
+      clearCatHoverClose(id);
+      hoverCloseTimersRef.current[id] = window.setTimeout(() => {
+        delete hoverCloseTimersRef.current[id];
+        if (pinnedCatsRef.current[id]) return;
+        setOpenCats((prev) => (!prev[id] ? prev : { ...prev, [id]: false }));
+      }, 280);
+    },
+    [clearCatHoverClose]
+  );
+
+  useEffect(
+    () => () => {
+      for (const timer of Object.values(hoverCloseTimersRef.current)) {
+        if (timer != null) window.clearTimeout(timer);
+      }
+      hoverCloseTimersRef.current = {};
+    },
+    []
+  );
 
   const resolvedPoints = useMemo(
     () =>
@@ -198,6 +281,28 @@ export const RoadsRoutingWorkspace: React.FC<RoadsRoutingWorkspaceProps> = ({
     setRoutes([]);
     setSelectedRouteId(null);
     setRouteFit(null);
+  };
+
+  /** Same map reset as Clear Pins (pins + routes off the map). */
+  const resetMapLikeClearPins = () => {
+    setPoints([]);
+    setPlacing(false);
+    invalidateRoutes();
+  };
+
+  /** Remove saved layers; when none remain, reset map like Clear Pins. */
+  const removeSavedLayersAndMaybeResetMap = (layerIds: string[]) => {
+    if (!layerIds.length) return;
+    const removing = new Set(layerIds);
+    const remaining = savedLayers.filter((layer) => !removing.has(layer.id)).length;
+    if (layerIds.length === 1) {
+      onRemoveRoutingLayer(layerIds[0]);
+    } else {
+      onRemoveRoutingLayers(layerIds);
+    }
+    if (remaining === 0) {
+      resetMapLikeClearPins();
+    }
   };
 
   const addPoint = () => {
@@ -237,7 +342,12 @@ export const RoadsRoutingWorkspace: React.FC<RoadsRoutingWorkspaceProps> = ({
     invalidateRoutes();
   };
 
+  const isolateIndiaIfNeeded = () => {
+    if (!indiaIsolated) setIndiaIsolated(true);
+  };
+
   const handleStatePick = (feature: GeoJSON.Feature, name: string) => {
+    isolateIndiaIfNeeded();
     if (placing) return;
     const bbox = featureBbox(feature);
     if (!bbox) return;
@@ -256,6 +366,10 @@ export const RoadsRoutingWorkspace: React.FC<RoadsRoutingWorkspaceProps> = ({
   const handleMapClick = (lat: number, lon: number) => {
     if (suppressMapClickRef.current) {
       suppressMapClickRef.current = false;
+      return;
+    }
+    if (!indiaIsolated) {
+      setIndiaIsolated(true);
       return;
     }
     if (!placing) return;
@@ -291,18 +405,18 @@ export const RoadsRoutingWorkspace: React.FC<RoadsRoutingWorkspaceProps> = ({
   };
 
   const clearPoints = () => {
-    setPoints([]);
-    setPlacing(false);
-    invalidateRoutes();
+    resetMapLikeClearPins();
     onTriggerToast('Cleared pins and routes');
   };
 
   const clearAllLayers = () => {
     onClearSavedLayers();
+    resetMapLikeClearPins();
     onTriggerToast('Cleared all layers');
   };
 
   const fitIndia = () => {
+    setIndiaIsolated(true);
     setPlacing(false);
     setPickedState(null);
     setRouteFit(null);
@@ -387,11 +501,14 @@ export const RoadsRoutingWorkspace: React.FC<RoadsRoutingWorkspaceProps> = ({
           const contributing = hit.layerIds.length
             ? hit.layerIds
             : graphLayers.map((g) => g.layerId);
+          const rawPoints = hit.points.map((p) => ({ lat: p.lat, lon: p.lon }));
+          // Align drawn polyline to pavement on satellite basemaps (GIS graph unchanged).
+          const aligned = await osrmAlignRoutePolyline(rawPoints);
           collected.push({
             id: `gis-${mode}-${i + 1}`,
             name: `${modeLabel} alt ${i + 1}`,
             color: nextColor(),
-            points: hit.points.map((p) => ({ lat: p.lat, lon: p.lon })),
+            points: aligned ?? rawPoints,
             distanceKm: hit.distanceKm,
             durationMin: estimateDurationMin(hit.distanceKm, speedKmh),
             layerIds: contributing,
@@ -402,6 +519,9 @@ export const RoadsRoutingWorkspace: React.FC<RoadsRoutingWorkspaceProps> = ({
               ...hit.notes,
               `Travel mode: ${modeLabel}.`,
               `Combined network graph: ${stats.nodes} nodes / ${stats.edges} edges from ${graphLayers.length} enabled road layer(s).`,
+              ...(aligned
+                ? ['Display geometry aligned to the OSM driving network for basemap registration.']
+                : []),
               ...loadNotes.slice(0, 6),
             ],
             ops: [],
@@ -590,6 +710,9 @@ export const RoadsRoutingWorkspace: React.FC<RoadsRoutingWorkspaceProps> = ({
   );
 
   const mapHint = (() => {
+    if (showWorldOverview) {
+      return 'World view — click the map to isolate India';
+    }
     if (!placing || !pickedState) {
       return points.length
         ? 'Enter coordinates below, or click a state to zoom in before pinning on the map'
@@ -635,18 +758,37 @@ export const RoadsRoutingWorkspace: React.FC<RoadsRoutingWorkspaceProps> = ({
 
   const selected = routes.find((r) => r.id === selectedRouteId) ?? null;
   const savedCount = savedLayers.length;
+  const allRoutesVisible =
+    routes.length > 0 && routes.every((r) => r.visible);
+
+  const setAllRoutesVisible = (on: boolean) => {
+    setRoutes((prev) => {
+      if (!prev.length) return prev;
+      if (prev.every((r) => r.visible === on)) return prev;
+      return prev.map((r) => (r.visible === on ? r : { ...r, visible: on }));
+    });
+  };
 
   return (
-    <div className="h-full min-h-0 overflow-hidden bg-[#e8eef4] flex flex-col">
+    <div className="h-full min-h-0 overflow-hidden bg-surface flex flex-col">
       <WorkspaceSidebarSplit
         testId="roads-routing-split"
-        asideClassName="w-full lg:w-[340px] shrink-0 border-b lg:border-b-0 lg:border-r border-outline-variant/40 bg-surface-container-lowest flex flex-col max-h-[42vh] lg:max-h-none overflow-hidden"
+        asideClassName="w-full lg:w-[340px] shrink-0 border-b lg:border-b-0 lg:border-r border-outline-variant/40 ws-aside bg-surface-container-lowest flex flex-col max-h-[42vh] lg:max-h-none overflow-hidden"
         sidebar={
           <>
-        <div className="p-3 border-b border-outline-variant/35 space-y-2">
+        <div className="p-3 border-b border-outline-variant/35 space-y-2 bg-surface-container-lowest/90">
           <div className="flex items-center gap-2">
-            <Navigation className="w-4 h-4 text-secondary" />
-            <h1 className="text-sm font-bold text-primary tracking-tight">Roads Routing</h1>
+            <span className="inline-flex items-center justify-center w-7 h-7 rounded-md bg-secondary-container/60 text-secondary">
+              <Navigation className="w-3.5 h-3.5" />
+            </span>
+            <div className="min-w-0">
+              <div className="text-[9.5px] font-bold uppercase tracking-[0.12em] text-secondary">
+                Routing
+              </div>
+              <h1 className="text-sm font-bold text-primary tracking-tight leading-tight">
+                Roads Routing
+              </h1>
+            </div>
           </div>
           <div className="flex flex-wrap gap-1.5">
             <button
@@ -790,7 +932,7 @@ export const RoadsRoutingWorkspace: React.FC<RoadsRoutingWorkspaceProps> = ({
           </div>
         </div>
 
-        <div className="flex-1 min-h-0 overflow-y-auto p-3 space-y-3">
+        <div className="flex-1 min-h-0 overflow-y-auto [scrollbar-gutter:stable] p-3 space-y-3">
           <section>
             <h2 className="text-[10px] font-bold uppercase tracking-wider text-on-surface-variant mb-1.5">
               Saved layers ({savedCount})
@@ -802,67 +944,293 @@ export const RoadsRoutingWorkspace: React.FC<RoadsRoutingWorkspaceProps> = ({
               </p>
             ) : (
               <div className="space-y-2">
-                {groupLayersByCatalogModule(savedLayers).map((group) => (
-                  <div key={group.id}>
-                    <h3 className="text-[9px] font-bold uppercase tracking-wider text-on-surface-variant mb-1">
-                      {group.label}
-                    </h3>
-                    <ul className="space-y-1.5">
-                      {group.layers.map((layer) => {
-                        const visible = Boolean(routingConfig[layer.id]?.enabled);
-                        return (
-                          <li
-                            key={layer.id}
-                            className="rounded border border-outline-variant/40 bg-white px-2 py-1.5 text-[11px]"
-                          >
-                            <div className="flex items-center gap-2">
-                              <button
-                                type="button"
-                                className="cursor-pointer p-0.5"
-                                title={visible ? 'Hide on map' : 'Show on map'}
-                                aria-label={visible ? `Hide ${layer.name}` : `Show ${layer.name}`}
-                                onClick={() =>
-                                  onChangeRoutingLayerVisibility(layer.id, !visible)
-                                }
-                              >
-                                {visible ? (
-                                  <Eye className="w-3.5 h-3.5 text-primary" />
-                                ) : (
-                                  <EyeOff className="w-3.5 h-3.5 text-on-surface-variant" />
-                                )}
-                              </button>
-                              <span className="flex-1 truncate font-medium" title={layer.name}>
-                                {layer.name}
-                              </span>
-                              <button
-                                type="button"
-                                className="cursor-pointer text-error"
-                                title="Remove from Roads Routing"
-                                onClick={() => onRemoveRoutingLayer(layer.id)}
-                              >
-                                <Trash2 className="w-3 h-3" />
-                              </button>
-                            </div>
-                            {!visible && (
-                              <div className="mt-0.5 text-[9px] text-on-surface-variant pl-5">
-                                Status: Hidden
-                              </div>
-                            )}
-                          </li>
-                        );
-                      })}
-                    </ul>
-                  </div>
-                ))}
+                {groupLayersByCatalogModule(savedLayers).map((group) => {
+                  const open = openCats[group.id];
+                  const pinned = pinnedCats[group.id];
+                  const toggleableLayers = group.layers.filter(
+                    (layer) => !isUnroutableDisplayRoadLayer(layer)
+                  );
+                  const allVisibleInSection =
+                    toggleableLayers.length > 0 &&
+                    toggleableLayers.every((layer) =>
+                      Boolean(routingConfig[layer.id]?.enabled)
+                    );
+                  return (
+                    <section
+                      key={group.id}
+                      className="rounded border border-outline-variant/40 overflow-hidden"
+                      onMouseEnter={() => openCatOnHover(group.id)}
+                      onMouseLeave={() => scheduleCatHoverClose(group.id)}
+                    >
+                      <div className="flex items-stretch bg-surface-container-lowest">
+                        <button
+                          type="button"
+                          className="min-w-0 flex-1 flex items-center justify-between px-2.5 py-2 text-left"
+                          onClick={() =>
+                            setOpenCats((prev) => ({
+                              ...prev,
+                              [group.id]: !prev[group.id],
+                            }))
+                          }
+                        >
+                          <span className="text-[11px] font-bold text-primary">
+                            {group.label}
+                          </span>
+                          <span className="flex items-center gap-1 text-[10px] text-on-surface-variant">
+                            {group.layers.length}
+                            <ChevronDown
+                              className={`w-3.5 h-3.5 transition ${open ? 'rotate-180' : ''}`}
+                            />
+                          </span>
+                        </button>
+                        <button
+                          type="button"
+                          data-testid={`roads-routing-pin-${group.id}`}
+                          title={pinned ? 'Unpin section' : 'Pin section open'}
+                          aria-pressed={pinned}
+                          aria-label={
+                            pinned
+                              ? `Unpin ${group.label}`
+                              : `Pin ${group.label} open`
+                          }
+                          className="shrink-0 px-2 py-2 border-l border-outline-variant/30 hover:bg-surface-container-high"
+                          onClick={(e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            clearCatHoverClose(group.id);
+                            setPinnedCats((prev) => {
+                              const nextPinned = !prev[group.id];
+                              const next = { ...prev, [group.id]: nextPinned };
+                              pinnedCatsRef.current = next;
+                              if (nextPinned) {
+                                setOpenCats((openPrev) =>
+                                  openPrev[group.id]
+                                    ? openPrev
+                                    : { ...openPrev, [group.id]: true }
+                                );
+                              }
+                              return next;
+                            });
+                          }}
+                        >
+                          <Pin
+                            className={`w-3.5 h-3.5 ${
+                              pinned
+                                ? 'fill-primary text-primary rotate-45'
+                                : 'text-on-surface-variant'
+                            }`}
+                          />
+                        </button>
+                      </div>
+                      {open && (
+                        <div className="bg-surface">
+                          <div className="px-2.5 py-1.5 bg-surface-container-lowest/80 flex flex-wrap items-center gap-1.5 border-b border-outline-variant/30">
+                            <button
+                              type="button"
+                              data-testid={`roads-routing-hide-unhide-${group.id}`}
+                              disabled={toggleableLayers.length === 0}
+                              onClick={() =>
+                                onSetRoutingLayersVisibility(
+                                  toggleableLayers.map((layer) => layer.id),
+                                  !allVisibleInSection
+                                )
+                              }
+                              className="h-7 px-2.5 rounded border border-sky-300 bg-sky-100 text-sky-900 text-[10.5px] font-semibold inline-flex items-center gap-1 hover:bg-sky-200/80 disabled:opacity-50 disabled:cursor-not-allowed"
+                            >
+                              {allVisibleInSection ? (
+                                <>
+                                  <EyeOff className="w-3 h-3" />
+                                  Hide All
+                                </>
+                              ) : (
+                                <>
+                                  <Eye className="w-3 h-3" />
+                                  Unhide All
+                                </>
+                              )}
+                            </button>
+                            <button
+                              type="button"
+                              data-testid={`roads-routing-clear-all-${group.id}`}
+                              onClick={() =>
+                                removeSavedLayersAndMaybeResetMap(
+                                  group.layers.map((layer) => layer.id)
+                                )
+                              }
+                              className="h-7 px-2.5 rounded border border-error/40 bg-error/10 text-error text-[10.5px] font-semibold inline-flex items-center gap-1 hover:bg-error/15"
+                            >
+                              <Trash2 className="w-3 h-3" />
+                              Clear All
+                            </button>
+                          </div>
+                          <ul className="space-y-1.5 p-1.5">
+                            {group.layers.map((layer) => {
+                              const unroutable = isUnroutableDisplayRoadLayer(layer);
+                              const visible = unroutable
+                                ? false
+                                : Boolean(routingConfig[layer.id]?.enabled);
+                              return (
+                                <li
+                                  key={layer.id}
+                                  className={`rounded border border-outline-variant/40 px-2 py-1.5 text-[11px] ${
+                                    unroutable
+                                      ? 'bg-surface-container-low/80 opacity-80'
+                                      : 'bg-white'
+                                  }`}
+                                  data-unroutable={unroutable ? 'true' : 'false'}
+                                >
+                                  <div className="flex items-center gap-2">
+                                    <button
+                                      type="button"
+                                      className={`p-0.5 ${
+                                        unroutable
+                                          ? 'cursor-not-allowed opacity-50'
+                                          : 'cursor-pointer'
+                                      }`}
+                                      title={
+                                        unroutable
+                                          ? 'Not routable — removed from map (disabled)'
+                                          : visible
+                                            ? 'Hide on map'
+                                            : 'Show on map'
+                                      }
+                                      aria-label={
+                                        unroutable
+                                          ? `${layer.name} not routable`
+                                          : visible
+                                            ? `Hide ${layer.name}`
+                                            : `Show ${layer.name}`
+                                      }
+                                      aria-disabled={unroutable}
+                                      disabled={unroutable}
+                                      onClick={() => {
+                                        if (unroutable) return;
+                                        onChangeRoutingLayerVisibility(layer.id, !visible);
+                                      }}
+                                    >
+                                      {visible ? (
+                                        <Eye className="w-3.5 h-3.5 text-primary" />
+                                      ) : (
+                                        <EyeOff className="w-3.5 h-3.5 text-on-surface-variant" />
+                                      )}
+                                    </button>
+                                    <span
+                                      className={`flex-1 truncate font-medium ${
+                                        unroutable ? 'text-on-surface-variant' : ''
+                                      }`}
+                                      title={layer.name}
+                                    >
+                                      {layer.name}
+                                    </span>
+                                    {!unroutable && (
+                                      <SavedLayerColorPicker
+                                        layerId={layer.id}
+                                        color={routingConfig[layer.id]?.color}
+                                        title={`Colour for ${layer.name}`}
+                                        onChange={(color) =>
+                                          onChangeRoutingLayerColor(layer.id, color)
+                                        }
+                                      />
+                                    )}
+                                    <button
+                                      type="button"
+                                      className="cursor-pointer text-error"
+                                      title="Remove from Roads Routing"
+                                      onClick={() =>
+                                        removeSavedLayersAndMaybeResetMap([layer.id])
+                                      }
+                                    >
+                                      <Trash2 className="w-3 h-3" />
+                                    </button>
+                                  </div>
+                                  {unroutable ? (
+                                    <div className="mt-0.5 text-[9px] text-on-surface-variant pl-5">
+                                      Status: Not applied · Not routable (disabled)
+                                    </div>
+                                  ) : !visible ? (
+                                    <div className="mt-0.5 text-[9px] text-on-surface-variant pl-5">
+                                      Status: Hidden
+                                    </div>
+                                  ) : null}
+                                </li>
+                              );
+                            })}
+                          </ul>
+                        </div>
+                      )}
+                    </section>
+                  );
+                })}
               </div>
             )}
           </section>
 
           <section>
-            <div className="flex items-center gap-2 mb-1.5">
-              <h2 className="text-[10px] font-bold uppercase tracking-wider text-on-surface-variant flex-1">
+            <div className="flex flex-wrap items-center gap-1.5 mb-1.5">
+              <h2 className="text-[10px] font-bold uppercase tracking-wider text-on-surface-variant min-w-0">
                 Route alternatives ({routes.length})
               </h2>
+              <div className="relative group/travel-help shrink-0">
+                <button
+                  type="button"
+                  data-testid="roads-routing-travel-mode-help"
+                  aria-label="Travel mode layer description"
+                  title="Travel mode layers"
+                  className="h-7 w-7 rounded border border-outline-variant/50 bg-white text-on-surface-variant hover:text-primary hover:bg-surface-container inline-flex items-center justify-center cursor-pointer"
+                >
+                  <Info className="w-3.5 h-3.5" />
+                </button>
+                <div
+                  role="tooltip"
+                  className="pointer-events-none invisible opacity-0 group-hover/travel-help:visible group-hover/travel-help:opacity-100 transition-opacity absolute left-0 top-full z-[40] mt-1 w-[260px] rounded border border-outline-variant/50 bg-white p-2.5 shadow-lg text-left"
+                >
+                  <p className="text-[10px] font-bold text-primary mb-1.5">
+                    Layers used per travel mode
+                  </p>
+                  {(
+                    [
+                      ['four-wheeler', '1. Four-Wheeler'],
+                      ['two-wheeler', '2. Two-Wheeler'],
+                      ['on-foot', '3. By Foot'],
+                    ] as const
+                  ).map(([mode, heading]) => (
+                    <div key={mode} className="mb-1.5 last:mb-0">
+                      <div className="text-[10px] font-semibold text-secondary">{heading}</div>
+                      <ul className="mt-0.5 space-y-0.5 pl-2">
+                        {ROUTING_TRAVEL_MODE_LAYER_LABELS[mode].map((name) => (
+                          <li
+                            key={name}
+                            className="text-[9.5px] text-on-surface-variant leading-snug list-disc ml-2"
+                          >
+                            {name}
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  ))}
+                </div>
+              </div>
+              <div className="flex-1 min-w-0" />
+              {routes.length > 0 && (
+                <button
+                  type="button"
+                  data-testid="roads-routing-hide-unhide-routes"
+                  onClick={() => setAllRoutesVisible(!allRoutesVisible)}
+                  className="h-7 px-2.5 rounded border border-sky-300 bg-sky-100 text-sky-900 text-[10.5px] font-semibold inline-flex items-center gap-1 hover:bg-sky-200/80"
+                >
+                  {allRoutesVisible ? (
+                    <>
+                      <EyeOff className="w-3 h-3" />
+                      Hide All
+                    </>
+                  ) : (
+                    <>
+                      <Eye className="w-3 h-3" />
+                      Unhide All
+                    </>
+                  )}
+                </button>
+              )}
               <div
                 className="inline-flex items-center gap-0.5 rounded border border-outline-variant/50 bg-white p-0.5"
                 role="group"
@@ -1040,9 +1408,11 @@ export const RoadsRoutingWorkspace: React.FC<RoadsRoutingWorkspaceProps> = ({
           <ApLeafletMap
             className="h-full w-full"
             basemap="satellite"
-            fitToState
+            fitToState={indiaIsolated}
+            unconstrainedWorldView={showWorldOverview}
+            suppressIndiaOverviewMask={showWorldOverview}
             interactive
-            clickMode={placing ? 'inspect' : 'pan'}
+            clickMode={placing || showWorldOverview ? 'inspect' : 'pan'}
             onMapClick={handleMapClick}
             indiaStatePick={placing ? 'pass' : 'pick'}
             onIndiaStatePick={handleStatePick}
@@ -1054,12 +1424,13 @@ export const RoadsRoutingWorkspace: React.FC<RoadsRoutingWorkspaceProps> = ({
             markers={markers}
             overlayRoutes={overlayRoutes}
             apOnlyPermanentStateLabels
-            showStateBorder={mapFlags.showStateBorder}
-            stateOpacity={mapFlags.stateOpacity}
+            compactApStateLabel
             showDistricts={mapFlags.showDistricts}
             districtOpacity={mapFlags.districtOpacity}
             showMandals={mapFlags.showMandals}
             showVillages={mapFlags.showVillages}
+            villageFetchMinZoom={0}
+            layerColorOverrides={layerColorOverrides}
             mandalOpacity={mapFlags.mandalOpacity}
             villageOpacity={mapFlags.villageOpacity}
             showDistrictsGisHist={mapFlags.showDistrictsGisHist}
@@ -1080,14 +1451,12 @@ export const RoadsRoutingWorkspace: React.FC<RoadsRoutingWorkspaceProps> = ({
             showAgencyRoutes={mapFlags.showAgencyRoutes}
             showPoliceStations={mapFlags.showPoliceStations}
             policeStationOpacity={mapFlags.policeStationOpacity}
-            // Border PS stay off — many are mislabeled (e.g. Warangal as AP).
-            showBorderPs={false}
+            showBorderPs={mapFlags.showBorderPs}
             showProposedAnpr={mapFlags.showProposedAnpr}
             showApNeighborStates={mapFlags.showApNeighborStates}
             showAobDists={mapFlags.showAobDists}
             showKmzVillages={mapFlags.showKmzVillages}
             showPsBorderArea={mapFlags.showPsBorderArea}
-            showAtlasMapData={mapFlags.showAtlasMapData}
             showTalukGis={mapFlags.showTalukGis}
             showVspVillagePts={mapFlags.showVspVillagePts}
             showPlaces={mapFlags.showPlaces}
@@ -1107,7 +1476,7 @@ export const RoadsRoutingWorkspace: React.FC<RoadsRoutingWorkspaceProps> = ({
               .sort()
               .join(',')}:${routes.length}:pts:${resolvedPoints
               .map((p) => `${p.id}:${p.lat.toFixed(5)},${p.lon.toFixed(5)}`)
-              .join('|')}`}
+              .join('|')}:${indiaIsolated ? 'in' : 'world'}`}
           />
           <div
             data-testid="roads-routing-map-hint"

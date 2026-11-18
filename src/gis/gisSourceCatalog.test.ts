@@ -47,7 +47,6 @@ describe('GIS-Source Admin Phase 1A catalog', () => {
       'lyr-aob-dists',
       'lyr-kmz-villages',
       'lyr-ps-border-area',
-      'lyr-atlas-map-data',
       'lyr-taluk-gis',
       'lyr-vsp-village-pts',
       'lyr-ap-roads-major',
@@ -165,7 +164,6 @@ const EXPECTED_PARTIAL_ADMIN_COUNTS = {
   aobDists: 31,
   kmzVillages: 266,
   psBorderArea: 99,
-  atlasMapData: 1005,
 } as const;
 
 const EXPECTED_PARTIAL_ROAD_COUNTS = {

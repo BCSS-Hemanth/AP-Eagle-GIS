@@ -1,6 +1,7 @@
 import type { AtlasConfig, AtlasDistrictConfig } from './atlasTypes';
 import { ATLAS_LAYER_STORAGE_KEY } from './atlasTypes';
 import type { JsonStorage } from '../dashboardLayers';
+import { normalizeLayerColorMap } from '../layerColor';
 
 export function emptyAtlasDistrictConfig(districtId: string): AtlasDistrictConfig {
   return {
@@ -9,6 +10,7 @@ export function emptyAtlasDistrictConfig(districtId: string): AtlasDistrictConfi
     appliedLayerIds: [],
     layerVisibility: {},
     layerOpacity: {},
+    layerColors: {},
   };
 }
 
@@ -57,6 +59,9 @@ export function loadAtlasConfig(storage: JsonStorage | null = browserStorage()):
                 Object.entries(row.layerOpacity).filter(([, v]) => typeof v === 'number')
               )
             : {},
+        layerColors: normalizeLayerColorMap(
+          (row as { layerColors?: unknown }).layerColors
+        ),
       };
     }
     return {

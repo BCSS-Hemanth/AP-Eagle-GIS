@@ -36,9 +36,9 @@ export const GIS_SOURCE_ADMIN_LAYERS = {
   aobDists: `${GIS_SOURCE_ADMIN_BASE}/aob_dists.geojson`,
   kmzVillages: `${GIS_SOURCE_ADMIN_BASE}/kmz_villages.geojson`,
   psBorderArea: `${GIS_SOURCE_ADMIN_BASE}/ps_border_area.geojson`,
-  atlasMapData: `${GIS_SOURCE_ADMIN_BASE}/atlas_map_data.geojson`,
   rail: `${GIS_SOURCE_ADMIN_BASE}/rail_nt.geojson`,
-  roadsMajor: `${GIS_SOURCE_ADMIN_BASE}/ap_roads_major.geojson`,
+  /** ?v= busts stale browser/module cache after pavement-alignment densify. */
+  roadsMajor: `${GIS_SOURCE_ADMIN_BASE}/ap_roads_major.geojson?v=20261117-osrm-dense`,
 } as const;
 
 /** Road Network KMZ products. Independent of OPS d_routes (`lyr-drug-routes`). */

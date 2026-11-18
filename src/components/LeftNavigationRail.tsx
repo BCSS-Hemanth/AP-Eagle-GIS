@@ -46,11 +46,11 @@ export const LeftNavigationRail: React.FC<LeftNavigationRailProps> = ({
     <aside
       onMouseEnter={onEnter}
       onMouseLeave={onLeave}
-      className={`fixed left-0 top-14 bottom-0 bg-surface-container-lowest border-r border-outline-variant/35 flex flex-col transition-all duration-200 select-none ${
-        expanded ? 'w-64 shadow-lg' : 'w-14'
+      className={`fixed left-0 top-14 bottom-0 app-shell-chrome border-r border-outline-variant/35 flex flex-col transition-all duration-200 select-none ${
+        expanded ? 'w-64 shadow-[4px_0_24px_rgba(11,28,48,0.08)]' : 'w-14'
       } ${collapsed && hovered ? 'z-[800]' : 'z-40'}`}
     >
-      <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden gis-scroll py-2 pb-3 space-y-3">
+      <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden gis-scroll py-2.5 pb-3 space-y-3.5">
         {APP_NAV_SECTIONS.map((section) => {
           const items = allowedWorkspaces
             ? section.items.filter((item) => allowedWorkspaces.includes(item.id))
@@ -60,7 +60,7 @@ export const LeftNavigationRail: React.FC<LeftNavigationRailProps> = ({
             <div key={section.id}>
               {expanded && (
                 <div className="px-3 mb-1.5">
-                  <span className="text-[10px] font-bold uppercase tracking-wider text-outline">
+                  <span className="text-[10px] font-bold uppercase tracking-[0.12em] text-outline">
                     {section.title}
                   </span>
                 </div>
@@ -76,12 +76,15 @@ export const LeftNavigationRail: React.FC<LeftNavigationRailProps> = ({
                       data-testid={`nav-${item.id}`}
                       title={!expanded ? item.label : undefined}
                       onClick={() => onSelectWorkspace(item.id)}
-                      className={`w-full flex items-center justify-between px-2 py-1.5 rounded text-left transition-colors cursor-pointer ${
+                      className={`relative w-full flex items-center justify-between px-2 py-1.5 rounded-md text-left cursor-pointer ${
                         isActive
-                          ? 'bg-primary-container text-on-primary font-semibold'
+                          ? 'bg-primary text-on-primary font-semibold shadow-sm'
                           : 'text-on-surface-variant hover:bg-surface-container-low hover:text-on-surface font-normal'
                       }`}
                     >
+                      {isActive && (
+                        <span className="absolute left-0 top-1 bottom-1 w-[3px] rounded-r-full bg-secondary-fixed" />
+                      )}
                       <div className="flex items-center gap-2 min-w-0">
                         <Icon
                           className={`w-4 h-4 shrink-0 ${

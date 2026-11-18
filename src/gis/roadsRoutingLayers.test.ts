@@ -3,6 +3,7 @@ import { INITIAL_GIS_LAYERS } from '../data/apGisData';
 import { layersInCatalogScope } from './catalogWorkspaces';
 import {
   isRoutableRoadLayer,
+  isUnroutableDisplayRoadLayer,
   listRoutableRoadLayerIds,
   mergeEnabledLayersIntoRoutingConfig,
   resolveLayerGeoJsonUrl,
@@ -38,6 +39,33 @@ describe('roadsRoutingLayers', () => {
     expect(rows[0].enabled).toBe(false);
   });
 
+  it('keeps unroutable road lines listed but off the map when saved', () => {
+    expect(isUnroutableDisplayRoadLayer('lyr-railways')).toBe(true);
+    expect(isUnroutableDisplayRoadLayer('lyr-rivers')).toBe(true);
+    expect(isUnroutableDisplayRoadLayer('lyr-highways')).toBe(false);
+    expect(isUnroutableDisplayRoadLayer('lyr-pss')).toBe(false);
+
+    const config = {
+      'lyr-railways': { enabled: true, opacity: 100 },
+      'lyr-highways': { enabled: true, opacity: 100 },
+    };
+    const rows = routingLayersFromConfig(INITIAL_GIS_LAYERS, config);
+    const rail = rows.find((l) => l.id === 'lyr-railways');
+    const hwy = rows.find((l) => l.id === 'lyr-highways');
+    expect(rail?.enabled).toBe(false);
+    expect(hwy?.enabled).toBe(true);
+
+    const merged = mergeEnabledLayersIntoRoutingConfig(
+      {},
+      INITIAL_GIS_LAYERS.map((l) =>
+        l.id === 'lyr-railways' || l.id === 'lyr-highways' ? { ...l, enabled: true } : l
+      ),
+      null
+    );
+    expect(merged['lyr-railways']?.enabled).toBe(false);
+    expect(merged['lyr-highways']?.enabled).toBe(false);
+  });
+
   it('treats every Road Network LineString as routable except rail/water/intel corridors', () => {
     expect(isRoutableRoadLayer('lyr-highways')).toBe(true);
     expect(isRoutableRoadLayer('lyr-ap-roads-major')).toBe(true);
@@ -47,10 +75,11 @@ describe('roadsRoutingLayers', () => {
     expect(isRoutableRoadLayer('lyr-roads-asr-classified')).toBe(true);
     expect(isRoutableRoadLayer('lyr-asr-road-network')).toBe(true);
     expect(isRoutableRoadLayer('lyr-route-modeling')).toBe(true);
+    expect(isRoutableRoadLayer('lyr-ganja-transport-routes')).toBe(true);
 
     expect(isRoutableRoadLayer('lyr-railways')).toBe(false);
     expect(isRoutableRoadLayer('lyr-rivers')).toBe(false);
-    expect(isRoutableRoadLayer('lyr-ganja-transport-routes')).toBe(false);
+    expect(isRoutableRoadLayer('lyr-drug-routes')).toBe(false);
     expect(isRoutableRoadLayer('lyr-pss')).toBe(false);
 
     const roadNet = layersInCatalogScope('road-network-layers', INITIAL_GIS_LAYERS);
@@ -59,11 +88,7 @@ describe('roadsRoutingLayers', () => {
         expect(isRoutableRoadLayer(layer)).toBe(false);
         continue;
       }
-      if (
-        layer.id === 'lyr-railways' ||
-        layer.id === 'lyr-rivers' ||
-        layer.id === 'lyr-ganja-transport-routes'
-      ) {
+      if (layer.id === 'lyr-railways' || layer.id === 'lyr-rivers') {
         expect(isRoutableRoadLayer(layer)).toBe(false);
       } else {
         expect(isRoutableRoadLayer(layer)).toBe(true);
@@ -78,7 +103,7 @@ describe('roadsRoutingLayers', () => {
   it('resolves catalog sourceTable paths to fetchable GeoJSON URLs', () => {
     const major = INITIAL_GIS_LAYERS.find((l) => l.id === 'lyr-ap-roads-major')!;
     expect(resolveLayerGeoJsonUrl(major)).toBe(
-      '/geo/gis-source/admin/ap_roads_major.geojson'
+      '/geo/gis-source/admin/ap_roads_major.geojson?v=20261117-osrm-dense'
     );
     const nh = INITIAL_GIS_LAYERS.find((l) => l.id === 'lyr-highways')!;
     expect(resolveLayerGeoJsonUrl(nh)).toContain('/api/gis-roads/geojson');

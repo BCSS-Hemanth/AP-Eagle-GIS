@@ -33,6 +33,7 @@ describe('atlasConfig', () => {
       selectedLayerIds: ['lyr-pss'],
       appliedLayerIds: ['lyr-pss'],
       layerVisibility: { 'lyr-pss': true },
+      layerColors: { 'lyr-pss': '#aabbcc' },
     });
     cfg = { ...cfg, activeDistrictId: 'asr' };
     expect(persistAtlasConfig(cfg, storage)).toBe(true);
@@ -40,5 +41,36 @@ describe('atlasConfig', () => {
     const loaded = loadAtlasConfig(storage);
     expect(loaded.activeDistrictId).toBe('asr');
     expect(loaded.districts.asr.appliedLayerIds).toEqual(['lyr-pss']);
+    expect(loaded.districts.asr.layerColors).toEqual({ 'lyr-pss': '#aabbcc' });
+  });
+
+  it('starts with empty layerColors and ignores invalid hex on load', () => {
+    expect(emptyAtlasDistrictConfig('asr').layerColors).toEqual({});
+    const mem = new Map<string, string>();
+    const storage = {
+      getItem: (k: string) => mem.get(k) ?? null,
+      setItem: (k: string, v: string) => {
+        mem.set(k, v);
+      },
+    };
+    mem.set(
+      ATLAS_LAYER_STORAGE_KEY,
+      JSON.stringify({
+        version: 1,
+        activeDistrictId: 'asr',
+        districts: {
+          asr: {
+            districtId: 'asr',
+            selectedLayerIds: ['lyr-pss'],
+            appliedLayerIds: ['lyr-pss'],
+            layerVisibility: {},
+            layerOpacity: {},
+            layerColors: { 'lyr-pss': 'not-a-color', 'lyr-hotspots': '#ff00aa' },
+          },
+        },
+      })
+    );
+    const loaded = loadAtlasConfig(storage);
+    expect(loaded.districts.asr.layerColors).toEqual({ 'lyr-hotspots': '#ff00aa' });
   });
 });

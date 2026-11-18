@@ -76,3 +76,55 @@ export async function osrmDrivingRouteAlternatives(
     durationMin: Math.round(route.duration / 60),
   }));
 }
+
+/**
+ * Align a GIS route polyline to the OSM driving network for satellite basemap display.
+ * Topology/search still come from GIS; this only remaps drawn coordinates onto pavement.
+ */
+export async function osrmAlignRoutePolyline(
+  points: Array<{ lat: number; lon: number }>,
+  options?: { maxWaypoints?: number; radiusM?: number }
+): Promise<Array<{ lat: number; lon: number }> | null> {
+  if (points.length < 2) return null;
+  const maxWaypoints = options?.maxWaypoints ?? 80;
+  const radiusM = options?.radiusM ?? 60;
+  const sampled =
+    points.length <= maxWaypoints
+      ? points
+      : (() => {
+          const out: Array<{ lat: number; lon: number }> = [];
+          const step = (points.length - 1) / (maxWaypoints - 1);
+          for (let i = 0; i < maxWaypoints; i++) {
+            out.push(points[Math.round(i * step)]!);
+          }
+          const last = points[points.length - 1]!;
+          if (out[out.length - 1] !== last) out[out.length - 1] = last;
+          return out;
+        })();
+  const coords = sampled.map((p) => `${p.lon},${p.lat}`).join(';');
+  const radiuses = sampled.map(() => String(radiusM)).join(';');
+  const url =
+    `https://router.project-osrm.org/match/v1/driving/${coords}` +
+    `?overview=full&geometries=geojson&radiuses=${radiuses}&gaps=ignore`;
+  try {
+    const res = await fetch(url);
+    if (!res.ok) return null;
+    const json = (await res.json()) as {
+      code?: string;
+      matchings?: Array<{ geometry?: { coordinates?: number[][] } }>;
+    };
+    if (json.code !== 'Ok' || !json.matchings?.length) return null;
+    const merged: Array<{ lat: number; lon: number }> = [];
+    for (const matching of json.matchings) {
+      const line = matching.geometry?.coordinates ?? [];
+      for (const [lon, lat] of line) {
+        if (!merged.length || merged[merged.length - 1]!.lon !== lon || merged[merged.length - 1]!.lat !== lat) {
+          merged.push({ lat, lon });
+        }
+      }
+    }
+    return merged.length >= 2 ? merged : null;
+  } catch {
+    return null;
+  }
+}

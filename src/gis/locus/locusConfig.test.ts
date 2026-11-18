@@ -36,10 +36,34 @@ describe('locusConfig', () => {
       selectedLayerIds: ['lyr-pss'],
       appliedLayerIds: ['lyr-pss'],
       layerVisibility: { 'lyr-pss': true },
+      layerColors: { 'lyr-pss': '#112233' },
     });
     expect(persistLocusConfig(cfg, storage)).toBe(true);
     expect(storage.getItem(LOCUS_LAYER_STORAGE_KEY)).toBeTruthy();
     const loaded = loadLocusConfig(storage);
     expect(loaded.districts.asr.appliedLayerIds).toEqual(['lyr-pss']);
+    expect(loaded.districts.asr.layerColors).toEqual({ 'lyr-pss': '#112233' });
+  });
+
+  it('starts with empty layerColors and ignores invalid hex on load', () => {
+    expect(emptyLocusDistrictConfig('asr').layerColors).toEqual({});
+    const storage = memoryStorage({
+      [LOCUS_LAYER_STORAGE_KEY]: JSON.stringify({
+        version: 1,
+        activeDistrictId: 'asr',
+        districts: {
+          asr: {
+            districtId: 'asr',
+            selectedLayerIds: ['lyr-pss'],
+            appliedLayerIds: ['lyr-pss'],
+            layerVisibility: {},
+            layerOpacity: {},
+            layerColors: { 'lyr-pss': 'bad', 'lyr-hotspots': '#00ff99' },
+          },
+        },
+      }),
+    });
+    const loaded = loadLocusConfig(storage);
+    expect(loaded.districts.asr.layerColors).toEqual({ 'lyr-hotspots': '#00ff99' });
   });
 });

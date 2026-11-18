@@ -58,12 +58,6 @@ const ASR_LAYERS: LocusInventoryLayer[] = [
     featureCount: 22,
   },
   {
-    layerId: 'lyr-atlas-map-data',
-    category: 'administrative',
-    name: 'Atlas Map Data Bundle (KMZ)',
-    featureCount: 707,
-  },
-  {
     layerId: 'lyr-vsp-village-pts',
     category: 'administrative',
     name: 'VSP / AOB Village Points',
@@ -74,12 +68,6 @@ const ASR_LAYERS: LocusInventoryLayer[] = [
     category: 'administrative',
     name: 'Taluks / Mandals (GIS-Source)',
     featureCount: 6,
-  },
-  {
-    layerId: 'lyr-state-border',
-    category: 'administrative',
-    name: 'State Border (AP, post-2014)',
-    featureCount: 1,
   },
   {
     layerId: 'lyr-districts-gis-hist',

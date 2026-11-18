@@ -1380,10 +1380,8 @@ export const MapViewerWorkspace: React.FC<MapViewerWorkspaceProps> = ({
               layoutRevision={`${leftOpen}-${rightOpen}-${bottomMode}-${mapViewMode}`}
               viewTarget={sharedView ?? undefined}
               viewActive={mapViewMode === '3d'}
-              showStateBorder={isLayerOn('lyr-state-border')}
               showDistricts={isLayerOn('lyr-districts')}
               districtOpacity={getLayerOpacity('lyr-districts')}
-              stateOpacity={getLayerOpacity('lyr-state-border')}
               showHighways={isLayerOn('lyr-highways')}
               showAgencyRoutes={isLayerOn('lyr-drug-routes')}
               showRailways={isLayerOn('lyr-railways')}
@@ -1511,10 +1509,8 @@ export const MapViewerWorkspace: React.FC<MapViewerWorkspaceProps> = ({
               viewActive={mapViewMode === '2d'}
               fitToState
               basemap={basemap}
-              showStateBorder={isLayerOn('lyr-state-border')}
               showDistricts={isLayerOn('lyr-districts')}
               districtOpacity={getLayerOpacity('lyr-districts')}
-              stateOpacity={getLayerOpacity('lyr-state-border')}
               showHighways={isLayerOn('lyr-highways')}
               showApRoadsFull={isLayerOn('lyr-ap-roads-full')}
               showApRoadsMajor={isLayerOn('lyr-ap-roads-major')}
@@ -1526,7 +1522,6 @@ export const MapViewerWorkspace: React.FC<MapViewerWorkspaceProps> = ({
               showAobDists={isLayerOn('lyr-aob-dists')}
               showKmzVillages={isLayerOn('lyr-kmz-villages')}
               showPsBorderArea={isLayerOn('lyr-ps-border-area')}
-              showAtlasMapData={isLayerOn('lyr-atlas-map-data')}
               showTalukGis={isLayerOn('lyr-taluk-gis')}
               showVspVillagePts={isLayerOn('lyr-vsp-village-pts')}
               showRivers={isLayerOn('lyr-rivers')}
@@ -1773,7 +1768,6 @@ export const MapViewerWorkspace: React.FC<MapViewerWorkspaceProps> = ({
               <div className="gis-map-host flex-1">
                 <ApLeafletMap
                   basemap="vector"
-                  showStateBorder
                   showDistricts
                   initialZoom={6}
                   clickMode="pan"

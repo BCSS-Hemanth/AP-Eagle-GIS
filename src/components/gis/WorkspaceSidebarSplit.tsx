@@ -22,7 +22,7 @@ type WorkspaceSidebarSplitProps = {
 };
 
 const DEFAULT_ASIDE =
-  'w-full lg:w-[340px] shrink-0 border-b lg:border-b-0 lg:border-r border-outline-variant/40 bg-surface-container-low overflow-y-auto max-h-[42vh] lg:max-h-none';
+  'w-full lg:w-[340px] shrink-0 border-b lg:border-b-0 lg:border-r border-outline-variant/40 bg-surface-container-low/90 overflow-y-auto max-h-[42vh] lg:max-h-none';
 
 /**
  * Sidebar + map split with a Bhuvan-style seam toggle.
@@ -68,7 +68,7 @@ export const WorkspaceSidebarSplit: React.FC<WorkspaceSidebarSplitProps> = ({
             aria-label={open ? 'Collapse sidebar' : 'Expand sidebar'}
             title={open ? 'Collapse sidebar' : 'Expand sidebar'}
             onClick={() => setOpen((v) => !v)}
-            className="absolute z-30 top-1/2 -translate-y-1/2 left-0 h-12 w-5 rounded-r-md bg-white border border-l-0 border-outline-variant/50 shadow-md text-on-surface hover:bg-sky-50 cursor-pointer inline-flex items-center justify-center"
+            className="absolute z-30 top-1/2 -translate-y-1/2 left-0 h-12 w-5 rounded-r-md bg-surface-container-lowest border border-l-0 border-outline-variant/55 shadow-[2px_0_10px_rgba(11,28,48,0.12)] text-on-surface hover:bg-secondary-container/40 hover:text-secondary cursor-pointer inline-flex items-center justify-center"
           >
             {open ? (
               <ChevronLeft className="w-3.5 h-3.5" strokeWidth={2.5} />

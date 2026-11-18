@@ -2,6 +2,7 @@ import type { GisLayer } from '../types/gis';
 import { filterFeaturesInParent } from './adminHierarchy';
 import { catalogModuleForLayer } from './catalogWorkspaces';
 import type { DashboardLayerConfig, DashboardLayerEntry, JsonStorage } from './dashboardLayers';
+import { normalizeLayerHexColor } from './layerColor';
 import {
   mergeEnabledLayersIntoRoutingConfig,
   routingLayersFromConfig,
@@ -211,14 +212,16 @@ export function loadRoadsRoutingNewLayerConfig(
     const out: RoadsRoutingNewLayerConfig = {};
     for (const [id, value] of Object.entries(parsed as Record<string, unknown>)) {
       if (!value || typeof value !== 'object') continue;
-      const row = value as { enabled?: unknown; opacity?: unknown };
+      const row = value as { enabled?: unknown; opacity?: unknown; color?: unknown };
       if (typeof row.enabled !== 'boolean') continue;
+      const color = normalizeLayerHexColor(row.color);
       out[id] = {
         enabled: row.enabled,
         opacity:
           typeof row.opacity === 'number'
             ? Math.min(100, Math.max(15, Math.round(row.opacity)))
             : 100,
+        ...(color ? { color } : {}),
       } as DashboardLayerEntry;
     }
     return Object.keys(out).length ? out : null;

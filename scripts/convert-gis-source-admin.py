@@ -225,18 +225,18 @@ def main() -> None:
         major_count += 1
         if not geom_touches_ap(geom):
             continue
-        # light simplify for browser size
+        # Light simplify (~5.5 m). Older 0.0008 deg (~88 m) drifted centerlines into blocks.
         try:
-            simplified = geom.simplify(0.0008, preserve_topology=True)
+            simplified = geom.simplify(0.00005, preserve_topology=True)
         except Exception:
             simplified = geom
-        feats.append(slim_feature(simplified, props, ["RD_TYPE", "RD_SUB_TYP", "NAME", "LENGTH"], 4))
+        feats.append(slim_feature(simplified, props, ["RD_TYPE", "RD_SUB_TYP", "NAME", "LENGTH"], 6))
     write_fc(
         "ap_roads_major",
         feats,
         {
             "source": "ap_road network/ap_roads",
-            "note": "NH/SH/MDR subset",
+            "note": "NH/SH/MDR subset; light simplify 0.00005 deg; run OSRM densify for long sparse chords after convert",
             "sourceFeatureCount": source_count,
             "majorFeatureCount": major_count,
         },

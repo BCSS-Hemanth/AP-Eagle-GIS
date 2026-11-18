@@ -20,7 +20,7 @@ export const ADMIN_GIS_SOURCE_SAFETY = {
     gisSourcePath: '/geo/gis-source/admin/ap_state_gis_source.geojson',
     replaceAllowed: false as const,
     reason:
-      'GIS-Source IND_adm1 Andhra Pradesh polygon is undivided (pre-Telangana). Keep post-2014 AP state outline for lyr-state-border.',
+      'GIS-Source IND_adm1 Andhra Pradesh polygon is undivided (pre-Telangana). Keep post-2014 AP outline (/geo/ap-state.geojson) for fit/clip — not a catalog layer.',
   },
   indiaOverview: {
     currentSource: 'DataMeet India states (Telangana split)',

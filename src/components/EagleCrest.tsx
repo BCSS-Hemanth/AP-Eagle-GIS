@@ -8,7 +8,7 @@ export const EagleCrest: React.FC<{ className?: string }> = ({ className = 'w-8 
     <img
       src={EAGLE_CREST_SRC}
       alt="EAGLE Force Andhra Pradesh Crest"
-      className={`${className} object-contain`}
+      className={`${className} object-contain select-none`}
       draggable={false}
     />
   );

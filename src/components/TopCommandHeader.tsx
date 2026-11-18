@@ -52,15 +52,17 @@ export const TopCommandHeader: React.FC<TopCommandHeaderProps> = ({
   return (
     <header
       ref={headerRef}
-      className="fixed top-0 left-0 right-0 h-14 bg-surface-container-lowest border-b border-outline-variant/40 z-50 flex items-center justify-between px-3 gap-3 select-none"
+      className="fixed top-0 left-0 right-0 h-14 app-shell-chrome border-b border-outline-variant/35 z-50 flex items-center justify-between px-3 gap-3 select-none"
     >
+      <div className="absolute inset-x-0 bottom-0 h-[2px] bg-gradient-to-r from-secondary via-secondary/40 to-transparent pointer-events-none" />
+
       {/* Zone 1: Brand Lockup & Sidebar Toggle */}
       <div className="flex items-center gap-2.5 shrink-0">
         <button
           type="button"
           onClick={onToggleSidebar}
           title={sidebarCollapsed ? 'Expand Workspace Navigation' : 'Collapse Workspace Navigation'}
-          className="w-8 h-8 rounded flex items-center justify-center text-on-surface-variant hover:text-primary hover:bg-surface-container-low transition-colors cursor-pointer"
+          className="w-8 h-8 rounded-md flex items-center justify-center text-on-surface-variant hover:text-primary hover:bg-surface-container-low transition-colors cursor-pointer"
         >
           <Menu className="w-4 h-4" />
         </button>
@@ -70,9 +72,9 @@ export const TopCommandHeader: React.FC<TopCommandHeaderProps> = ({
           onClick={() => onSwitchWorkspace('ndps-spatial-dashboard')}
           className="flex items-center gap-2.5 text-left cursor-pointer group"
         >
-          <EagleCrest className="w-9 h-9 shrink-0" />
+          <EagleCrest className="w-9 h-9 shrink-0 drop-shadow-sm" />
           <div className="flex flex-col justify-center leading-tight">
-            <span className="text-[12.5px] font-bold text-primary uppercase tracking-tight whitespace-nowrap">
+            <span className="font-display text-[13px] font-semibold text-primary uppercase tracking-[0.04em] whitespace-nowrap group-hover:text-primary-container">
               EAGLE Force AP | GIS Monitoring &amp; Spatial Intelligence
             </span>
             <span className="text-[10px] font-medium text-on-surface-variant whitespace-nowrap hidden sm:block">
@@ -84,7 +86,6 @@ export const TopCommandHeader: React.FC<TopCommandHeaderProps> = ({
 
       {/* Zone 2: Notifications & Analyst Badge */}
       <div className="flex items-center gap-2.5 shrink-0 ml-auto">
-        {/* Tactical Alerts Bell */}
         <div className="relative">
           <button
             type="button"
@@ -92,7 +93,7 @@ export const TopCommandHeader: React.FC<TopCommandHeaderProps> = ({
               setAlertsMenuOpen((v) => !v);
             }}
             title="Tactical Interception Alerts"
-            className="relative w-8 h-8 flex items-center justify-center rounded hover:bg-surface-container text-on-surface-variant hover:text-primary transition-colors cursor-pointer"
+            className="relative w-8 h-8 flex items-center justify-center rounded-md hover:bg-surface-container text-on-surface-variant hover:text-primary transition-colors cursor-pointer"
           >
             <Bell className="w-4 h-4" />
             {unreadAlertsCount > 0 && (
@@ -101,19 +102,19 @@ export const TopCommandHeader: React.FC<TopCommandHeaderProps> = ({
           </button>
 
           {alertsMenuOpen && (
-            <div className="absolute right-0 mt-1.5 w-88 bg-surface-container-lowest rounded-md shadow-xl border border-outline-variant/50 overflow-hidden z-50">
-              <div className="px-3 py-2 bg-surface-container-low border-b border-outline-variant/30 flex items-center justify-between">
-                <span className="text-[11px] font-bold uppercase tracking-wider text-primary">
+            <div className="absolute right-0 mt-1.5 w-88 rounded-lg shadow-xl border border-outline-variant/45 overflow-hidden z-50 bg-surface-container-lowest">
+              <div className="px-3 py-2.5 bg-primary text-on-primary border-b border-white/10 flex items-center justify-between">
+                <span className="text-[11px] font-bold uppercase tracking-wider">
                   Tactical Spatial Alerts ({unreadAlertsCount} Unread)
                 </span>
-                <span className="text-[10px] font-mono text-error font-bold">LIVE FEED</span>
+                <span className="text-[10px] font-mono text-secondary-fixed font-bold">LIVE FEED</span>
               </div>
-              <div className="divide-y divide-outline-variant/20 max-h-72 overflow-y-auto">
+              <div className="divide-y divide-outline-variant/20 max-h-72 overflow-y-auto gis-scroll">
                 {alerts.map((alt) => (
                   <div
                     key={alt.id}
                     className={`p-2.5 text-xs space-y-1.5 ${
-                      alt.acknowledged ? 'opacity-65 bg-surface-container-lowest' : 'bg-error-container/15'
+                      alt.acknowledged ? 'opacity-65 bg-surface-container-lowest' : 'bg-error-container/20'
                     }`}
                   >
                     <div className="flex items-center justify-between">
@@ -135,7 +136,7 @@ export const TopCommandHeader: React.FC<TopCommandHeaderProps> = ({
                             onSelectFeatureAndFly(alt.featureId);
                             setAlertsMenuOpen(false);
                           }}
-                          className="px-1.5 py-0.5 rounded bg-primary text-on-primary text-[10px] font-semibold hover:bg-primary-container cursor-pointer"
+                          className="px-1.5 py-0.5 rounded-md bg-primary text-on-primary text-[10px] font-semibold hover:bg-primary-container cursor-pointer"
                         >
                           Locate
                         </button>
@@ -143,7 +144,7 @@ export const TopCommandHeader: React.FC<TopCommandHeaderProps> = ({
                           <button
                             type="button"
                             onClick={() => onAcknowledgeAlert(alt.id)}
-                            className="px-1.5 py-0.5 rounded bg-surface-container hover:bg-surface-container-high text-[10px] font-medium cursor-pointer"
+                            className="px-1.5 py-0.5 rounded-md bg-surface-container hover:bg-surface-container-high text-[10px] font-medium cursor-pointer"
                           >
                             Ack
                           </button>
@@ -157,7 +158,6 @@ export const TopCommandHeader: React.FC<TopCommandHeaderProps> = ({
           )}
         </div>
 
-        {/* Analyst Identity */}
         <div className="hidden sm:flex items-center gap-2 pl-2.5 border-l border-outline-variant/40">
           <div className="flex flex-col text-right leading-tight">
             <span className="text-[11px] font-bold text-primary whitespace-nowrap" data-testid="session-user">
@@ -167,7 +167,7 @@ export const TopCommandHeader: React.FC<TopCommandHeaderProps> = ({
               {userRole ?? userUnit}
             </span>
           </div>
-          <div className="w-8 h-8 rounded-full bg-primary text-on-primary flex items-center justify-center shrink-0">
+          <div className="w-8 h-8 rounded-full bg-primary text-on-primary flex items-center justify-center shrink-0 shadow-sm ring-2 ring-secondary/25">
             <UserCheck className="w-4 h-4" />
           </div>
           {onLogout && (
@@ -175,7 +175,7 @@ export const TopCommandHeader: React.FC<TopCommandHeaderProps> = ({
               type="button"
               data-testid="logout"
               onClick={onLogout}
-              className="text-[10px] font-bold uppercase text-on-surface-variant hover:text-error cursor-pointer"
+              className="text-[10px] font-bold uppercase tracking-wide text-on-surface-variant hover:text-error cursor-pointer px-1.5 py-1 rounded-md hover:bg-error-container/40"
             >
               Sign out
             </button>

@@ -206,8 +206,8 @@ const HeatMapPanel: React.FC = () => {
   };
 
   return (
-    <div className="relative rounded-lg border border-slate-300 overflow-hidden bg-[#e8eef2] h-full min-h-0 shadow-sm">
-      <div className="absolute top-2 left-2 z-[500] px-2 py-0.5 rounded-md bg-[#0b1c30]/92 text-[10px] font-bold text-white shadow">
+    <div className="relative rounded-lg border border-outline-variant/50 overflow-hidden bg-surface-container-low h-full min-h-0 shadow-[0_8px_24px_rgba(11,28,48,0.06)]">
+      <div className="absolute top-2 left-2 z-[500] px-2.5 py-1 rounded-md bg-primary/92 text-[10px] font-bold text-white shadow-md border border-white/10 backdrop-blur-sm">
         NDPS Cases Heat Map
       </div>
       {gunturIsolated && (
@@ -222,10 +222,8 @@ const HeatMapPanel: React.FC = () => {
       <div className="gis-map-host h-full min-h-0">
         <ApLeafletMap
           basemap="vector"
-          showStateBorder
           showDistricts
           districtOpacity={1}
-          stateOpacity={1}
           fitToState
           adminHoverIdentify={false}
           highlightApFill={false}
@@ -278,10 +276,10 @@ function Panel({
 }) {
   return (
     <section
-      className={`bg-white rounded-lg border border-slate-200/90 shadow-sm overflow-hidden flex flex-col min-h-0 ${className}`}
+      className={`bg-surface-container-lowest rounded-lg border border-outline-variant/50 shadow-[0_4px_16px_rgba(11,28,48,0.05)] overflow-hidden flex flex-col min-h-0 ${className}`}
     >
       <div
-        className="px-2.5 py-1.5 text-[10px] font-bold uppercase tracking-wider text-white shrink-0"
+        className="px-2.5 py-1.5 text-[10px] font-bold uppercase tracking-[0.08em] text-white shrink-0"
         style={{ background: accent }}
       >
         {title}

@@ -1,6 +1,7 @@
 import type { LocusConfig, LocusDistrictConfig } from './locusTypes';
 import { LOCUS_LAYER_STORAGE_KEY } from './locusTypes';
 import type { JsonStorage } from '../dashboardLayers';
+import { normalizeLayerColorMap } from '../layerColor';
 
 export function emptyLocusDistrictConfig(districtId: string): LocusDistrictConfig {
   return {
@@ -9,6 +10,7 @@ export function emptyLocusDistrictConfig(districtId: string): LocusDistrictConfi
     appliedLayerIds: [],
     layerVisibility: {},
     layerOpacity: {},
+    layerColors: {},
   };
 }
 
@@ -57,6 +59,9 @@ export function loadLocusConfig(storage: JsonStorage | null = browserStorage()):
                 Object.entries(row.layerOpacity).filter(([, v]) => typeof v === 'number')
               )
             : {},
+        layerColors: normalizeLayerColorMap(
+          (row as { layerColors?: unknown }).layerColors
+        ),
       };
     }
     return {
