@@ -6,10 +6,11 @@ import { EagleCrest } from './EagleCrest';
 
 export const LoginScreen: React.FC = () => {
   const { login } = useAuth();
-  const [username, setUsername] = useState('BCSS-Garuda');
-  const [password, setPassword] = useState('garuda@123');
+  const [username, setUsername] = useState('');
+  const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [showDemo, setShowDemo] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
 
   const onSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -60,7 +61,12 @@ export const LoginScreen: React.FC = () => {
             <input
               data-testid="login-username"
               value={username}
-              onChange={(e) => setUsername(e.target.value)}
+              onChange={(e) => {
+                setUsername(e.target.value);
+                setError(null);
+              }}
+              required
+              autoFocus
               className="mt-1.5 ws-field !font-medium"
               autoComplete="username"
             />
@@ -69,16 +75,29 @@ export const LoginScreen: React.FC = () => {
             Password
             <input
               data-testid="login-password"
-              type="password"
+              type={showPassword ? 'text' : 'password'}
               value={password}
-              onChange={(e) => setPassword(e.target.value)}
+              onChange={(e) => {
+                setPassword(e.target.value);
+                setError(null);
+              }}
+              required
               className="mt-1.5 ws-field !font-medium"
               autoComplete="current-password"
             />
           </label>
+          <label className="flex items-center gap-2 text-[11px] font-medium cursor-pointer">
+            <input
+              type="checkbox"
+              checked={showPassword}
+              onChange={(e) => setShowPassword(e.target.checked)}
+            />
+            Show password
+          </label>
           {error && (
             <div
               data-testid="login-error"
+              role="alert"
               className="text-xs font-semibold text-error bg-error-container/80 border border-error/20 rounded-md px-2.5 py-2"
             >
               {error}
@@ -92,6 +111,7 @@ export const LoginScreen: React.FC = () => {
             Sign in
           </button>
 
+          {import.meta.env.DEV && (
           <div className="border-t border-outline-variant/40 pt-3">
             <button
               type="button"
@@ -116,6 +136,7 @@ export const LoginScreen: React.FC = () => {
               </div>
             ) : null}
           </div>
+          )}
         </form>
       </div>
     </div>

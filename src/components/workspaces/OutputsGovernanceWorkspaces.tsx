@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React from 'react';
 import { Download, FileSpreadsheet, ShieldCheck } from 'lucide-react';
 import { AuditLogEntry, GisLayer, WorkspaceId } from '../../types/gis';
 import { INITIAL_SEIZURE_REPORT_ROWS } from '../../data/apGisData';
@@ -21,17 +21,17 @@ export const OutputsGovernanceWorkspaces: React.FC<OutputsGovProps> = ({
   onTriggerToast,
 }) => {
   const { can } = useAuth();
-  const [reportPeriod, setReportPeriod] = useState<'FY25-26' | 'Q3-2026'>('FY25-26');
-
+  
   if (workspace === 'reports-seizure-analytics') {
     const rows = INITIAL_SEIZURE_REPORT_ROWS;
 
+    const q = (v: string) => `"${v.replace(/"/g, '""')}"`;
     const handleDownloadCsv = () => {
       const csv = [
         'Seizure_Location,FIRs,Seized_Kg,Vehicles_Impounded,Remarks',
-        ...rows.map((r) => `"${r.location}",${r.firs},${r.cannabisKg},${r.vehicles},"${r.remarks}"`),
+        ...rows.map((r) => `${q(r.location)},${r.firs},${r.cannabisKg},${r.vehicles},${q(r.remarks)}`),
       ].join('\n');
-      downloadTextFile(`eagle_ap_seizure_report_${reportPeriod}.csv`, csv, 'text/csv');
+      downloadTextFile('eagle_ap_seizure_report.csv', csv, 'text/csv');
       onTriggerToast('Downloaded seizure report (.csv)');
     };
 
@@ -47,20 +47,9 @@ export const OutputsGovernanceWorkspaces: React.FC<OutputsGovProps> = ({
             </h1>
           </div>
           <div className="flex items-center gap-2">
-            <div className="flex items-center bg-surface-container p-0.5 rounded-md border border-outline-variant/40">
-              {(['FY25-26', 'Q3-2026'] as const).map((p) => (
-                <button
-                  key={p}
-                  type="button"
-                  onClick={() => setReportPeriod(p)}
-                  className={`px-2.5 py-1 rounded-md text-xs font-semibold cursor-pointer ${
-                    reportPeriod === p ? 'bg-white text-primary shadow-sm' : 'text-on-surface-variant'
-                  }`}
-                >
-                  {p}
-                </button>
-              ))}
-            </div>
+            <span className="px-2 py-1 rounded bg-amber-100 text-amber-900 text-[10px] font-bold uppercase tracking-wide">
+              Demo sample data
+            </span>
             <button
               type="button"
               onClick={handleDownloadCsv}
@@ -153,9 +142,11 @@ export const OutputsGovernanceWorkspaces: React.FC<OutputsGovProps> = ({
               <tr key={entry.id} className="hover:bg-surface-container-low/50">
                 <td className="py-2 px-3 font-mono font-bold text-primary">{entry.id}</td>
                 <td className="py-2 px-3 font-mono text-on-surface-variant">{entry.timestamp}</td>
-                <td className="py-2 px-3 font-semibold text-primary flex items-center gap-1.5">
-                  <ShieldCheck className="w-3.5 h-3.5 text-secondary" />
-                  <span>{entry.actor}</span>
+                <td className="py-2 px-3 font-semibold text-primary">
+                  <span className="inline-flex items-center gap-1.5">
+                    <ShieldCheck className="w-3.5 h-3.5 text-secondary" />
+                    <span>{entry.actor}</span>
+                  </span>
                 </td>
                 <td className="py-2 px-3 font-mono text-[10.5px]">{entry.role}</td>
                 <td className="py-2 px-3 font-mono font-semibold text-secondary">{entry.action}</td>

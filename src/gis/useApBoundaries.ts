@@ -33,6 +33,7 @@ export function useApBoundaries() {
   const [state, setState] = useState<GeoJSON.FeatureCollection | null>(cachedState);
   const [error, setError] = useState<string | null>(null);
   const [ready, setReady] = useState(Boolean(cachedDistricts && cachedState));
+  const [attempt, setAttempt] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
@@ -40,17 +41,24 @@ export function useApBoundaries() {
     loadPromise
       .then(() => {
         if (cancelled) return;
+        setError(null);
         setDistricts(cachedDistricts);
         setState(cachedState);
         setReady(true);
       })
       .catch((err: Error) => {
+        loadPromise = null; // allow retry after a failed load
         if (!cancelled) setError(err.message);
       });
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [attempt]);
 
-  return { districts, state, ready, error };
+  const retry = () => {
+    setError(null);
+    setAttempt((n) => n + 1);
+  };
+
+  return { districts, state, ready, error, retry };
 }

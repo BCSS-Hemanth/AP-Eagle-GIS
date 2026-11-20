@@ -1,17 +1,8 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { Info } from 'lucide-react';
-import {
-  AuditLogEntry,
-  BasemapId,
-  CrsId,
-  DigitizedFeature,
-  GisLayer,
-  TacticalAlert,
-  WorkspaceId,
-} from './types/gis';
+import { AuditLogEntry, GisLayer, TacticalAlert, WorkspaceId } from './types/gis';
 import {
   INITIAL_AUDIT_LOGS,
-  INITIAL_GIS_JOBS,
   INITIAL_GIS_LAYERS,
   INITIAL_TACTICAL_ALERTS,
   INSPECTABLE_FEATURES,
@@ -59,7 +50,6 @@ import {
   type CatalogHoverDestination,
   type CatalogHoverExclusions,
 } from './gis/catalogHoverSelection';
-import type { IngestedLayer } from './gis/ingest';
 import { RoadsRoutingWorkspace } from './components/workspaces/RoadsRoutingWorkspace';
 import { RoadsRoutingNewWorkspace } from './components/workspaces/RoadsRoutingNewWorkspace';
 import { AtlasWorkspace } from './components/workspaces/AtlasWorkspace';
@@ -67,7 +57,7 @@ import { LocusWorkspace } from './components/workspaces/LocusWorkspace';
 import { RasterWorkspace } from './components/workspaces/RasterWorkspace';
 
 function AppShell() {
-  const { user, canOpen, can, logout } = useAuth();
+  const { user, canOpen, logout } = useAuth();
   const [activeWorkspace, setActiveWorkspace] = useState<WorkspaceId>('ndps-spatial-dashboard');
   const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(true);
   /** Hides header + left nav so Full Screen / Full map fills the viewport (all modules). */
@@ -112,48 +102,41 @@ function AppShell() {
     () => applyLayerConfig(INITIAL_GIS_LAYERS, dashboardLayerConfig),
     [dashboardLayerConfig]
   );
-  const [basemap, setBasemap] = useState<BasemapId>('maplibre');
-  const crs: CrsId = 'EPSG:4326';
-  const [centerCoords, setCenterCoords] = useState<{ lat: number; lon: number }>({
-    lat: 16.5062,
-    lon: 80.648,
-  });
-  const [selectedFeatureId, setSelectedFeatureId] = useState<string>('');
-  const [selectedPsId, setSelectedPsId] = useState<string | null>(null);
   const [externalFocus, setExternalFocus] = useState<{
     lat: number;
     lon: number;
     zoom: number;
+    token: number;
   } | null>(null);
 
-  // Map Viewer Dock States
-  const [leftOpen, setLeftOpen] = useState<boolean>(true);
-  const [rightOpen, setRightOpen] = useState<boolean>(true);
-  const [bottomMode, setBottomMode] = useState<'expanded' | 'minimized' | 'closed'>('expanded');
-
-  // Dynamic Platform State
-  const jobs = INITIAL_GIS_JOBS;
   const [alerts, setAlerts] = useState<TacticalAlert[]>(INITIAL_TACTICAL_ALERTS);
-  const [digitizedFeatures, setDigitizedFeatures] = useState<DigitizedFeature[]>([]);
-  const [ingestedLayers, setIngestedLayers] = useState<IngestedLayer[]>([]);
   const [auditLogs, setAuditLogs] = useState<AuditLogEntry[]>(INITIAL_AUDIT_LOGS);
 
   // Toast Notification
-  const [toastMessage, setToastMessage] = useState<string | null>(null);
+  // Message text is kept after hide so it does not blank out during the fade.
+  const [toast, setToast] = useState<{ text: string; visible: boolean; seq: number }>({
+    text: '',
+    visible: false,
+    seq: 0,
+  });
+  const toastMessage = toast.text;
 
   const triggerToast = useCallback((msg: string) => {
-    setToastMessage(msg);
+    setToast((prev) => ({ text: msg, visible: true, seq: prev.seq + 1 }));
   }, []);
 
   useEffect(() => {
-    if (!toastMessage) return;
-    const t = setTimeout(() => setToastMessage(null), 3200);
+    if (!toast.visible) return;
+    const t = setTimeout(() => setToast((prev) => ({ ...prev, visible: false })), 3200);
     return () => clearTimeout(t);
-  }, [toastMessage]);
+  }, [toast.seq, toast.visible]);
 
   const appendAudit = useCallback((action: string, resource: string) => {
     const now = new Date();
-    const ts = `2026-10-28 ${String(now.getHours()).padStart(2, '0')}:${String(
+    const ymd = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(
+      now.getDate()
+    ).padStart(2, '0')}`;
+    const ts = `${ymd} ${String(now.getHours()).padStart(2, '0')}:${String(
       now.getMinutes()
     ).padStart(2, '0')}:${String(now.getSeconds()).padStart(2, '0')} IST`;
     setAuditLogs((prev) => [
@@ -196,22 +179,29 @@ function AppShell() {
     layerIds: string[]
   ) => {
     if (layerIds.length === 0) return;
-    setCatalogHoverExclusions((prev) => {
-      const { next, turnOffLayerIds } = excludeLayersFromHover(prev, destination, layerIds);
-      if (turnOffLayerIds.length > 0) {
-        const off = new Set(turnOffLayerIds);
-        setLayers((layersPrev) =>
-          layersPrev.map((l) => (off.has(l.id) && l.enabled ? { ...l, enabled: false } : l))
-        );
-      }
-      return next;
-    });
+    // Compute outside the state updater so no setState runs inside another updater.
+    const { next, turnOffLayerIds } = excludeLayersFromHover(
+      catalogHoverExclusions,
+      destination,
+      layerIds
+    );
+    setCatalogHoverExclusions(next);
+    if (turnOffLayerIds.length > 0) {
+      const off = new Set(turnOffLayerIds);
+      setLayers((layersPrev) =>
+        layersPrev.map((l) => (off.has(l.id) && l.enabled ? { ...l, enabled: false } : l))
+      );
+    }
   };
 
-  const handleChangeLayerOpacity = (layerId: string, opacity: number) => {
-    setLayers((prev) =>
-      prev.map((l) => (l.id === layerId ? { ...l, opacity } : l))
-    );
+  /** Bulk select/unselect for catalog "Select All" — one audit entry instead of one per layer. */
+  const handleSetLayersEnabled = (layerIds: string[], enabled: boolean) => {
+    if (!layerIds.length) return;
+    const ids = new Set(layerIds);
+    setLayers((prev) => prev.map((l) => (ids.has(l.id) ? { ...l, enabled } : l)));
+    setCatalogHoverExclusions((prev) => layerIds.reduce(clearLayerHoverExclusions, prev));
+    setCatalogSaveAck({ dashboard: false, roadsRouting: false, roadsRoutingNew: false });
+    appendAudit(enabled ? 'ENABLE_LAYERS_BULK' : 'DISABLE_LAYERS_BULK', `${layerIds.length} layers`);
   };
 
   const selectedIdsFor = (destination: CatalogHoverDestination) =>
@@ -223,6 +213,10 @@ function AppShell() {
 
   const handleSaveDashboardLayers = () => {
     const selected = selectedIdsFor('dashboard');
+    if (selected.size === 0) {
+      triggerToast('No layers selected — tick layers under Visible before saving to the Dashboard');
+      return;
+    }
     const before = new Set(
       Object.entries(dashboardLayerConfig)
         .filter(([, entry]) => entry?.enabled)
@@ -250,6 +244,10 @@ function AppShell() {
       return;
     }
     const selected = selectedIdsFor('roadsRouting');
+    if (selected.size === 0) {
+      triggerToast('No layers selected — tick layers under Visible before saving to Roads Routing');
+      return;
+    }
     const beforeIds = new Set(Object.keys(roadsRoutingConfig));
     const next = destinationConfigFromSelection(layers, selected, 'assigned', undefined, roadsRoutingConfig);
     // Unroutable road lines stay in the saved list but are never applied on the map.
@@ -279,6 +277,10 @@ function AppShell() {
       return;
     }
     const selected = selectedIdsFor('roadsRoutingNew');
+    if (selected.size === 0) {
+      triggerToast('No layers selected — tick layers under Visible before saving to Roads Routing New');
+      return;
+    }
     const beforeIds = new Set(Object.keys(roadsRoutingNewConfig));
     const next = destinationConfigFromSelection(
       layers,
@@ -305,23 +307,18 @@ function AppShell() {
 
   const handleSelectFeatureAndFly = (featureId: string) => {
     const resolved = resolveFlyTarget(featureId, INSPECTABLE_FEATURES, kmzRows, searchTargets);
-    if (!resolved) return;
-    const { feature, stationId } = resolved;
-    setSelectedPsId(stationId);
-    if (INSPECTABLE_FEATURES[featureId] || INSPECTABLE_FEATURES[feature.id]) {
-      setSelectedFeatureId(INSPECTABLE_FEATURES[featureId]?.id ?? feature.id);
+    if (!resolved) {
+      triggerToast('Could not locate that feature on the map');
+      return;
     }
-    setExternalFocus({ lat: feature.lat, lon: feature.lon, zoom: 13 });
-    setCenterCoords({ lat: feature.lat, lon: feature.lon });
-    setRightOpen(true);
+    const { feature } = resolved;
+    setExternalFocus({ lat: feature.lat, lon: feature.lon, zoom: 13, token: Date.now() });
     setActiveWorkspace('ndps-spatial-dashboard');
     triggerToast(`Focused spatial target: ${feature.name}`);
   };
 
   const handleFlyToLocation = (lat: number, lon: number, label: string) => {
-    setSelectedPsId(null);
-    setExternalFocus({ lat, lon, zoom: 10 });
-    setCenterCoords({ lat, lon });
+    setExternalFocus({ lat, lon, zoom: 10, token: Date.now() });
     setActiveWorkspace('ndps-spatial-dashboard');
     triggerToast(`Focused spatial target: ${label}`);
   };
@@ -332,59 +329,6 @@ function AppShell() {
     );
     appendAudit('ACKNOWLEDGE_ALERT', alertId);
     triggerToast(`Alert ${alertId} acknowledged and logged to NOC dispatch`);
-  };
-
-  const handleAddDigitizedFeature = (df: DigitizedFeature) => {
-    if (!can('digitize') && !can('import')) {
-      triggerToast('Vector write denied for your RBAC clearance');
-      return;
-    }
-    setDigitizedFeatures((prev) => [df, ...prev]);
-    appendAudit('COMMIT_VECTOR_GEOMETRY', `${df.name} (${df.type})`);
-  };
-
-  const handlePublishIngested = (incoming: IngestedLayer[]) => {
-    if (!can('import')) {
-      triggerToast('Import denied for your RBAC clearance');
-      return;
-    }
-    setIngestedLayers((prev) => [...incoming, ...prev]);
-    const first = incoming[0];
-    if (first?.bbox) {
-      const lat = (first.bbox[1] + first.bbox[3]) / 2;
-      const lon = (first.bbox[0] + first.bbox[2]) / 2;
-      setExternalFocus({ lat, lon, zoom: 10 });
-      setCenterCoords({ lat, lon });
-    }
-    appendAudit(
-      'INGEST_LAYER',
-      incoming.map((layer) => `${layer.driver}:${layer.name}`).join(', ')
-    );
-    triggerToast(
-      `Mounted ${incoming.length} ingested layer${incoming.length === 1 ? '' : 's'} without replacing catalog data`
-    );
-    setActiveWorkspace('ndps-spatial-dashboard');
-  };
-
-  const handleToggleIngested = (id: string) => {
-    setIngestedLayers((prev) =>
-      prev.map((layer) => (layer.id === id ? { ...layer, enabled: !layer.enabled } : layer))
-    );
-  };
-
-  const handleIngestedOpacity = (id: string, opacity: number) => {
-    setIngestedLayers((prev) =>
-      prev.map((layer) => (layer.id === id ? { ...layer, opacity } : layer))
-    );
-  };
-
-  const handleRemoveIngested = (id: string) => {
-    setIngestedLayers((prev) => prev.filter((layer) => layer.id !== id));
-  };
-
-  const handleDeleteDigitizedFeature = (id: string) => {
-    setDigitizedFeatures((prev) => prev.filter((f) => f.id !== id));
-    triggerToast('Removed custom digitized geometry from map');
   };
 
   useEffect(() => {
@@ -509,6 +453,7 @@ function AppShell() {
             onFlyToLocation={handleFlyToLocation}
             onSwitchWorkspace={handleSelectWorkspace}
             onTriggerToast={triggerToast}
+            focusRequest={externalFocus}
             dashboardMapExpanded={mapFullscreen}
             onDashboardMapExpandedChange={setMapFullscreen}
           />
@@ -725,7 +670,7 @@ function AppShell() {
             workspace={activeWorkspace}
             layers={layers}
             onToggleLayer={handleToggleLayer}
-            onChangeLayerOpacity={handleChangeLayerOpacity}
+            onSetLayersEnabled={handleSetLayersEnabled}
             onSaveDashboardLayers={handleSaveDashboardLayers}
             onSaveRoadsRoutingLayers={handleSaveRoadsRoutingLayers}
             onSaveRoadsRoutingNewLayers={handleSaveRoadsRoutingNewLayers}
@@ -809,14 +754,8 @@ function AppShell() {
               });
               triggerToast(`Unselected ${layerIds.length} layer(s) from Roads Routing New`);
             }}
-            digitizedFeatures={digitizedFeatures}
-            ingestedLayers={ingestedLayers}
-            onAddDigitizedFeature={handleAddDigitizedFeature}
-            onDeleteDigitizedFeature={handleDeleteDigitizedFeature}
-            onPublishIngested={handlePublishIngested}
             onSwitchWorkspace={handleSelectWorkspace}
             onTriggerToast={triggerToast}
-            onFlyToLocation={handleFlyToLocation}
           />
         )}
 
@@ -835,14 +774,16 @@ function AppShell() {
         </MapLayoutProvider>
       </main>
 
-      {/* Floating Tactical Toast Notification */}
+      {/* Floating Tactical Toast — z above full-screen map frames (z-[900]) */}
       <div
-        className={`fixed bottom-10 left-1/2 -translate-x-1/2 bg-primary/95 text-on-primary px-3.5 py-2.5 rounded-lg shadow-[0_12px_32px_rgba(7,25,41,0.35)] border border-secondary/70 text-xs flex items-center gap-2 pointer-events-none transition-all duration-200 z-50 backdrop-blur-sm ${
-          toastMessage ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-2'
+        role="status"
+        aria-live="polite"
+        className={`fixed bottom-10 left-1/2 -translate-x-1/2 max-w-[min(92vw,40rem)] bg-primary/95 text-on-primary px-3.5 py-2.5 rounded-lg shadow-[0_12px_32px_rgba(7,25,41,0.35)] border border-secondary/70 text-xs flex items-center gap-2 pointer-events-none transition-all duration-200 z-[1100] backdrop-blur-sm ${
+          toast.visible ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-2'
         }`}
       >
         <Info className="w-4 h-4 text-secondary-fixed shrink-0" />
-        <span className="font-semibold whitespace-nowrap tracking-wide" data-testid="toast">
+        <span className="font-semibold tracking-wide" data-testid="toast">
           {toastMessage}
         </span>
       </div>

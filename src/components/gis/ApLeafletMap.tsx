@@ -7,6 +7,7 @@ import React, {
   useImperativeHandle,
   useLayoutEffect,
   useMemo,
+  useRef,
   useState,
   type ErrorInfo,
   type ReactNode,
@@ -2792,6 +2793,30 @@ const PostgisBboxRoadLayer: React.FC<{
   );
 };
 
+/** On-screen +/- zoom (default Leaflet zoom control is disabled so it cannot clash with the drill UI). */
+const ZoomButtons: React.FC = () => {
+  const map = useMap();
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (ref.current) {
+      L.DomEvent.disableClickPropagation(ref.current);
+      L.DomEvent.disableScrollPropagation(ref.current);
+    }
+  }, []);
+  const cls =
+    'w-8 h-8 flex items-center justify-center bg-white text-primary text-lg font-bold leading-none cursor-pointer hover:bg-sky-50 border border-outline-variant/60';
+  return (
+    <div ref={ref} className="absolute right-2 bottom-8 z-[1000] flex flex-col rounded shadow-md overflow-hidden">
+      <button type="button" aria-label="Zoom in" title="Zoom in" className={`${cls} rounded-t`} onClick={() => map.zoomIn(1)}>
+        +
+      </button>
+      <button type="button" aria-label="Zoom out" title="Zoom out" className={`${cls} rounded-b border-t-0`} onClick={() => map.zoomOut(1)}>
+        −
+      </button>
+    </div>
+  );
+};
+
 export const ApLeafletMap = forwardRef<ApLeafletMapHandle, ApLeafletMapProps>(function ApLeafletMap(
   {
     basemap,
@@ -2908,7 +2933,7 @@ export const ApLeafletMap = forwardRef<ApLeafletMapHandle, ApLeafletMapProps>(fu
   },
   ref
 ) {
-  const { districts, state, ready } = useApBoundaries();
+  const { districts, state, ready, error: boundaryError, retry: retryBoundaries } = useApBoundaries();
   const { states: indiaStates, outline: indiaOutline, ready: indiaReady } = useIndiaStates();
   const { highways, rivers } = useApNetwork();
   const apFocused = isApStateFocus(adminDrill);
@@ -4240,10 +4265,27 @@ export const ApLeafletMap = forwardRef<ApLeafletMapHandle, ApLeafletMapProps>(fu
           onCursorMove={onCursorMove}
         />
         <BoxZoomTool enabled={clickMode === 'boxzoom'} />
+        {interactive && !politicalClean && <ZoomButtons />}
       </MapContainer>
       {!ready && (
-        <div className="absolute inset-0 flex items-center justify-center bg-[#d4e6f2]/80 text-xs font-semibold text-primary z-[500]">
-          Loading OpenStreetMap administrative boundaries (EPSG:4326)…
+        <div
+          role={boundaryError ? 'alert' : 'status'}
+          className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-[#d4e6f2]/80 text-xs font-semibold text-primary z-[500]"
+        >
+          {boundaryError ? (
+            <>
+              <span className="text-error">{boundaryError}</span>
+              <button
+                type="button"
+                onClick={retryBoundaries}
+                className="px-3 py-1 rounded bg-primary text-on-primary cursor-pointer"
+              >
+                Retry
+              </button>
+            </>
+          ) : (
+            <span>Loading map boundaries…</span>
+          )}
         </div>
       )}
     </div>

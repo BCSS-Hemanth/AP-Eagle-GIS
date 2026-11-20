@@ -260,7 +260,10 @@ export const AtlasWorkspace: React.FC<AtlasWorkspaceProps> = ({
         if (!cancelled) setPedakurapaduRoads(data);
       })
       .catch(() => {
-        if (!cancelled) setPedakurapaduRoads(null);
+        if (!cancelled) {
+          setPedakurapaduRoads(null);
+          onTriggerToast('Could not load Pedakurapadu roads layer');
+        }
       });
     return () => {
       cancelled = true;
@@ -580,6 +583,11 @@ export const AtlasWorkspace: React.FC<AtlasWorkspaceProps> = ({
 
   const handleClear = () => {
     if (!districtId) return;
+    if (
+      districtCfg.appliedLayerIds.length + districtCfg.selectedLayerIds.length > 0 &&
+      !window.confirm('Clear all layers for this district? This cannot be undone.')
+    )
+      return;
     writeDistrict(emptyAtlasDistrictConfig(districtId));
     onTriggerToast('Atlas layers cleared for this district');
   };
@@ -674,6 +682,15 @@ export const AtlasWorkspace: React.FC<AtlasWorkspaceProps> = ({
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [mapExpanded]);
+
+  useEffect(() => {
+    if (!exportOpen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && !exporting) setExportOpen(false);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [exportOpen, exporting]);
 
   const viewSwitcher = (
     <div
@@ -802,7 +819,7 @@ export const AtlasWorkspace: React.FC<AtlasWorkspaceProps> = ({
       {compositionActive && (
         <button
           type="button"
-          className="absolute top-2 right-2 z-[500] h-8 px-2.5 rounded bg-black/70 text-white text-[10px] font-semibold"
+          className="absolute top-2 right-2 z-[500] h-8 px-2.5 rounded bg-black/70 text-white text-[10px] font-semibold cursor-pointer"
           onClick={handleResetView}
         >
           Fit district
@@ -859,6 +876,11 @@ export const AtlasWorkspace: React.FC<AtlasWorkspaceProps> = ({
               data-testid="atlas-download-map"
               className="ws-btn ws-btn-primary"
               disabled={!compositionActive || !visibleIds.size}
+              title={
+                !compositionActive || !visibleIds.size
+                  ? 'Display at least one layer (Eye on) to enable download'
+                  : 'Download the map as an image'
+              }
               onClick={() => {
                 setExportView(atlasView);
                 setExportOpen(true);
@@ -901,6 +923,12 @@ export const AtlasWorkspace: React.FC<AtlasWorkspaceProps> = ({
                   const v = e.target.value;
                   if (v) handleDistrictChange(v);
                   else {
+                    if (
+                      districtId &&
+                      atlasHasPendingChanges(getDistrictConfig(config, districtId)) &&
+                      !window.confirm('Discard unapplied Atlas layer selections?')
+                    )
+                      return;
                     setDistrictId(null);
                     persist({ ...config, activeDistrictId: null });
                   }
@@ -909,7 +937,7 @@ export const AtlasWorkspace: React.FC<AtlasWorkspaceProps> = ({
                 <option value="">— Choose district —</option>
                 {ATLAS_DISTRICTS.map((d) => (
                   <option key={d.id} value={d.id} disabled={d.status !== 'ready'}>
-                    {d.name}
+                    {d.name}{d.status !== 'ready' ? ' (coming soon)' : ''}
                   </option>
                 ))}
               </select>
@@ -1126,6 +1154,7 @@ export const AtlasWorkspace: React.FC<AtlasWorkspaceProps> = ({
                                     <button
                                       type="button"
                                       title={eyeOn ? 'Hide layer' : 'Show layer'}
+                                      aria-label={eyeOn ? `Hide ${row.name}` : `Show ${row.name}`}
                                       className="p-1 rounded hover:bg-surface-container-high"
                                       onClick={() => setEye(row.layerId, !eyeOn)}
                                     >
@@ -1144,6 +1173,7 @@ export const AtlasWorkspace: React.FC<AtlasWorkspaceProps> = ({
                                     <button
                                       type="button"
                                       title="Remove from Atlas"
+                                      aria-label={`Remove ${row.name}`}
                                       className="p-1 rounded hover:bg-surface-container-high"
                                       onClick={() => removeLayer(row.layerId)}
                                     >
@@ -1173,7 +1203,10 @@ export const AtlasWorkspace: React.FC<AtlasWorkspaceProps> = ({
 
       {exportOpen && (
         <div
-          className="fixed inset-0 z-[90] bg-black/45 flex items-center justify-center p-4"
+          className="fixed inset-0 z-[1000] bg-black/45 flex items-center justify-center p-4"
+          onMouseDown={(e) => {
+            if (e.target === e.currentTarget && !exporting) setExportOpen(false);
+          }}
           role="dialog"
           aria-modal
           aria-label="Download Atlas map"

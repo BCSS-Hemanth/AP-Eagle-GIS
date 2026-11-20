@@ -208,7 +208,7 @@ const HeatMapPanel: React.FC = () => {
   return (
     <div className="relative rounded-lg border border-outline-variant/50 overflow-hidden bg-surface-container-low h-full min-h-0 shadow-[0_8px_24px_rgba(11,28,48,0.06)]">
       <div className="absolute top-2 left-2 z-[500] px-2.5 py-1 rounded-md bg-primary/92 text-[10px] font-bold text-white shadow-md border border-white/10 backdrop-blur-sm">
-        NDPS Cases Heat Map
+        NDPS Cases Heat Map{!gunturIsolated ? ' · click the Guntur marker to drill in' : ''}
       </div>
       {gunturIsolated && (
         <button
@@ -294,8 +294,11 @@ export const NdpsAnalyticsWorkspace: React.FC = () => (
     className="h-full min-h-0 overflow-hidden bg-gradient-to-br from-slate-100 via-[#e8f2f7] to-[#dceeea]"
     data-testid="ndps-analytics-workspace"
   >
-    <div className="h-full min-h-0 p-2 lg:p-2.5">
-      <div className="h-full min-h-0 grid grid-cols-1 xl:grid-cols-12 gap-2">
+    <div className="h-full min-h-0 p-2 lg:p-2.5 flex flex-col gap-1.5">
+      <div className="shrink-0 rounded bg-amber-100 text-amber-900 text-[10px] font-bold uppercase tracking-wide px-2 py-1">
+        Demo data — illustrative figures, names and photos; not live NDPS records
+      </div>
+      <div className="flex-1 min-h-0 grid grid-cols-1 xl:grid-cols-12 gap-2">
         {/* Left */}
         <aside className="xl:col-span-3 h-full min-h-0 flex flex-col gap-2 overflow-hidden">
           <Panel title="NDPS Offender Summary" accent="#0f766e" className="shrink-0">

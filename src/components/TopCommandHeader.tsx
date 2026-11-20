@@ -43,8 +43,15 @@ export const TopCommandHeader: React.FC<TopCommandHeaderProps> = ({
         setAlertsMenuOpen(false);
       }
     };
+    const handleEsc = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setAlertsMenuOpen(false);
+    };
     document.addEventListener('mousedown', handleOutside);
-    return () => document.removeEventListener('mousedown', handleOutside);
+    document.addEventListener('keydown', handleEsc);
+    return () => {
+      document.removeEventListener('mousedown', handleOutside);
+      document.removeEventListener('keydown', handleEsc);
+    };
   }, []);
 
   const unreadAlertsCount = alerts.filter((a) => !a.acknowledged).length;
@@ -52,7 +59,7 @@ export const TopCommandHeader: React.FC<TopCommandHeaderProps> = ({
   return (
     <header
       ref={headerRef}
-      className="fixed top-0 left-0 right-0 h-14 app-shell-chrome border-b border-outline-variant/35 z-50 flex items-center justify-between px-3 gap-3 select-none"
+      className="fixed top-0 left-0 right-0 h-14 app-shell-chrome border-b border-outline-variant/35 z-[1000] flex items-center justify-between px-3 gap-3 select-none"
     >
       <div className="absolute inset-x-0 bottom-0 h-[2px] bg-gradient-to-r from-secondary via-secondary/40 to-transparent pointer-events-none" />
 
@@ -93,16 +100,20 @@ export const TopCommandHeader: React.FC<TopCommandHeaderProps> = ({
               setAlertsMenuOpen((v) => !v);
             }}
             title="Tactical Interception Alerts"
+            aria-label={`Tactical alerts, ${unreadAlertsCount} unread`}
+            aria-expanded={alertsMenuOpen}
             className="relative w-8 h-8 flex items-center justify-center rounded-md hover:bg-surface-container text-on-surface-variant hover:text-primary transition-colors cursor-pointer"
           >
             <Bell className="w-4 h-4" />
             {unreadAlertsCount > 0 && (
-              <span className="absolute top-1 right-1 w-2 h-2 rounded-full bg-error ring-2 ring-surface-container-lowest" />
+              <span className="absolute -top-0.5 -right-0.5 min-w-4 h-4 px-1 rounded-full bg-error text-on-error text-[9px] font-bold leading-4 text-center ring-2 ring-surface-container-lowest">
+                {unreadAlertsCount}
+              </span>
             )}
           </button>
 
           {alertsMenuOpen && (
-            <div className="absolute right-0 mt-1.5 w-88 rounded-lg shadow-xl border border-outline-variant/45 overflow-hidden z-50 bg-surface-container-lowest">
+            <div className="absolute right-0 mt-1.5 w-88 max-w-[92vw] rounded-lg shadow-xl border border-outline-variant/45 overflow-hidden z-50 bg-surface-container-lowest">
               <div className="px-3 py-2.5 bg-primary text-on-primary border-b border-white/10 flex items-center justify-between">
                 <span className="text-[11px] font-bold uppercase tracking-wider">
                   Tactical Spatial Alerts ({unreadAlertsCount} Unread)
@@ -110,6 +121,9 @@ export const TopCommandHeader: React.FC<TopCommandHeaderProps> = ({
                 <span className="text-[10px] font-mono text-secondary-fixed font-bold">LIVE FEED</span>
               </div>
               <div className="divide-y divide-outline-variant/20 max-h-72 overflow-y-auto gis-scroll">
+                {alerts.length === 0 && (
+                  <p className="p-3 text-[11px] text-on-surface-variant">No active alerts.</p>
+                )}
                 {alerts.map((alt) => (
                   <div
                     key={alt.id}
@@ -158,8 +172,8 @@ export const TopCommandHeader: React.FC<TopCommandHeaderProps> = ({
           )}
         </div>
 
-        <div className="hidden sm:flex items-center gap-2 pl-2.5 border-l border-outline-variant/40">
-          <div className="flex flex-col text-right leading-tight">
+        <div className="flex items-center gap-2 pl-2.5 border-l border-outline-variant/40">
+          <div className="hidden sm:flex flex-col text-right leading-tight">
             <span className="text-[11px] font-bold text-primary whitespace-nowrap" data-testid="session-user">
               {userName}
             </span>
@@ -167,7 +181,7 @@ export const TopCommandHeader: React.FC<TopCommandHeaderProps> = ({
               {userRole ?? userUnit}
             </span>
           </div>
-          <div className="w-8 h-8 rounded-full bg-primary text-on-primary flex items-center justify-center shrink-0 shadow-sm ring-2 ring-secondary/25">
+          <div className="hidden sm:flex w-8 h-8 rounded-full bg-primary text-on-primary items-center justify-center shrink-0 shadow-sm ring-2 ring-secondary/25">
             <UserCheck className="w-4 h-4" />
           </div>
           {onLogout && (

@@ -953,3 +953,12 @@ img.ap-gis-source-raster {
   display: block;
 }
 
+
+/* Tailwind 4 resets buttons to the default cursor. */
+button:not(:disabled),
+[role="button"]:not([aria-disabled="true"]) {
+  cursor: pointer;
+}
+button:disabled {
+  cursor: not-allowed;
+}

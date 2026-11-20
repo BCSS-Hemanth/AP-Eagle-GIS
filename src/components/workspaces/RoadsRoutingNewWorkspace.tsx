@@ -346,32 +346,25 @@ export const RoadsRoutingNewWorkspace: React.FC<RoadsRoutingNewWorkspaceProps> =
     if (!placing) return;
     const latText = lat.toFixed(6);
     const lonText = lon.toFixed(6);
-    setPoiEntries((prev) => {
-      const emptyIdx = prev.findIndex((p) => entryLonLat(p) == null);
-      if (emptyIdx >= 0) {
-        const next = prev.map((p, i) =>
-          i === emptyIdx ? { ...p, latText, lonText } : p
-        );
-        onTriggerToast(
-          `Point ${next[emptyIdx].label} set (${lat.toFixed(4)}, ${lon.toFixed(4)}) — add more points or Display Road Networks`
-        );
-        return next;
-      }
-      const next = relabelPois([
+    // Compute from current state (no side effects inside the updater).
+    const prev = poiEntries;
+    const emptyIdx = prev.findIndex((p) => entryLonLat(p) == null);
+    let next: typeof prev;
+    let label: string;
+    if (emptyIdx >= 0) {
+      next = prev.map((p, i) => (i === emptyIdx ? { ...p, latText, lonText } : p));
+      label = next[emptyIdx].label;
+    } else {
+      next = relabelPois([
         ...prev,
-        {
-          id: nextPoiId(prev),
-          label: poiLabel(prev.length),
-          latText,
-          lonText,
-        },
+        { id: nextPoiId(prev), label: poiLabel(prev.length), latText, lonText },
       ]);
-      const created = next[next.length - 1];
-      onTriggerToast(
-        `Point ${created.label} set (${lat.toFixed(4)}, ${lon.toFixed(4)}) — add more points or Display Road Networks`
-      );
-      return next;
-    });
+      label = next[next.length - 1].label;
+    }
+    setPoiEntries(next);
+    onTriggerToast(
+      `Point ${label} set (${lat.toFixed(4)}, ${lon.toFixed(4)}) — add more points or Display Road Networks`
+    );
     invalidateNetworks();
   };
 
@@ -386,6 +379,7 @@ export const RoadsRoutingNewWorkspace: React.FC<RoadsRoutingNewWorkspaceProps> =
   };
 
   const clearAllLayers = () => {
+    if (savedLayers.length > 0 && !window.confirm('Remove every saved layer from Roads Routing New?')) return;
     const savedIds = routingNewLayersFromConfig(allLayers, routingNewConfig).map((l) => l.id);
     loadGenRef.current += 1;
     clearedConfigSigRef.current = JSON.stringify(routingNewConfig);
@@ -757,6 +751,7 @@ export const RoadsRoutingNewWorkspace: React.FC<RoadsRoutingNewWorkspaceProps> =
                         type="button"
                         className="ml-auto cursor-pointer text-error p-0.5"
                         title={`Remove Point ${p.label}`}
+                        aria-label={`Remove Point ${p.label}`}
                         onClick={() => removePoi(p.id)}
                       >
                         <X className="w-3 h-3" />
@@ -1027,6 +1022,7 @@ export const RoadsRoutingNewWorkspace: React.FC<RoadsRoutingNewWorkspaceProps> =
                                       type="button"
                                       className="cursor-pointer text-error"
                                       title="Remove from Roads Routing New"
+                                      aria-label={`Remove ${layer.name}`}
                                       onClick={() =>
                                         removeSavedLayersAndMaybeResetMap([layer.id])
                                       }
@@ -1099,8 +1095,8 @@ export const RoadsRoutingNewWorkspace: React.FC<RoadsRoutingNewWorkspaceProps> =
               savedLayers.some((l) => l.enabled && usesRoutingNewRadiusMatch(l.id)) && (
               <p className="mt-2 text-[10px] text-on-surface-variant">
                 No radius-matched road features near the selected point
-                {pois.length === 1 ? '' : 's'} at this buffer. Zoom in for Full / OPS map layers,
-                or try a larger buffer.
+                {pois.length === 1 ? '' : 's'} (corridor ±{POI_CORRIDOR_HALF_WIDTH_KM} km). Zoom in
+                for Full / OPS map layers, or move the pins closer to a road.
               </p>
             )}
           </section>

@@ -323,6 +323,11 @@ export const RasterWorkspace: React.FC<RasterWorkspaceProps> = ({
 
   const handleClear = () => {
     if (!districtId) return;
+    if (
+      districtCfg.appliedLayerIds.length + districtCfg.selectedLayerIds.length > 0 &&
+      !window.confirm('Clear all layers for this district? This cannot be undone.')
+    )
+      return;
     writeDistrict(emptyRasterDistrictConfig(districtId));
     onTriggerToast('Raster layers cleared for this district');
   };
@@ -475,7 +480,7 @@ export const RasterWorkspace: React.FC<RasterWorkspaceProps> = ({
                 <option value="">— Choose district —</option>
                 {RASTER_DISTRICTS.map((d) => (
                   <option key={d.id} value={d.id} disabled={d.status !== 'ready'}>
-                    {d.name}
+                    {d.name}{d.status !== 'ready' ? ' (coming soon)' : ''}
                   </option>
                 ))}
               </select>
@@ -540,7 +545,7 @@ export const RasterWorkspace: React.FC<RasterWorkspaceProps> = ({
                 <section className="rounded border border-outline-variant/40 overflow-hidden">
                   <button
                     type="button"
-                    className="w-full flex items-center justify-between px-2.5 py-2 bg-surface-container-lowest text-left"
+                    className="w-full flex items-center justify-between px-2.5 py-2 bg-surface-container-lowest text-left cursor-pointer"
                     onClick={() => setLayersOpen((o) => !o)}
                   >
                     <span className="text-[11px] font-bold text-primary">Raster & Imagery</span>
@@ -617,6 +622,7 @@ export const RasterWorkspace: React.FC<RasterWorkspaceProps> = ({
                                 <button
                                   type="button"
                                   title={eyeOn ? 'Hide layer' : 'Show layer'}
+                                      aria-label={eyeOn ? `Hide ${row.name}` : `Show ${row.name}`}
                                   className="p-1 rounded hover:bg-surface-container-high"
                                   onClick={() => setEye(row.layerId, !eyeOn)}
                                 >
@@ -629,6 +635,7 @@ export const RasterWorkspace: React.FC<RasterWorkspaceProps> = ({
                                 <button
                                   type="button"
                                   title="Remove from Raster"
+                                  aria-label={`Remove ${row.name}`}
                                   className="p-1 rounded hover:bg-surface-container-high"
                                   onClick={() => removeLayer(row.layerId)}
                                 >

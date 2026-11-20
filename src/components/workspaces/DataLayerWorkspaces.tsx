@@ -1,7 +1,6 @@
 import React, { useState } from 'react';
 import { LayoutDashboard, Navigation2, Satellite, Save } from 'lucide-react';
-import { DigitizedFeature, GisLayer, WorkspaceId } from '../../types/gis';
-import type { IngestedLayer } from '../../gis/ingest';
+import { GisLayer, WorkspaceId } from '../../types/gis';
 import {
   CATALOG_SCOPE,
   canSaveToRoadsModules,
@@ -20,7 +19,8 @@ interface DataLayerProps {
   workspace: CatalogWorkspaceId;
   layers: GisLayer[];
   onToggleLayer: (id: string) => void;
-  onChangeLayerOpacity: (id: string, opacity: number) => void;
+  /** Bulk select/unselect (one audit entry). */
+  onSetLayersEnabled: (ids: string[], enabled: boolean) => void;
   onSaveDashboardLayers?: () => void;
   onSaveRoadsRoutingLayers?: () => void;
   onSaveRoadsRoutingNewLayers?: () => void;
@@ -40,21 +40,15 @@ interface DataLayerProps {
   onUnselectAllDashboardLayers?: (layerIds: string[]) => void;
   onUnselectAllRoadsRoutingLayers?: (layerIds: string[]) => void;
   onUnselectAllRoadsRoutingNewLayers?: (layerIds: string[]) => void;
-  digitizedFeatures: DigitizedFeature[];
-  ingestedLayers?: IngestedLayer[];
-  onAddDigitizedFeature: (f: DigitizedFeature) => void;
-  onPublishIngested?: (layers: IngestedLayer[]) => void;
-  onDeleteDigitizedFeature: (id: string) => void;
   onSwitchWorkspace: (ws: WorkspaceId) => void;
   onTriggerToast: (msg: string) => void;
-  onFlyToLocation?: (lat: number, lon: number, label: string) => void;
 }
 
 export const DataLayerWorkspaces: React.FC<DataLayerProps> = ({
   workspace,
   layers,
   onToggleLayer,
-  onChangeLayerOpacity: _onChangeLayerOpacity,
+  onSetLayersEnabled,
   onSaveDashboardLayers,
   onSaveRoadsRoutingLayers,
   onSaveRoadsRoutingNewLayers,
@@ -68,14 +62,8 @@ export const DataLayerWorkspaces: React.FC<DataLayerProps> = ({
   onUnselectAllDashboardLayers,
   onUnselectAllRoadsRoutingLayers,
   onUnselectAllRoadsRoutingNewLayers,
-  digitizedFeatures: _digitizedFeatures,
-  ingestedLayers: _ingestedLayers = [],
-  onAddDigitizedFeature: _onAddDigitizedFeature,
-  onPublishIngested: _onPublishIngested,
-  onDeleteDigitizedFeature: _onDeleteDigitizedFeature,
   onSwitchWorkspace,
   onTriggerToast,
-  onFlyToLocation: _onFlyToLocation,
 }) => {
   // Catalog filter
   const [catalogSearch, setCatalogSearch] = useState('');
@@ -83,8 +71,6 @@ export const DataLayerWorkspaces: React.FC<DataLayerProps> = ({
   const catalogId = workspace;
   const meta = CATALOG_SCOPE[catalogId];
   const scoped = layersInCatalogScope(catalogId, layers);
-  const allScopedSelected =
-    scoped.length > 0 && scoped.every((layer) => layer.enabled);
   const filtered = scoped
     .filter(
       (l) =>
@@ -99,23 +85,30 @@ export const DataLayerWorkspaces: React.FC<DataLayerProps> = ({
       return ar - br;
     });
   const showRoadsSave = canSaveToRoadsModules(catalogId);
+  const filtering = catalogSearch.trim().length > 0;
+  // "Select All" acts on what the user sees (the filtered rows).
+  const targetLayers = filtering ? filtered : scoped;
+  const allTargetSelected = targetLayers.length > 0 && targetLayers.every((layer) => layer.enabled);
 
   const handleSelectAllToggle = () => {
-    if (!scoped.length) {
-      onTriggerToast('No layers available in this module');
+    if (!targetLayers.length) {
+      onTriggerToast('No layers available in this view');
       return;
     }
-    if (allScopedSelected) {
-      for (const layer of scoped) {
-        if (layer.enabled) onToggleLayer(layer.id);
-      }
-      onTriggerToast(`Unselected all ${scoped.length} layer(s) in ${meta.title}`);
+    const scopeLabel = filtering ? `${targetLayers.length} filtered` : `all ${targetLayers.length}`;
+    if (allTargetSelected) {
+      onSetLayersEnabled(
+        targetLayers.map((l) => l.id),
+        false
+      );
+      onTriggerToast(`Unselected ${scopeLabel} layer(s) in ${meta.title}`);
       return;
     }
-    for (const layer of scoped) {
-      if (!layer.enabled) onToggleLayer(layer.id);
-    }
-    onTriggerToast(`Selected all ${scoped.length} layer(s) in ${meta.title}`);
+    onSetLayersEnabled(
+      targetLayers.filter((l) => !l.enabled).map((l) => l.id),
+      true
+    );
+    onTriggerToast(`Selected ${scopeLabel} layer(s) in ${meta.title}`);
   };
     // Each Save button has an independent hover list (Visible minus that button's exclusions).
     const dashboardHoverLayers = layersForCatalogHover(
@@ -153,16 +146,23 @@ export const DataLayerWorkspaces: React.FC<DataLayerProps> = ({
                 type="button"
                 data-testid="catalog-select-all-layers"
                 onClick={handleSelectAllToggle}
-                disabled={!scoped.length}
+                disabled={!targetLayers.length}
                 className="ws-btn disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                {allScopedSelected ? 'Unselect All Layers' : 'Select All Layers'}
+                {allTargetSelected
+                  ? filtering
+                    ? 'Unselect Filtered'
+                    : 'Unselect All Layers'
+                  : filtering
+                    ? 'Select Filtered'
+                    : 'Select All Layers'}
               </button>
               <input
                 type="text"
                 value={catalogSearch}
                 onChange={(e) => setCatalogSearch(e.target.value)}
                 placeholder="Filter layers or PostGIS table..."
+                aria-label="Filter layers"
                 className="ws-field !h-8 !w-64 !max-w-full !font-medium"
               />
             </div>
@@ -314,6 +314,13 @@ export const DataLayerWorkspaces: React.FC<DataLayerProps> = ({
               </tr>
             </thead>
             <tbody>
+              {filtered.length === 0 && (
+                <tr>
+                  <td colSpan={4} className="py-6 px-3 text-on-surface-variant">
+                    {filtering ? `No layers match “${catalogSearch}”.` : 'No layers in this module.'}
+                  </td>
+                </tr>
+              )}
               {filtered.map((lyr) => (
                 <tr
                   key={lyr.id}

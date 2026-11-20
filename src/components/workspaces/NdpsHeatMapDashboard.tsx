@@ -19,6 +19,8 @@ interface NdpsHeatMapDashboardProps {
   onFlyToLocation?: (lat: number, lon: number, label: string) => void;
   onSwitchWorkspace: (ws: WorkspaceId) => void;
   onTriggerToast: (msg: string) => void;
+  /** Pan/zoom request from alert Locate / search (token changes per request). */
+  focusRequest?: { lat: number; lon: number; zoom: number; token: number } | null;
   /** When true, app chrome (header/nav) is hidden by the parent shell. */
   mapExpanded?: boolean;
   onMapExpandedChange?: (expanded: boolean) => void;
@@ -27,6 +29,7 @@ interface NdpsHeatMapDashboardProps {
 export const NdpsHeatMapDashboard: React.FC<NdpsHeatMapDashboardProps> = ({
   layers,
   onTriggerToast,
+  focusRequest,
   mapExpanded = false,
   onMapExpandedChange,
 }) => {
@@ -42,6 +45,16 @@ export const NdpsHeatMapDashboard: React.FC<NdpsHeatMapDashboardProps> = ({
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [mapExpanded, onMapExpandedChange]);
+
+  useEffect(() => {
+    if (!focusRequest) return;
+    // Map may still be mounting after a workspace switch; wait for it.
+    const t = window.setTimeout(
+      () => mapRef.current?.flyTo(focusRequest.lat, focusRequest.lon, focusRequest.zoom),
+      500
+    );
+    return () => window.clearTimeout(t);
+  }, [focusRequest?.token]);
 
   const toggleExpanded = () => onMapExpandedChange?.(!mapExpanded);
 

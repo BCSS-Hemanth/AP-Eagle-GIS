@@ -64,6 +64,16 @@ export const SavedLayersHoverMenu: React.FC<SavedLayersHoverMenuProps> = ({
       onMouseEnter={onEnter}
       onMouseLeave={onLeave}
       onFocus={onEnter}
+      onPointerDown={(e) => {
+        // Touch has no hover: open the list on tap.
+        if (e.pointerType === 'touch') onEnter();
+      }}
+      onKeyDown={(e) => {
+        if (e.key === 'Escape') {
+          clearLeave();
+          setOpen(false);
+        }
+      }}
       onBlur={(e) => {
         if (!e.currentTarget.contains(e.relatedTarget as Node | null)) onLeave();
       }}

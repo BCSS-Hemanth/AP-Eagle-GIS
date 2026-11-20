@@ -439,6 +439,11 @@ export const LocusWorkspace: React.FC<LocusWorkspaceProps> = ({
 
   const handleClear = () => {
     if (!districtId) return;
+    if (
+      districtCfg.appliedLayerIds.length + districtCfg.selectedLayerIds.length > 0 &&
+      !window.confirm('Clear all layers for this district? This cannot be undone.')
+    )
+      return;
     writeDistrict(emptyLocusDistrictConfig(districtId));
     onTriggerToast('Locus layers cleared for this district');
   };
@@ -506,6 +511,15 @@ export const LocusWorkspace: React.FC<LocusWorkspaceProps> = ({
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [mapExpanded]);
+
+  useEffect(() => {
+    if (!exportOpen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && !exporting) setExportOpen(false);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [exportOpen, exporting]);
 
   const mapStage = (
     <div className="flex-1 h-full min-h-0 min-w-0 relative" data-testid="locus-map-host">
@@ -637,6 +651,11 @@ export const LocusWorkspace: React.FC<LocusWorkspaceProps> = ({
               data-testid="locus-download-kmz"
               className="ws-btn ws-btn-primary"
               disabled={!compositionActive || !districtCfg.appliedLayerIds.length}
+              title={
+                !compositionActive || !districtCfg.appliedLayerIds.length
+                  ? 'Display layers first to enable KMZ download'
+                  : 'Download KMZ'
+              }
               onClick={() => setExportOpen(true)}
             >
               <Download className="w-3.5 h-3.5" />
@@ -690,7 +709,7 @@ export const LocusWorkspace: React.FC<LocusWorkspaceProps> = ({
                 <option value="">— Choose district —</option>
                 {LOCUS_DISTRICTS.map((d) => (
                   <option key={d.id} value={d.id} disabled={d.status !== 'ready'}>
-                    {d.name}
+                    {d.name}{d.status !== 'ready' ? ' (coming soon)' : ''}
                   </option>
                 ))}
               </select>
@@ -896,6 +915,7 @@ export const LocusWorkspace: React.FC<LocusWorkspaceProps> = ({
                                     <button
                                       type="button"
                                       title={eyeOn ? 'Hide layer' : 'Show layer'}
+                                      aria-label={eyeOn ? `Hide ${row.name}` : `Show ${row.name}`}
                                       className="p-1 rounded hover:bg-surface-container-high"
                                       onClick={() => setEye(row.layerId, !eyeOn)}
                                     >
@@ -914,6 +934,7 @@ export const LocusWorkspace: React.FC<LocusWorkspaceProps> = ({
                                     <button
                                       type="button"
                                       title="Remove from Locus"
+                                      aria-label={`Remove ${row.name}`}
                                       className="p-1 rounded hover:bg-surface-container-high"
                                       onClick={() => removeLayer(row.layerId)}
                                     >
@@ -940,7 +961,10 @@ export const LocusWorkspace: React.FC<LocusWorkspaceProps> = ({
 
       {exportOpen && (
         <div
-          className="fixed inset-0 z-[90] bg-black/45 flex items-center justify-center p-4"
+          className="fixed inset-0 z-[1000] bg-black/45 flex items-center justify-center p-4"
+          onMouseDown={(e) => {
+            if (e.target === e.currentTarget && !exporting) setExportOpen(false);
+          }}
           role="dialog"
           aria-modal
           aria-label="Download Locus KMZ"

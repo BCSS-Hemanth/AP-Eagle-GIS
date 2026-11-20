@@ -410,6 +410,7 @@ export const RoadsRoutingWorkspace: React.FC<RoadsRoutingWorkspaceProps> = ({
   };
 
   const clearAllLayers = () => {
+    if (savedLayers.length > 0 && !window.confirm('Remove every saved layer from Roads Routing?')) return;
     onClearSavedLayers();
     resetMapLikeClearPins();
     onTriggerToast('Cleared all layers');
@@ -842,6 +843,7 @@ export const RoadsRoutingWorkspace: React.FC<RoadsRoutingWorkspaceProps> = ({
                         type="button"
                         className="ml-auto cursor-pointer text-error p-0.5"
                         title={`Remove Point ${p.label}`}
+                        aria-label={`Remove Point ${p.label}`}
                         onClick={() => removePoint(p.id)}
                       >
                         <X className="w-3 h-3" />
@@ -1136,6 +1138,7 @@ export const RoadsRoutingWorkspace: React.FC<RoadsRoutingWorkspaceProps> = ({
                                       type="button"
                                       className="cursor-pointer text-error"
                                       title="Remove from Roads Routing"
+                                      aria-label={`Remove ${layer.name}`}
                                       onClick={() =>
                                         removeSavedLayersAndMaybeResetMap([layer.id])
                                       }
@@ -1268,9 +1271,17 @@ export const RoadsRoutingWorkspace: React.FC<RoadsRoutingWorkspaceProps> = ({
               <ul className="space-y-1.5">
                 {routes.map((r) => (
                   <li key={r.id}>
-                    <button
-                      type="button"
+                    <div
+                      role="button"
+                      tabIndex={0}
+                      aria-pressed={selectedRouteId === r.id}
                       onClick={() => setSelectedRouteId(r.id)}
+                      onKeyDown={(e) => {
+                        if (e.target === e.currentTarget && (e.key === 'Enter' || e.key === ' ')) {
+                          e.preventDefault();
+                          setSelectedRouteId(r.id);
+                        }
+                      }}
                       className={`w-full text-left rounded border px-2 py-1.5 cursor-pointer ${
                         selectedRouteId === r.id
                           ? 'border-primary bg-primary/5'
@@ -1286,6 +1297,8 @@ export const RoadsRoutingWorkspace: React.FC<RoadsRoutingWorkspaceProps> = ({
                         <button
                           type="button"
                           className="cursor-pointer p-0.5"
+                          title={r.visible ? 'Hide route' : 'Show route'}
+                          aria-label={r.visible ? `Hide ${r.name}` : `Show ${r.name}`}
                           onClick={(e) => {
                             e.stopPropagation();
                             setRoutes((prev) =>
@@ -1319,7 +1332,7 @@ export const RoadsRoutingWorkspace: React.FC<RoadsRoutingWorkspaceProps> = ({
                           {r.ops.filter((o) => o.relation === 'detour').length} nearby
                         </div>
                       )}
-                    </button>
+                    </div>
                   </li>
                 ))}
               </ul>
